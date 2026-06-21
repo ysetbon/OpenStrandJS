@@ -31,6 +31,15 @@
     // into meta.curve_params. Defaults match the braid fixtures.
     let CURVE = { base_fraction: 1.0, dist_multiplier: 2.0, exponent: 2.0 };
 
+    // Shadow parameters (canvas defaults): default_shadow_color (0,0,0,150) and
+    // max_blur_radius 30. A strand casts a shadow onto every lower-ordered strand
+    // as (over-body expanded by blur) ∩ (under-body), drawn just under the over
+    // strand's body so only the fringe beyond it shows.
+    const SHADOW_COLOR = { r: 0, g: 0, b: 0, a: 150 };
+    const MAX_BLUR = 30;
+    let SHADOW_ENABLED = false; // set per-fixture from meta.shadow_enabled
+    let SHADOW_PAINT = null;    // paper.Color for shadows
+
     // Faithful port of strand.py::_build_curve_profile. Returns {mode, segments}
     // in world coordinates; each segment is a cubic {p0, cp1, cp2, p3}.
     function buildProfile(s, enableThird) {
@@ -191,6 +200,26 @@
         if (rp) { const m2 = mask.subtract(rp); rp.remove(); mask.remove(); mask = m2; }
       }
 
+      // Mask crossing shadow (draw_mask_strand_shadow): the over strand, expanded
+      // by blur, intersected with the under strand's body, minus deletions. Drawn
+      // dark UNDER the over-strand redraw so only the fringe on the under strand
+      // shows.
+      if (SHADOW_ENABLED) {
+        const firstExp = strokedBodyAtWidth(first, P, enableThird, ((first.width || 0) + 2 * (first.stroke_width || 0) + MAX_BLUR) * ss);
+        const secondBody = strokedBodyAtWidth(second, P, enableThird, ((second.width || 0) + 2 * (second.stroke_width || 0)) * ss);
+        if (firstExp && secondBody) {
+          let sh = firstExp.intersect(secondBody);
+          for (const rect of ms.deletion_rectangles || []) {
+            const rp = deletionPath(rect, P, ss);
+            if (rp && sh) { const s2 = sh.subtract(rp); rp.remove(); sh.remove(); sh = s2; }
+          }
+          if (sh && sh.area && Math.abs(sh.area) > 0.5) { sh.fillColor = SHADOW_PAINT; sh.strokeColor = null; }
+          else if (sh) sh.remove();
+        }
+        firstExp && firstExp.remove();
+        secondBody && secondBody.remove();
+      }
+
       const firstOutline = bodyOutline(first, P, enableThird, ss);
       if (!firstOutline) { mask.remove(); return; }
       firstOutline.fillColor = toColor(first.color);
@@ -227,12 +256,68 @@
       const byLayer = {};
       for (const s of strands) byLayer[s.layer_name] = s;
 
-      // Draw in list order (matches the Qt paint loop): regular strands paint
-      // their full body; masked strands repaint the top strand over the bottom.
+      const shadowEnabled = !!meta.shadow_enabled;
+      SHADOW_ENABLED = shadowEnabled;
+      SHADOW_PAINT = toColor(SHADOW_COLOR);
+
+      // Pairs that are the two components of a mask don't shadow each other (the
+      // mask owns that crossing).
+      const maskPairs = new Set();
       for (const s of strands) {
-        if (s.type === 'MaskedStrand') drawMasked(s, byLayer, P, enableThird, ss);
-        else drawStrand(s, P, enableThird, ss);
+        if (s.type !== 'MaskedStrand') continue;
+        const p = (s.layer_name || '').split('_');
+        if (p.length >= 4) {
+          maskPairs.add(p[0] + '_' + p[1] + '|' + p[2] + '_' + p[3]);
+          maskPairs.add(p[2] + '_' + p[3] + '|' + p[0] + '_' + p[1]);
+        }
       }
+
+      // Precompute each regular strand's full body and blur-expanded body once
+      // (kept invisible; reused for all shadow pairs).
+      const fullBody = {}, expBody = {};
+      if (shadowEnabled) {
+        for (const s of strands) {
+          if (s.type === 'MaskedStrand') continue;
+          const w = s.width || 0, sw = s.stroke_width || 0;
+          const fb = strokedBodyAtWidth(s, P, enableThird, (w + 2 * sw) * ss);
+          const eb = strokedBodyAtWidth(s, P, enableThird, (w + 2 * sw + MAX_BLUR) * ss);
+          if (fb) fb.visible = false;
+          if (eb) eb.visible = false;
+          fullBody[s.layer_name] = fb;
+          expBody[s.layer_name] = eb;
+        }
+      }
+      const shadowCol = toColor(SHADOW_COLOR);
+
+      // Draw in list order (≈ Qt paint loop): for each strand, first cast its
+      // shadow onto already-drawn lower strands, then paint its body. Masked
+      // strands repaint the top strand over the bottom.
+      for (let i = 0; i < strands.length; i++) {
+        const s = strands[i];
+        if (s.type === 'MaskedStrand') { drawMasked(s, byLayer, P, enableThird, ss); continue; }
+
+        if (shadowEnabled && expBody[s.layer_name]) {
+          for (let j = 0; j < i; j++) {
+            const o = strands[j];
+            if (o.type === 'MaskedStrand' || !fullBody[o.layer_name]) continue;
+            if (maskPairs.has(s.layer_name + '|' + o.layer_name)) continue;
+            const region = expBody[s.layer_name].intersect(fullBody[o.layer_name]);
+            if (!region) continue;
+            if (region.area && Math.abs(region.area) > 0.5) {
+              region.fillColor = shadowCol;
+              region.strokeColor = null;
+            } else {
+              region.remove();
+            }
+          }
+        }
+        drawStrand(s, P, enableThird, ss);
+      }
+
+      // Remove the invisible helper bodies.
+      for (const k in fullBody) { if (fullBody[k]) fullBody[k].remove(); }
+      for (const k in expBody) { if (expBody[k]) expBody[k].remove(); }
+
       paper.view.update();
 
       const vis = document.getElementById('c');
