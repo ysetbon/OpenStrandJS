@@ -8,8 +8,14 @@ Fidelity-first JS/Canvas port of OpenStrand Studio. The Qt app
 | fixture | match | notes |
 |---|---|---|
 | `single_strand` | **99.68%** | one curved strand; residual is the ~1px stroked-outline band |
-| `three_strand_braid` | **97.85%** | 18 strands + 3 masks; clean over-under, correct curves |
-| `overhand_knot` | **98.07%** | first try, no knot-specific code — masking generalizes |
+| `three_strand_braid` | **97.85%** | 18 strands + 3 masks; clean over-under, correct curves; shadows off |
+| `overhand_knot` | **98.10%** | masking + crossing shadows; residual is the outline band |
+| `closed_knot` | **98.80%** | 4 strands, no masks; residual is junction/closure caps + outline band |
+
+Shadows are ported (`draw_strand_shadow` + `draw_mask_strand_shadow`), gated on
+`meta.shadow_enabled` (per-fixture). The remaining gaps are now (1) the ~1px
+stroked-outline band on every strand and (2) junction caps where strand segments
+join (`has_circles`), visible at the closed_knot closure point.
 
 ## How the harness works
 
