@@ -1,0 +1,84 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>OpenStrandJS render</title>
+  <style>
+    html, body { margin: 0; padding: 0; background: #fff; }
+    #c { display: block; }
+  </style>
+  <script src="../node_modules/paper/dist/paper-full.min.js"></script>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <script>
+    // First-cut strand renderer. Deliberately NOT yet faithful to every detail
+    // of strand.py (end-cap border, the real stroke->outline, masking, shadows,
+    // the third control point). It renders the strand body as a fill + border so
+    // the diff harness produces a real number and a diff image to drive tuning.
+
+    function toColor(c) {
+      if (!c) return new paper.Color(0, 0, 0, 1);
+      const a = (c.a == null ? 255 : c.a) / 255;
+      return new paper.Color(c.r / 255, c.g / 255, c.b / 255, a);
+    }
+
+    // Build the strand centerline as a cubic Bezier in image (pixel) space.
+    function buildCenterline(s, P) {
+      const path = new paper.Path();
+      path.moveTo(P(s.start));
+      const cps = s.control_points || [];
+      const cp1 = cps[0] || s.start;
+      const cp2 = cps[1] || s.end;
+      // TODO: honor control_point_center (third control point) -> 2 segments.
+      path.cubicCurveTo(P(cp1), P(cp2), P(s.end));
+      return path;
+    }
+
+    function drawStrand(s, P) {
+      const w = s.width || 0;
+      const sw = s.stroke_width || 0;
+      // Border first (below), fill on top. TODO: replace double-stroke with the
+      // real stroked-outline fill+pen so flat end-caps get a border too.
+      const outer = buildCenterline(s, P);
+      outer.strokeColor = toColor(s.stroke_color);
+      outer.strokeWidth = w + 2 * sw;
+      outer.strokeCap = 'butt';
+      outer.strokeJoin = 'round';
+
+      const inner = buildCenterline(s, P);
+      inner.strokeColor = toColor(s.color);
+      inner.strokeWidth = w;
+      inner.strokeCap = 'butt';
+      inner.strokeJoin = 'round';
+    }
+
+    window.renderFixture = function (strands, meta) {
+      const canvas = document.getElementById('c');
+      const W = meta.image_width, H = meta.image_height;
+      canvas.width = W;
+      canvas.height = H;
+      canvas.style.width = W + 'px';
+      canvas.style.height = H + 'px';
+
+      paper.setup(canvas);
+
+      // Opaque white background to match the reference fill.
+      const bg = new paper.Path.Rectangle(new paper.Point(0, 0), new paper.Size(W, H));
+      bg.fillColor = 'white';
+
+      // World point (cx, cy) -> pixel (cx + x_offset, cy + y_offset).
+      const ox = meta.x_offset, oy = meta.y_offset;
+      const P = (pt) => new paper.Point(pt.x + ox, pt.y + oy);
+
+      for (const s of strands) {
+        if (s.type === 'MaskedStrand') continue; // TODO: boolean masking
+        drawStrand(s, P);
+      }
+
+      paper.view.update();
+      return { drawn: strands.length, width: W, height: H };
+    };
+  </script>
+</body>
+</html>
