@@ -58,5 +58,8 @@ try {
   await canvas.screenshot({ path: outPng });
   console.log('js render ->', outPng, JSON.stringify(result));
 } finally {
-  await browser.close();
+  await browser.close().catch(() => {});
 }
+// Playwright can keep the event loop alive after close, hanging the process
+// (which stalled chained diffs and background tasks). Force a clean exit.
+process.exit(0);

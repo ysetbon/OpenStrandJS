@@ -174,8 +174,18 @@ def main():
     else:
         image = hi
     image.save(out_png, "PNG")
+
+    # Curve-shape parameters live on the strands (set from canvas/settings), not
+    # in the saved JSON. Export them so the JS renderer reproduces get_path().
+    sample = canvas.strands[0] if canvas.strands else None
+    curve_params = {
+        "base_fraction": float(getattr(sample, "control_point_base_fraction", 0.4)) if sample else 0.4,
+        "dist_multiplier": float(getattr(sample, "distance_multiplier", 1.2)) if sample else 1.2,
+        "exponent": float(getattr(sample, "curve_response_exponent", 1.5)) if sample else 1.5,
+    }
     meta = {
         "fixture": os.path.basename(in_json),
+        "curve_params": curve_params,
         "image_width": image.width(),
         "image_height": image.height(),
         "min_x": min_x,

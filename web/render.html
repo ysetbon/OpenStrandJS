@@ -26,6 +26,11 @@
       return new paper.Color(c.r / 255, c.g / 255, c.b / 255, a);
     }
 
+    // Curve-shape parameters. These are canvas-level settings (NOT stored per
+    // strand in the JSON); the reference renderer exports the canvas's values
+    // into meta.curve_params. Defaults match the braid fixtures.
+    let CURVE = { base_fraction: 1.0, dist_multiplier: 2.0, exponent: 2.0 };
+
     // Faithful port of strand.py::_build_curve_profile. Returns {mode, segments}
     // in world coordinates; each segment is a cubic {p0, cp1, cp2, p3}.
     function buildProfile(s, enableThird) {
@@ -33,9 +38,9 @@
       const cps = s.control_points || [];
       const control_point1 = cps[0] || start;
       const control_point2 = cps[1] || end;
-      const base_fraction = s.control_point_base_fraction ?? 0.4;
-      const dist_multiplier = s.distance_multiplier ?? 1.2;
-      const exponent = s.curve_response_exponent ?? 1.5;
+      const base_fraction = CURVE.base_fraction;
+      const dist_multiplier = CURVE.dist_multiplier;
+      const exponent = CURVE.exponent;
       const bias_triangle = 0.5, bias_circle = 0.5; // no bias control in fixtures
 
       const thirdLocked = enableThird && s.control_point_center_locked && s.control_point_center;
@@ -198,6 +203,7 @@
     }
 
     window.renderFixture = function (strands, meta) {
+      if (meta.curve_params) CURVE = meta.curve_params;
       const W = meta.image_width, H = meta.image_height;
       // Match the reference, which renders at `supersample`x then downscales.
       // Paper draws into an offscreen W*ss x H*ss canvas; we then downscale into
