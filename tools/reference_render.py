@@ -183,6 +183,7 @@ def main():
         "max_x": max_x,
         "max_y": max_y,
         "padding": padding,
+        "supersample": factor,
         # Content point (cx, cy) maps to pixel (cx + x_offset, cy + y_offset).
         "x_offset": padding - min_x,
         "y_offset": padding - min_y,

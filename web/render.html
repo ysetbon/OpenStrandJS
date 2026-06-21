@@ -12,10 +12,13 @@
 <body>
   <canvas id="c"></canvas>
   <script>
-    // First-cut strand renderer. Deliberately NOT yet faithful to every detail
-    // of strand.py (end-cap border, the real stroke->outline, masking, shadows,
-    // the third control point). It renders the strand body as a fill + border so
-    // the diff harness produces a real number and a diff image to drive tuning.
+    // ---- small vector helpers (plain {x,y}, world space) ----
+    const vsub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y });
+    const vadd = (a, b) => ({ x: a.x + b.x, y: a.y + b.y });
+    const vmul = (a, s) => ({ x: a.x * s, y: a.y * s });
+    const vlen = (v) => Math.hypot(v.x, v.y);
+    const vdist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+    const vnorm = (v) => { const l = vlen(v); return l < 0.001 ? { x: 0, y: 0 } : { x: v.x / l, y: v.y / l }; };
 
     function toColor(c) {
       if (!c) return new paper.Color(0, 0, 0, 1);
@@ -23,61 +26,155 @@
       return new paper.Color(c.r / 255, c.g / 255, c.b / 255, a);
     }
 
-    // Build the strand centerline as a cubic Bezier in image (pixel) space.
-    function buildCenterline(s, P) {
-      const path = new paper.Path();
-      path.moveTo(P(s.start));
+    // Faithful port of strand.py::_build_curve_profile. Returns {mode, segments}
+    // in world coordinates; each segment is a cubic {p0, cp1, cp2, p3}.
+    function buildProfile(s, enableThird) {
+      const start = s.start, end = s.end;
       const cps = s.control_points || [];
-      const cp1 = cps[0] || s.start;
-      const cp2 = cps[1] || s.end;
-      // TODO: honor control_point_center (third control point) -> 2 segments.
-      path.cubicCurveTo(P(cp1), P(cp2), P(s.end));
+      const control_point1 = cps[0] || start;
+      const control_point2 = cps[1] || end;
+      const base_fraction = s.control_point_base_fraction ?? 0.4;
+      const dist_multiplier = s.distance_multiplier ?? 1.2;
+      const exponent = s.curve_response_exponent ?? 1.5;
+      const bias_triangle = 0.5, bias_circle = 0.5; // no bias control in fixtures
+
+      const thirdLocked = enableThird && s.control_point_center_locked && s.control_point_center;
+
+      if (thirdLocked) {
+        const p0 = start, p1 = control_point1, p2 = s.control_point_center, p3 = control_point2, p4 = end;
+        const in_norm = vnorm(vsub(p2, p1)), out_norm = vnorm(vsub(p3, p2));
+        const center_tangent = { x: (in_norm.x + out_norm.x) * 0.5, y: (in_norm.y + out_norm.y) * 0.5 };
+        const dist2 = vdist(p2, p1), dist3 = vdist(p3, p2);
+        let frac1 = Math.min(0.1 + base_fraction * 0.3, 8.33);
+        let frac2 = Math.min(0.05 + base_fraction * 0.15, 3.77);
+        frac1 = Math.min(frac1 * dist_multiplier, 8.33);
+        frac2 = Math.min(frac2 * dist_multiplier, 8.33);
+        if (exponent !== 1.0) { frac1 = Math.pow(frac1, 1 / exponent); frac2 = Math.pow(frac2, 1 / exponent); }
+        const cp1 = vadd(p0, vmul(vsub(p1, p0), frac1 * (0.5 + bias_triangle)));
+        const cp2 = vsub(p2, vmul(center_tangent, dist2 * frac2 * (0.5 + bias_triangle)));
+        const cp3 = vadd(p2, vmul(center_tangent, dist3 * frac2 * (0.5 + bias_circle)));
+        const cp4 = vadd(p4, vmul(vsub(p3, p4), frac2 * (0.5 + bias_circle)));
+        return { mode: 'multi', segments: [{ p0, cp1, cp2, p3: p2 }, { p0: p2, cp1: cp3, cp2: cp4, p3: p4 }] };
+      }
+
+      const cp1_at_start = Math.abs(control_point1.x - start.x) < 1.0 && Math.abs(control_point1.y - start.y) < 1.0;
+      const cp2_at_start = Math.abs(control_point2.x - start.x) < 1.0 && Math.abs(control_point2.y - start.y) < 1.0;
+      if (cp1_at_start && cp2_at_start) return { mode: 'line', segments: [] };
+
+      const p0 = start, p1 = control_point1;
+      const p2 = { x: (control_point1.x + control_point2.x) / 2, y: (control_point1.y + control_point2.y) / 2 };
+      const p3 = control_point2, p4 = end;
+      const in_norm = vnorm(vsub(p2, p1)), out_norm = vnorm(vsub(p3, p2));
+      const center_tangent = { x: (in_norm.x + out_norm.x) * 0.5, y: (in_norm.y + out_norm.y) * 0.5 };
+      const dist2 = vdist(p2, p1), dist3 = vdist(p3, p2);
+      let frac1 = Math.min(Math.min(0.1 + base_fraction * 0.2, 2.34) * dist_multiplier, 8.33);
+      let frac2 = Math.min(Math.min(0.05 + base_fraction * 0.1, 1.17) * dist_multiplier, 8.33);
+      if (exponent !== 1.0) { frac1 = Math.pow(frac1, 1 / exponent); frac2 = Math.pow(frac2, 1 / exponent); }
+      const cp1 = vadd(p0, vmul(vsub(p1, p0), frac1 * (0.5 + bias_triangle)));
+      const cp2 = vsub(p2, vmul(center_tangent, dist2 * frac2 * (0.5 + bias_triangle)));
+      const cp3 = vadd(p2, vmul(center_tangent, dist3 * frac2 * (0.5 + bias_circle)));
+      const cp4 = vadd(p4, vmul(vsub(p3, p4), frac2 * (0.5 + bias_circle)));
+      return { mode: 'multi', segments: [{ p0, cp1, cp2, p3: p2 }, { p0: p2, cp1: cp3, cp2: cp4, p3: p4 }] };
+    }
+
+    // Build the centerline as a paper.Path in pixel space.
+    function buildCenterline(s, P, enableThird) {
+      const prof = buildProfile(s, enableThird);
+      const path = new paper.Path();
+      if (prof.mode === 'line') {
+        path.moveTo(P(s.start));
+        path.lineTo(P(s.end));
+        return path;
+      }
+      path.moveTo(P(prof.segments[0].p0));
+      for (const sg of prof.segments) {
+        path.cubicCurveTo(P(sg.cp1), P(sg.cp2), P(sg.p3));
+      }
       return path;
     }
 
-    function drawStrand(s, P) {
-      const w = s.width || 0;
-      const sw = s.stroke_width || 0;
-      // Border first (below), fill on top. TODO: replace double-stroke with the
-      // real stroked-outline fill+pen so flat end-caps get a border too.
-      const outer = buildCenterline(s, P);
-      outer.strokeColor = toColor(s.stroke_color);
-      outer.strokeWidth = w + 2 * sw;
-      outer.strokeCap = 'butt';
-      outer.strokeJoin = 'round';
+    // Equivalent of QPainterPathStroker.createStroke(width): the closed outline
+    // produced by stroking the centerline at the given width with flat caps.
+    // Implemented by sampling the centerline and offsetting by +/- width/2 along
+    // the normal, then joining left + reversed-right into a closed path.
+    function strokedOutline(centerline, width) {
+      const len = centerline.length;
+      if (len === 0 || width <= 0) return null;
+      const half = width / 2;
+      const N = Math.max(8, Math.ceil(len)); // ~1px sampling
+      const left = [], right = [];
+      for (let i = 0; i <= N; i++) {
+        const off = Math.min(len * i / N, len - 1e-4);
+        const pt = centerline.getPointAt(off);
+        const nrm = centerline.getNormalAt(off);
+        if (!pt || !nrm) continue;
+        left.push(pt.add(nrm.multiply(half)));
+        right.push(pt.subtract(nrm.multiply(half)));
+      }
+      right.reverse();
+      return new paper.Path({ segments: left.concat(right), closed: true });
+    }
 
-      const inner = buildCenterline(s, P);
-      inner.strokeColor = toColor(s.color);
-      inner.strokeWidth = w;
-      inner.strokeCap = 'butt';
-      inner.strokeJoin = 'round';
+    // Stroked body outline, with self-intersections (from offsetting a tightly
+    // curved centerline) resolved into a clean boundary. Returns a paper path or
+    // null. This is the masking primitive too.
+    function bodyOutline(s, P, enableThird, ss) {
+      const centerline = buildCenterline(s, P, enableThird);
+      let outline = strokedOutline(centerline, (s.width || 0) * ss);
+      centerline.remove();
+      if (!outline) return null;
+      const cleaned = outline.resolveCrossings();
+      if (cleaned !== outline) { outline.remove(); outline = cleaned; }
+      return outline;
+    }
+
+    function drawStrand(s, P, enableThird, ss) {
+      const outline = bodyOutline(s, P, enableThird, ss);
+      if (!outline) return;
+      outline.fillColor = toColor(s.color);
+      outline.strokeColor = toColor(s.stroke_color);
+      outline.strokeWidth = (s.stroke_width || 0) * ss;
+      outline.strokeJoin = 'round';
     }
 
     window.renderFixture = function (strands, meta) {
-      const canvas = document.getElementById('c');
       const W = meta.image_width, H = meta.image_height;
-      canvas.width = W;
-      canvas.height = H;
-      canvas.style.width = W + 'px';
-      canvas.style.height = H + 'px';
+      // Match the reference, which renders at `supersample`x then downscales.
+      // Paper draws into an offscreen W*ss x H*ss canvas; we then downscale into
+      // the visible 1x canvas with high-quality smoothing and screenshot that.
+      // (Playwright's canvas screenshot captures the backing store, not the CSS
+      // box, so an in-page downscale is the reliable way to supersample.)
+      const ss = meta.supersample || 2;
 
-      paper.setup(canvas);
+      const hi = document.createElement('canvas');
+      hi.width = W * ss;
+      hi.height = H * ss;
+      paper.setup(hi);
 
-      // Opaque white background to match the reference fill.
-      const bg = new paper.Path.Rectangle(new paper.Point(0, 0), new paper.Size(W, H));
+      const bg = new paper.Path.Rectangle(new paper.Point(0, 0), new paper.Size(W * ss, H * ss));
       bg.fillColor = 'white';
 
-      // World point (cx, cy) -> pixel (cx + x_offset, cy + y_offset).
       const ox = meta.x_offset, oy = meta.y_offset;
-      const P = (pt) => new paper.Point(pt.x + ox, pt.y + oy);
+      const P = (pt) => new paper.Point((pt.x + ox) * ss, (pt.y + oy) * ss);
+      const enableThird = strands.some((s) => s.control_point_center != null);
 
       for (const s of strands) {
         if (s.type === 'MaskedStrand') continue; // TODO: boolean masking
-        drawStrand(s, P);
+        drawStrand(s, P, enableThird, ss);
       }
-
       paper.view.update();
-      return { drawn: strands.length, width: W, height: H };
+
+      const vis = document.getElementById('c');
+      vis.width = W;
+      vis.height = H;
+      vis.style.width = W + 'px';
+      vis.style.height = H + 'px';
+      const ctx = vis.getContext('2d');
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(hi, 0, 0, W * ss, H * ss, 0, 0, W, H);
+
+      return { drawn: strands.length, width: W, height: H, supersample: ss };
     };
   </script>
 </body>

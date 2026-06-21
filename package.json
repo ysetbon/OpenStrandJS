@@ -9,7 +9,8 @@
     "build": "tsc",
     "render": "node tools/js_render.mjs",
     "diff": "node tools/diff.mjs",
-    "prove": "node tools/prove.mjs"
+    "prove": "node tools/prove.mjs",
+    "iterate": "node tools/js_render.mjs fixtures/single_strand.json artifacts/single_strand && node tools/diff.mjs artifacts/single_strand"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
