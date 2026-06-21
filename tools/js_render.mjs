@@ -42,7 +42,9 @@ try {
   page.on('console', (msg) => console.log('[page]', msg.text()));
   page.on('pageerror', (err) => console.error('[pageerror]', err.message));
 
-  const url = pathToFileURL(path.join(root, 'web', 'render.html')).href;
+  // Cache-buster: Chromium can cache file:// resources, which would silently
+  // serve a stale render.html after edits.
+  const url = pathToFileURL(path.join(root, 'web', 'render.html')).href + '?v=' + Math.floor(Math.random() * 1e9);
   await page.goto(url);
   await page.waitForFunction(() => typeof window.renderFixture === 'function');
 

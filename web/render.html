@@ -115,17 +115,21 @@
       return new paper.Path({ segments: left.concat(right), closed: true });
     }
 
-    // Stroked body outline, with self-intersections (from offsetting a tightly
-    // curved centerline) resolved into a clean boundary. Returns a paper path or
-    // null. This is the masking primitive too.
-    function bodyOutline(s, P, enableThird, ss) {
+    // Stroked body outline at an arbitrary width (pixel space), with
+    // self-intersections (from offsetting a tightly curved centerline) resolved
+    // into a clean boundary. Returns a paper path or null. The masking primitive.
+    function strokedBodyAtWidth(s, P, enableThird, widthPx) {
       const centerline = buildCenterline(s, P, enableThird);
-      let outline = strokedOutline(centerline, (s.width || 0) * ss);
+      let outline = strokedOutline(centerline, widthPx);
       centerline.remove();
       if (!outline) return null;
       const cleaned = outline.resolveCrossings();
       if (cleaned !== outline) { outline.remove(); outline = cleaned; }
       return outline;
+    }
+
+    function bodyOutline(s, P, enableThird, ss) {
+      return strokedBodyAtWidth(s, P, enableThird, (s.width || 0) * ss);
     }
 
     function drawStrand(s, P, enableThird, ss) {
@@ -135,6 +139,62 @@
       outline.strokeColor = toColor(s.stroke_color);
       outline.strokeWidth = (s.stroke_width || 0) * ss;
       outline.strokeJoin = 'round';
+    }
+
+    // A deletion rectangle (over-under gap) in pixel space. Corner-based
+    // ([x,y] arrays) or axis-aligned {x,y,width,height}; world coords via P.
+    function deletionPath(rect, P, ss) {
+      if (rect.top_left && rect.bottom_right) {
+        const tl = rect.top_left, br = rect.bottom_right;
+        const tr = rect.top_right || br, bl = rect.bottom_left || tl;
+        const A = (a) => P({ x: a[0], y: a[1] });
+        const path = new paper.Path([A(tl), A(tr), A(br), A(bl)]);
+        path.closed = true;
+        return path;
+      }
+      if (rect.x != null && rect.width != null) {
+        return new paper.Path.Rectangle(P({ x: rect.x, y: rect.y }), new paper.Size(rect.width * ss, rect.height * ss));
+      }
+      return null;
+    }
+
+    // Port of masked_strand.py: the masked region is
+    //   first.stroked(width)  ∩  second.stroked(width + 2*stroke + 4)
+    // minus the deletion rectangles. The first (top) strand is drawn clipped to
+    // that region so it appears OVER the second.
+    function drawMasked(ms, byLayer, P, enableThird, ss) {
+      const parts = (ms.layer_name || '').split('_');
+      if (parts.length < 4) return;
+      const first = byLayer[parts[0] + '_' + parts[1]];
+      const second = byLayer[parts[2] + '_' + parts[3]];
+      if (!first || !second) return;
+
+      const firstInner = strokedBodyAtWidth(first, P, enableThird, (first.width || 0) * ss);
+      const secondExt = strokedBodyAtWidth(
+        second, P, enableThird,
+        ((second.width || 0) + 2 * (second.stroke_width || 0) + 4) * ss,
+      );
+      if (!firstInner || !secondExt) { firstInner && firstInner.remove(); secondExt && secondExt.remove(); return; }
+
+      let mask = firstInner.intersect(secondExt);
+      firstInner.remove();
+      secondExt.remove();
+      if (!mask) return;
+
+      for (const rect of ms.deletion_rectangles || []) {
+        const rp = deletionPath(rect, P, ss);
+        if (rp) { const m2 = mask.subtract(rp); rp.remove(); mask.remove(); mask = m2; }
+      }
+
+      const firstOutline = bodyOutline(first, P, enableThird, ss);
+      if (!firstOutline) { mask.remove(); return; }
+      firstOutline.fillColor = toColor(first.color);
+      firstOutline.strokeColor = toColor(first.stroke_color);
+      firstOutline.strokeWidth = (first.stroke_width || 0) * ss;
+      firstOutline.strokeJoin = 'round';
+
+      // Clip the first strand's full body to the mask region.
+      new paper.Group({ children: [mask, firstOutline], clipped: true });
     }
 
     window.renderFixture = function (strands, meta) {
@@ -158,9 +218,14 @@
       const P = (pt) => new paper.Point((pt.x + ox) * ss, (pt.y + oy) * ss);
       const enableThird = strands.some((s) => s.control_point_center != null);
 
+      const byLayer = {};
+      for (const s of strands) byLayer[s.layer_name] = s;
+
+      // Draw in list order (matches the Qt paint loop): regular strands paint
+      // their full body; masked strands repaint the top strand over the bottom.
       for (const s of strands) {
-        if (s.type === 'MaskedStrand') continue; // TODO: boolean masking
-        drawStrand(s, P, enableThird, ss);
+        if (s.type === 'MaskedStrand') drawMasked(s, byLayer, P, enableThird, ss);
+        else drawStrand(s, P, enableThird, ss);
       }
       paper.view.update();
 
