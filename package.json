@@ -5,6 +5,9 @@
   "type": "module",
   "description": "Fidelity-first JavaScript/Canvas port of OpenStrand Studio. The Qt app (../OpenStrandStudio) is the spec and the pixel oracle.",
   "scripts": {
+    "dev": "vite",
+    "build:editor": "vite build",
+    "preview": "vite preview",
     "reference": "../OpenStrandStudio/src/build_env/Scripts/python.exe tools/reference_render.py",
     "build": "tsc",
     "render": "node tools/js_render.mjs",
@@ -15,12 +18,19 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
     "playwright": "^1.48.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "vite": "^5.4.0"
   },
   "dependencies": {
     "paper": "^0.12.18",
     "pixelmatch": "^6.0.0",
-    "pngjs": "^7.0.0"
+    "pngjs": "^7.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^5.0.0"
   }
 }

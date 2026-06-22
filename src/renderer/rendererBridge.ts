@@ -1,0 +1,31 @@
+// Typed bridge to the vanilla renderer in web/strand-renderer.js.
+//
+// strand-renderer.js references a global `paper` and assigns window.renderFixture
+// / window.extractStrands. It is loaded UNCHANGED (it's the pixel-verified
+// oracle). We expose paper as a global before any render call, then import the
+// script for its side effects. paper is only dereferenced inside renderFixture
+// at call time, so import order vs. the window.paper assignment is safe.
+
+import paper from 'paper';
+import '../../web/strand-renderer.js';
+import type { RenderMeta, RenderStrand } from '../model/types';
+
+(globalThis as unknown as { paper: typeof paper }).paper = paper;
+
+declare global {
+  interface Window {
+    renderFixture: (strands: RenderStrand[], meta: RenderMeta) => unknown;
+    extractStrands: (data: unknown, step?: number) => unknown[];
+  }
+}
+
+export function callRender(strands: RenderStrand[], meta: RenderMeta): void {
+  if (typeof window.renderFixture !== 'function') {
+    throw new Error('strand-renderer.js did not define window.renderFixture');
+  }
+  window.renderFixture(strands, meta);
+}
+
+export function extractStrands(data: unknown, step?: number): unknown[] {
+  return window.extractStrands(data, step);
+}

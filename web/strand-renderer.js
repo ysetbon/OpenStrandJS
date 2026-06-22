@@ -233,6 +233,13 @@ window.renderFixture = function (strands, meta) {
   const ss = meta.supersample || 2;
 
   const hi = document.createElement('canvas');
+  // Opt out of paper.js's automatic devicePixelRatio scaling: this renderer does
+  // its own supersampling via the W*ss offscreen canvas + manual downscale, so
+  // paper must treat 1 canvas px as 1 unit. Without this, a browser at DPR != 1
+  // (display zoom/scaling) double-scales and the drawing lands at the wrong size.
+  // Harness-safe: the Playwright reference runs at DPR=1, where pixelRatio is 1
+  // either way.
+  hi.setAttribute('hidpi', 'off');
   hi.width = W * ss;
   hi.height = H * ss;
   paper.setup(hi);
