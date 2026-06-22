@@ -5,8 +5,18 @@
 
 import { create } from 'zustand';
 import type {
-  EditorDocument, HandleKind, ModeName, Selection, Settings, StrandRecord, ViewState,
+  EditorDocument, HandleKind, ModeName, Point, Selection, Settings, StrandRecord, ViewState,
 } from '../model/types';
+
+// Transient new-strand / attach gesture (the rubber-band preview). Not part of
+// the document and not undoable; committed to the doc on pointer-up.
+export interface PendingStrand {
+  kind: 'new' | 'attach';
+  start: Point;
+  end: Point;
+  parent?: string;       // attach: parent layer_name
+  side?: 0 | 1;          // attach: which parent endpoint
+}
 import {
   DEFAULT_STRAND_COLOR, DEFAULT_STROKE_COLOR,
   DEFAULT_STRAND_WIDTH, DEFAULT_STROKE_WIDTH,
@@ -49,6 +59,8 @@ export interface EditorState {
   settings: Settings;
   dragging: boolean;
   hover: { layerName: string | null; handle: HandleKind | null };
+  pending: PendingStrand | null;     // new-strand / attach rubber-band preview
+  maskPending: string[];             // 0..2 strands picked for an over/under mask
   // bumped whenever the document changes so subscribers can re-render the canvas
   docRevision: number;
 
@@ -60,6 +72,8 @@ export interface EditorState {
   setSelection: (sel: Selection) => void;
   setDragging: (b: boolean) => void;
   setHover: (hover: { layerName: string | null; handle: HandleKind | null }) => void;
+  setPending: (pending: PendingStrand | null) => void;
+  setMaskPending: (maskPending: string[]) => void;
 }
 
 // Shallow structural clone of a document (snapshots stay JSON-serializable
@@ -76,6 +90,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   settings: DEFAULT_SETTINGS,
   dragging: false,
   hover: { layerName: null, handle: null },
+  pending: null,
+  maskPending: [],
   docRevision: 0,
 
   loadDocument: (doc) => set((s) => ({
@@ -97,6 +113,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setSelection: (selection) => set({ selection }),
   setDragging: (dragging) => set({ dragging }),
   setHover: (hover) => set({ hover }),
+  setPending: (pending) => set({ pending }),
+  setMaskPending: (maskPending) => set({ maskPending }),
 }));
 
 // Convenience accessor for imperative (non-React) code.

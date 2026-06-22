@@ -25,7 +25,10 @@ export function CanvasStage() {
 
     setOverlay(overlay, (ctx2d) => {
       const s = useEditorStore.getState();
-      drawOverlay(ctx2d, { doc: s.doc, view: s.view, selection: s.selection, settings: s.settings, hover: s.hover });
+      drawOverlay(ctx2d, {
+        doc: s.doc, view: s.view, selection: s.selection, settings: s.settings,
+        hover: s.hover, pending: s.pending, maskPending: s.maskPending,
+      });
     });
 
     const host = cCanvas ? new InteractionHost(cCanvas) : null;
