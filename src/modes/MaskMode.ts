@@ -32,6 +32,7 @@ export const MaskMode: Mode = {
       st.setSelection({ layerName: mask, handle: null });
       st.setMaskPending([]);
       st.setEraser({ layerName: mask, rect: rectOf(p.world, p.world) });
+      st.beginGesture();
       st.setDragging(true);
       ctx.requestOverlay();
       return;
@@ -51,7 +52,7 @@ export const MaskMode: Mode = {
 
     const first = pending[0];
     let newName: string | null = null;
-    st.mutateDoc((draft) => { newName = createMask(draft, first, layer); });
+    st.commitEdit((draft) => { newName = createMask(draft, first, layer); });
     st.setMaskPending([]);
     if (newName) st.setSelection({ layerName: newName, handle: null });
     ctx.requestRender();
@@ -75,6 +76,7 @@ export const MaskMode: Mode = {
     if (rect.maxX - rect.minX > MIN_SIDE && rect.maxY - rect.minY > MIN_SIDE) {
       st.mutateDoc((draft) => addDeletionRect(draft, layer, rect));
     }
+    st.commit();                 // one erase = one undo step (no-op gesture discarded)
     ctx.requestRender();
   },
 };

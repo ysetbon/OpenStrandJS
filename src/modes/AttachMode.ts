@@ -45,6 +45,7 @@ export const AttachMode: Mode = {
       drag = { kind: 'new', start: p.world };
       st.setPending({ kind: 'new', start: p.world, end: p.world });
     }
+    st.beginGesture();
     st.setDragging(true);
     ctx.requestOverlay();
   },
@@ -67,6 +68,7 @@ export const AttachMode: Mode = {
     st.setDragging(false);
 
     if (Math.hypot(end.x - d.start.x, end.y - d.start.y) < MIN_LEN) {
+      st.commit();               // nothing created -> commit() discards the no-op gesture
       ctx.requestOverlay();
       return;
     }
@@ -77,6 +79,7 @@ export const AttachMode: Mode = {
         ? addNewStrand(draft, d.start, end)
         : attachChild(draft, d.parent!, d.side!, d.start, end);
     });
+    st.commit();                 // one create = one undo step
     if (newName) st.setSelection({ layerName: newName, handle: null });
     ctx.requestRender();
   },

@@ -113,9 +113,22 @@ export class InteractionHost {
 
   private onKeyDown = (e: KeyboardEvent) => {
     if (e.code === 'Space') { this.spaceHeld = true; }
+    const tag = (e.target as HTMLElement | null)?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return; // don't hijack typing
+    const st = useEditorStore.getState();
+    const ctrl = e.ctrlKey || e.metaKey;
+    const k = e.key.toLowerCase();
     if (e.key === 'Escape') {
-      useEditorStore.getState().setSelection({ layerName: null, handle: null });
+      st.setSelection({ layerName: null, handle: null });
       requestOverlay();
+      return;
+    }
+    // Undo: Ctrl/Cmd+Z (no shift) or bare Z. Redo: Ctrl/Cmd+Shift+Z, Ctrl+Y, or bare X.
+    if ((ctrl && k === 'z' && !e.shiftKey) || (!ctrl && k === 'z')) {
+      e.preventDefault(); st.undo(); requestRender(); return;
+    }
+    if ((ctrl && k === 'z' && e.shiftKey) || (ctrl && k === 'y') || (!ctrl && k === 'x')) {
+      e.preventDefault(); st.redo(); requestRender(); return;
     }
   };
 

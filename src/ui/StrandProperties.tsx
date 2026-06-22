@@ -8,7 +8,7 @@ import { ColorField } from './ColorField';
 export function StrandProperties() {
   const name = useEditorStore((s) => s.selection.layerName);
   const strand = useEditorStore((s) => (name ? s.doc.strands[name] : null));
-  const mutateDoc = useEditorStore((s) => s.mutateDoc);
+  const commitEdit = useEditorStore((s) => s.commitEdit);
   const [wholeSet, setWholeSet] = useState(false);
 
   if (!name || !strand) return <div className="props empty">Select a strand to edit its color &amp; width.</div>;
@@ -17,7 +17,7 @@ export function StrandProperties() {
     return (
       <div className="props">
         <div className="props-title">{name} (mask)</div>
-        <button onClick={() => mutateDoc((d) => resetMask(d, name))}>Reset mask</button>
+        <button onClick={() => commitEdit((d) => resetMask(d, name))}>Reset mask</button>
         <div className="props-hint">In mask mode, drag inside the overlap to erase.</div>
       </div>
     );
@@ -26,25 +26,25 @@ export function StrandProperties() {
   return (
     <div className="props">
       <div className="props-title">{name} · set {strand.set_number}</div>
-      <ColorField label="Fill" value={strand.color} onChange={(c) => mutateDoc((d) => setColor(d, name, 'fill', c, wholeSet))} />
-      <ColorField label="Stroke" value={strand.stroke_color} onChange={(c) => mutateDoc((d) => setColor(d, name, 'stroke', c, wholeSet))} />
+      <ColorField label="Fill" value={strand.color} onChange={(c) => commitEdit((d) => setColor(d, name, 'fill', c, wholeSet))} />
+      <ColorField label="Stroke" value={strand.stroke_color} onChange={(c) => commitEdit((d) => setColor(d, name, 'stroke', c, wholeSet))} />
       <label className="props-row">
         <span>Width</span>
         <input type="range" min={1} max={120} value={strand.width}
-          onChange={(e) => mutateDoc((d) => setWidth(d, name, 'width', Number(e.target.value), wholeSet))} />
+          onChange={(e) => commitEdit((d) => setWidth(d, name, 'width', Number(e.target.value), wholeSet))} />
         <b>{strand.width}</b>
       </label>
       <label className="props-row">
         <span>Stroke</span>
         <input type="range" min={0} max={20} value={strand.stroke_width}
-          onChange={(e) => mutateDoc((d) => setWidth(d, name, 'stroke_width', Number(e.target.value), wholeSet))} />
+          onChange={(e) => commitEdit((d) => setWidth(d, name, 'stroke_width', Number(e.target.value), wholeSet))} />
         <b>{strand.stroke_width}</b>
       </label>
       <label className="props-check">
         <input type="checkbox" checked={wholeSet} onChange={(e) => setWholeSet(e.target.checked)} /> apply to whole set
       </label>
       <label className="props-check">
-        <input type="checkbox" checked={strand.shadow_only} onChange={(e) => mutateDoc((d) => setShadowOnly(d, name, e.target.checked))} /> shadow only
+        <input type="checkbox" checked={strand.shadow_only} onChange={(e) => commitEdit((d) => setShadowOnly(d, name, e.target.checked))} /> shadow only
       </label>
     </div>
   );

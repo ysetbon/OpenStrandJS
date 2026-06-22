@@ -33,6 +33,7 @@ export const MoveMode: Mode = {
       const hp = handlePos(s, hit.handle);
       drag = { layer: hit.layerName, handle: hit.handle, offset: { x: hp.x - p.world.x, y: hp.y - p.world.y } };
       st.setSelection({ layerName: hit.layerName, handle: hit.handle });
+      st.beginGesture();
       st.setDragging(true);
       ctx.requestOverlay();
     } else if (hit && hit.kind === 'body') {
@@ -67,7 +68,9 @@ export const MoveMode: Mode = {
   onPointerUp(_p: PointerInfo, ctx: ModeContext) {
     if (drag) {
       drag = null;
-      useEditorStore.getState().setDragging(false);
+      const st = useEditorStore.getState();
+      st.setDragging(false);
+      st.commit();               // one drag = one undo step
       ctx.requestRender();
     }
   },

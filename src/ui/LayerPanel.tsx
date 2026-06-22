@@ -18,7 +18,7 @@ export function LayerPanel() {
   const strands = useEditorStore((s) => s.doc.strands);
   const locked = useEditorStore((s) => s.doc.locked_layers);
   const selected = useEditorStore((s) => s.selection.layerName);
-  const mutateDoc = useEditorStore((s) => s.mutateDoc);
+  const commitEdit = useEditorStore((s) => s.commitEdit);
   const setSelection = useEditorStore((s) => s.setSelection);
   const dragIdx = useRef<number | null>(null);
 
@@ -30,7 +30,7 @@ export function LayerPanel() {
   }
 
   function remove(name: string) {
-    mutateDoc((d) => deleteStrand(d, name));
+    commitEdit((d) => deleteStrand(d, name));
     if (selected === name) setSelection({ layerName: null, handle: null });
   }
 
@@ -38,7 +38,7 @@ export function LayerPanel() {
     const { view } = useEditorStore.getState();
     const c = screenToWorld({ x: view.width / 2, y: view.height / 2 }, view);
     let newName: string | null = null;
-    mutateDoc((d) => { newName = addNewStrand(d, { x: c.x - 80, y: c.y }, { x: c.x + 80, y: c.y }); });
+    commitEdit((d) => { newName = addNewStrand(d, { x: c.x - 80, y: c.y }, { x: c.x + 80, y: c.y }); });
     if (newName) setSelection({ layerName: newName, handle: null });
   }
 
@@ -46,7 +46,7 @@ export function LayerPanel() {
     const from = dragIdx.current;
     dragIdx.current = null;
     if (from == null) return;
-    mutateDoc((d) => reorderLayer(d, from, targetOrderIdx));
+    commitEdit((d) => reorderLayer(d, from, targetOrderIdx));
   }
 
   return (
@@ -56,7 +56,7 @@ export function LayerPanel() {
         <div className="lp-actions">
           <button title="Add strand" onClick={addStrand}>＋</button>
           <button title="Deselect" onClick={() => setSelection({ layerName: null, handle: null })}>▢</button>
-          <button title="Delete all" onClick={() => { mutateDoc(deleteAllStrands); setSelection({ layerName: null, handle: null }); }}>🗑</button>
+          <button title="Delete all" onClick={() => { commitEdit(deleteAllStrands); setSelection({ layerName: null, handle: null }); }}>🗑</button>
         </div>
       </div>
 
@@ -88,8 +88,8 @@ export function LayerPanel() {
             >
               <span className="lp-name">{name}{isMask ? '  (mask)' : ''}</span>
               <span className="lp-row-actions" onClick={(e) => e.stopPropagation()}>
-                <button title={s.is_hidden ? 'Show' : 'Hide'} onClick={() => mutateDoc((d) => toggleHidden(d, name))}>{s.is_hidden ? '🚫' : '👁'}</button>
-                <button title={isLocked ? 'Unlock' : 'Lock'} onClick={() => mutateDoc((d) => toggleLock(d, name))}>{isLocked ? '🔒' : '🔓'}</button>
+                <button title={s.is_hidden ? 'Show' : 'Hide'} onClick={() => commitEdit((d) => toggleHidden(d, name))}>{s.is_hidden ? '🚫' : '👁'}</button>
+                <button title={isLocked ? 'Unlock' : 'Lock'} onClick={() => commitEdit((d) => toggleLock(d, name))}>{isLocked ? '🔒' : '🔓'}</button>
                 <button title="Delete" onClick={() => remove(name)}>✕</button>
               </span>
             </div>

@@ -21,6 +21,7 @@ import {
   DEFAULT_STRAND_COLOR, DEFAULT_STROKE_COLOR,
   DEFAULT_STRAND_WIDTH, DEFAULT_STROKE_WIDTH,
 } from '../model/factory';
+import { areVisuallyEqual } from './visualEqual';
 
 export function emptyDocument(): EditorDocument {
   return {
@@ -65,9 +66,19 @@ export interface EditorState {
   // bumped whenever the document changes so subscribers can re-render the canvas
   docRevision: number;
 
+  // snapshot history (Phase 5). present == doc. One snapshot per gesture.
+  past: EditorDocument[];
+  future: EditorDocument[];
+  gestureBase: EditorDocument | null;
+
   loadDocument: (doc: EditorDocument) => void;
   setDoc: (doc: EditorDocument) => void;
   mutateDoc: (fn: (draft: EditorDocument) => void) => void;
+  beginGesture: () => void;
+  commit: () => void;
+  commitEdit: (fn: (draft: EditorDocument) => void) => void;
+  undo: () => void;
+  redo: () => void;
   setView: (patch: Partial<ViewState>) => void;
   setMode: (mode: ModeName) => void;
   setSelection: (sel: Selection) => void;
@@ -77,6 +88,8 @@ export interface EditorState {
   setMaskPending: (maskPending: string[]) => void;
   setEraser: (eraser: EditorState['eraser']) => void;
 }
+
+const HISTORY_CAP = 100;
 
 // Shallow structural clone of a document (snapshots stay JSON-serializable
 // because StrandRecord holds no object cross-references).
@@ -96,19 +109,78 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   maskPending: [],
   eraser: null,
   docRevision: 0,
+  past: [],
+  future: [],
+  gestureBase: null,
 
   loadDocument: (doc) => set((s) => ({
     doc,
     selection: { layerName: doc.selected_strand_name, handle: null },
     docRevision: s.docRevision + 1,
+    past: [], future: [], gestureBase: null,    // a fresh load starts new history
   })),
 
   setDoc: (doc) => set((s) => ({ doc, docRevision: s.docRevision + 1 })),
 
+  // Live edit: mutates present, NO history push (used during drags).
   mutateDoc: (fn) => set((s) => {
     const draft = cloneDoc(s.doc);
     fn(draft);
     return { doc: draft, docRevision: s.docRevision + 1 };
+  }),
+
+  // Snapshot present as the gesture baseline (first call of a gesture wins).
+  beginGesture: () => set((s) => (s.gestureBase ? {} : { gestureBase: cloneDoc(s.doc) })),
+
+  // End a gesture: push the baseline to `past` iff the document changed visibly.
+  commit: () => set((s) => {
+    if (!s.gestureBase) return {};
+    if (areVisuallyEqual(s.gestureBase, s.doc)) return { gestureBase: null };
+    const past = [...s.past, s.gestureBase];
+    if (past.length > HISTORY_CAP) past.shift();
+    return { past, future: [], gestureBase: null };
+  }),
+
+  // Discrete edit = one undo step (begin + mutate + commit).
+  commitEdit: (fn) => { get().beginGesture(); get().mutateDoc(fn); get().commit(); },
+
+  undo: () => set((s) => {
+    if (!s.past.length) return {};
+    const prev = s.past[s.past.length - 1];
+    // shadow_enabled / show_control_points are canvas toggles -> carry current.
+    const restored: EditorDocument = {
+      ...prev,
+      shadow_enabled: s.doc.shadow_enabled,
+      show_control_points: s.doc.show_control_points,
+    };
+    const selLives = s.selection.layerName != null && restored.strands[s.selection.layerName];
+    return {
+      doc: restored,
+      past: s.past.slice(0, -1),
+      future: [...s.future, s.doc],
+      gestureBase: null,
+      docRevision: s.docRevision + 1,
+      selection: selLives ? s.selection : { layerName: null, handle: null },
+    };
+  }),
+
+  redo: () => set((s) => {
+    if (!s.future.length) return {};
+    const next = s.future[s.future.length - 1];
+    const restored: EditorDocument = {
+      ...next,
+      shadow_enabled: s.doc.shadow_enabled,
+      show_control_points: s.doc.show_control_points,
+    };
+    const selLives = s.selection.layerName != null && restored.strands[s.selection.layerName];
+    return {
+      doc: restored,
+      future: s.future.slice(0, -1),
+      past: [...s.past, s.doc],
+      gestureBase: null,
+      docRevision: s.docRevision + 1,
+      selection: selLives ? s.selection : { layerName: null, handle: null },
+    };
   }),
 
   setView: (patch) => set((s) => ({ view: { ...s.view, ...patch } })),

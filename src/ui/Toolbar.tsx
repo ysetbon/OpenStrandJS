@@ -19,6 +19,10 @@ export function Toolbar() {
     const n = s.selection.layerName;
     return n && s.doc.strands[n]?.type === 'MaskedStrand' ? n : null;
   });
+  const canUndo = useEditorStore((s) => s.past.length > 0);
+  const canRedo = useEditorStore((s) => s.future.length > 0);
+  const undo = useEditorStore((s) => s.undo);
+  const redo = useEditorStore((s) => s.redo);
 
   function applyDoc(json: unknown) {
     const doc = loadProject(json);
@@ -73,6 +77,11 @@ export function Toolbar() {
       {selectedMask && (
         <button onClick={() => mutateDoc((d) => resetMask(d, selectedMask))}>Reset mask</button>
       )}
+
+      <div className="group">
+        <button disabled={!canUndo} onClick={undo} title="Undo (Z / Ctrl+Z)">↶ Undo</button>
+        <button disabled={!canRedo} onClick={redo} title="Redo (X / Ctrl+Shift+Z)">↷ Redo</button>
+      </div>
 
       <span className="spacer" />
 
