@@ -3,7 +3,7 @@
 Fidelity-first JS/Canvas port of OpenStrand Studio. The Qt app
 (`../OpenStrandStudio`) is the spec; its headless render is the pixel oracle.
 
-## Interactive editor — Phase 1 MVP **DONE** (TS + React + Vite + Zustand)
+## Interactive editor — Phases 1–6 **COMPLETE** (TS + React + Vite + Zustand)
 
 Architecture and roadmap in `EDITOR_PLAN.md`. The editor reuses the verified
 `web/strand-renderer.js` UNCHANGED (one harness-safe fix: `hidpi="off"` on the
@@ -57,9 +57,27 @@ descendants + masks), Add / Deselect / Delete All.
 whole set" propagation (by set_number), shadow_only; masked rows get Reset mask.
 (Arrow/line/extension/circle toggles deferred — renderer doesn't draw them yet.)
 
-**Next:** Phase 5 (undo/redo + areVisuallyEqual dedup), then 6 (rotate/angle,
-settings+i18n, full zoom/pan via the one additive `meta.zoom`/`meta.pan` renderer
-edit, tabs, groups, PNG export).
+**Phase 5 DONE** (2ccbe0b): undo/redo — snapshot history (past/future/gestureBase),
+`areVisuallyEqual` dedup (no-op gestures create no step), one gesture = one step,
+Z/X + Ctrl variants + Toolbar buttons; `shadow_enabled`/`show_control_points`
+excluded from dedup and carried across undo, `shadow_overrides` undoable.
+
+**Phase 6 DONE**: 6a full zoom/pan (85e96ca — the one additive renderer edit
+`S = ss*zoom`, wheel zoom-about-cursor; fixtures pixel-identical at zoom 1), 6b
+PNG export (8dc87f6 — content-fit render → toDataURL → download), 6c rotate/angle
+(c5869fa — Angle/Length editor, end rotates around start length-preserved via
+moveHandle), 6d settings/i18n/grid/persistence (4dfd169 — settings dialog, theme,
+6-language i18n + Hebrew RTL, grid, localStorage), 6e multi-tab (42ba575), 6f
+groups (302dd52 — create-from-set + translate as a unit).
+
+**THE EDITOR IS COMPLETE.** Every slice was verified deterministically in a real
+browser and committed. Explicitly deferred (low-value / out of corpus scope):
+- Renderer decorations not exercised by the fixtures: **end caps** (circle/
+  elliptical `_make_cap_*` / `has_circles`), **arrows**, **side lines**,
+  **extensions**, **bias control**. These are the known ~1–3% fidelity residual.
+- Editor: per-layer arrow/line/extension toggles (no renderer effect yet), group
+  rotate + drag-the-group-on-canvas (nudge buttons cover translation), angle
+  dialog as a separate modal (inline in StrandProperties instead).
 
 ---
 
