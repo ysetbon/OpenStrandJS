@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import { isRTL } from './i18n';
 import { Toolbar } from './Toolbar';
+import { TabBar } from './TabBar';
 import { CanvasStage } from './CanvasStage';
 import { LayerPanel } from './LayerPanel';
 
@@ -19,6 +20,7 @@ export function App() {
   return (
     <div className="app">
       <Toolbar />
+      <TabBar />
       <div className="workarea">
         <CanvasStage />
         <LayerPanel />

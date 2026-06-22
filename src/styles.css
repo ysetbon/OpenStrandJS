@@ -18,6 +18,16 @@ body { font: 14px/1.4 system-ui, -apple-system, sans-serif; color: #1a1a1a; }
 .toolbar button:hover { background: #f0f0f0; }
 .toolbar button.active { background: #0a7d22; color: #fff; border-color: #0a7d22; }
 
+.tabbar { display: flex; align-items: stretch; gap: 2px; padding: 4px 8px 0; background: #ededed; border-bottom: 1px solid #ddd; }
+.tab { display: flex; align-items: center; gap: 6px; padding: 4px 10px; background: #dcdce0; border: 1px solid #ccc; border-bottom: none; border-radius: 6px 6px 0 0; cursor: pointer; font-size: 12px; }
+.tab.active { background: #fff; font-weight: 600; }
+.tab-close { border: none; background: transparent; cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px; color: #888; }
+.tab-close:hover { color: #c00; }
+.tab-new { border: 1px solid #ccc; background: #fff; border-radius: 6px; cursor: pointer; padding: 2px 8px; margin-left: 2px; }
+.theme-dark .tabbar { background: #222226; border-color: #3a3a40; }
+.theme-dark .tab { background: #33333a; border-color: #44444c; color: #ddd; }
+.theme-dark .tab.active { background: #1e1e22; }
+
 .workarea { display: flex; flex: 1; min-height: 0; }
 
 .stage {

@@ -87,6 +87,15 @@ export interface EditorState {
   future: EditorDocument[];
   gestureBase: EditorDocument | null;
 
+  // multi-tab (Phase 6e). The active tab's doc IS the live `doc`; inactive tabs
+  // hold their saved doc/view.
+  tabs: { id: number; name: string; doc?: EditorDocument; view?: ViewState }[];
+  activeTabId: number;
+  nextTabId: number;
+  newTab: () => void;
+  switchTab: (id: number) => void;
+  closeTab: (id: number) => void;
+
   loadDocument: (doc: EditorDocument) => void;
   setDoc: (doc: EditorDocument) => void;
   mutateDoc: (fn: (draft: EditorDocument) => void) => void;
@@ -129,6 +138,57 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   past: [],
   future: [],
   gestureBase: null,
+  tabs: [{ id: 1, name: 'Untitled 1' }],
+  activeTabId: 1,
+  nextTabId: 2,
+
+  newTab: () => set((s) => {
+    const tabs = s.tabs.map((t) => (t.id === s.activeTabId ? { ...t, doc: s.doc, view: s.view } : t));
+    const id = s.nextTabId;
+    tabs.push({ id, name: `Untitled ${id}` });
+    return {
+      tabs, activeTabId: id, nextTabId: id + 1,
+      doc: emptyDocument(), view: { ...DEFAULT_VIEW, width: s.view.width, height: s.view.height },
+      past: [], future: [], gestureBase: null, selection: { layerName: null, handle: null },
+      docRevision: s.docRevision + 1,
+    };
+  }),
+
+  switchTab: (id) => set((s) => {
+    if (id === s.activeTabId) return {};
+    const tabs = s.tabs.map((t) => (t.id === s.activeTabId ? { ...t, doc: s.doc, view: s.view } : t));
+    const target = tabs.find((t) => t.id === id);
+    if (!target) return {};
+    const doc = target.doc ?? emptyDocument();
+    return {
+      tabs, activeTabId: id,
+      doc, view: target.view ?? { ...DEFAULT_VIEW, width: s.view.width, height: s.view.height },
+      past: [], future: [], gestureBase: null,
+      selection: { layerName: doc.selected_strand_name ?? null, handle: null },
+      docRevision: s.docRevision + 1,
+    };
+  }),
+
+  closeTab: (id) => set((s) => {
+    const remaining = s.tabs.filter((t) => t.id !== id);
+    if (remaining.length === 0) {
+      const nid = s.nextTabId;
+      return {
+        tabs: [{ id: nid, name: `Untitled ${nid}` }], activeTabId: nid, nextTabId: nid + 1,
+        doc: emptyDocument(), view: { ...s.view }, past: [], future: [], gestureBase: null,
+        selection: { layerName: null, handle: null }, docRevision: s.docRevision + 1,
+      };
+    }
+    if (id !== s.activeTabId) return { tabs: remaining };
+    const target = remaining[0];
+    const doc = target.doc ?? emptyDocument();
+    return {
+      tabs: remaining, activeTabId: target.id,
+      doc, view: target.view ?? { ...s.view }, past: [], future: [], gestureBase: null,
+      selection: { layerName: doc.selected_strand_name ?? null, handle: null },
+      docRevision: s.docRevision + 1,
+    };
+  }),
 
   loadDocument: (doc) => set((s) => ({
     doc,
