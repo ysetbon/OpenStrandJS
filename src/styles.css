@@ -18,10 +18,39 @@ body { font: 14px/1.4 system-ui, -apple-system, sans-serif; color: #1a1a1a; }
 .toolbar button:hover { background: #f0f0f0; }
 .toolbar button.active { background: #0a7d22; color: #fff; border-color: #0a7d22; }
 
+.workarea { display: flex; flex: 1; min-height: 0; }
+
 .stage {
   position: relative; flex: 1; overflow: hidden;
   background: repeating-conic-gradient(#fafafa 0% 25%, #fff 0% 50%) 50% / 24px 24px;
 }
+
+.layer-panel {
+  width: 230px; flex: 0 0 230px; border-left: 1px solid #ddd;
+  background: #fafafa; display: flex; flex-direction: column; overflow: hidden;
+}
+.lp-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 10px; border-bottom: 1px solid #e2e2e2; font-weight: 600;
+}
+.lp-actions { display: flex; gap: 2px; }
+.lp-actions button, .lp-row-actions button {
+  border: 1px solid transparent; background: transparent; cursor: pointer;
+  border-radius: 5px; padding: 2px 6px; font-size: 13px; line-height: 1;
+}
+.lp-actions button:hover, .lp-row-actions button:hover { background: rgba(0,0,0,.08); }
+.lp-list { overflow-y: auto; flex: 1; padding: 4px; }
+.lp-empty { color: #999; font-size: 12px; padding: 10px; }
+.lp-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 5px 8px; margin: 3px 2px; border-radius: 6px; cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0,0,0,.12); user-select: none; font-size: 12px;
+}
+.lp-row.sel { outline: 2px solid #0a7d22; outline-offset: 1px; }
+.lp-row.hidden { opacity: .5; }
+.lp-row.locked { filter: grayscale(.4); }
+.lp-name { font-weight: 600; }
+.lp-row-actions { display: flex; gap: 1px; }
 #c, #overlay { position: absolute; top: 0; left: 0; }
 #c { background: #fff; touch-action: none; }
 #overlay { pointer-events: none; }

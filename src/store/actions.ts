@@ -6,7 +6,7 @@
 import type { EditorDocument, HandleKind, Point, RGBA, Settings, StrandRecord } from '../model/types';
 import { weldedEndpoints } from '../interaction/connections';
 import { makeAttachedStrand, makeStrand } from '../model/factory';
-import { nextFreeSet, nextIndexInSet } from '../model/layerName';
+import { maskComponents, nextFreeSet, nextIndexInSet } from '../model/layerName';
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 
@@ -149,6 +149,70 @@ export function addDeletionRect(
 export function resetMask(draft: EditorDocument, maskLayer: string): void {
   const m = draft.strands[maskLayer];
   if (m && m.type === 'MaskedStrand') m.deletion_rectangles = [];
+}
+
+// Delete a strand and everything that depends on it: attached descendants (and
+// theirs), and any MaskedStrand whose components include a removed strand. Frees
+// the parent endpoint's circle when an attached strand is removed.
+export function deleteStrand(draft: EditorDocument, name: string): void {
+  const target = draft.strands[name];
+  if (!target) return;
+  const toRemove = new Set<string>([name]);
+
+  if (target.type !== 'MaskedStrand') {
+    const collect = (n: string) => {
+      for (const k of Object.keys(draft.strands)) {
+        const s = draft.strands[k];
+        if (s.type === 'AttachedStrand' && s.attached_to === n && !toRemove.has(k)) {
+          toRemove.add(k);
+          collect(k);
+        }
+      }
+    };
+    collect(name);
+    if (target.type === 'AttachedStrand' && target.attached_to != null && target.attachment_side != null) {
+      const parent = draft.strands[target.attached_to];
+      if (parent) parent.has_circles[target.attachment_side] = false;
+    }
+  }
+
+  // Masks that reference any removed strand also go.
+  for (const k of Object.keys(draft.strands)) {
+    if (draft.strands[k].type !== 'MaskedStrand') continue;
+    const comp = maskComponents(k);
+    if (comp && (toRemove.has(comp.first) || toRemove.has(comp.second))) toRemove.add(k);
+  }
+
+  for (const k of toRemove) delete draft.strands[k];
+  draft.order = draft.order.filter((n) => !toRemove.has(n));
+  draft.locked_layers = draft.locked_layers.filter((n) => !toRemove.has(n));
+  if (draft.selected_strand_name && toRemove.has(draft.selected_strand_name)) draft.selected_strand_name = null;
+}
+
+export function deleteAllStrands(draft: EditorDocument): void {
+  draft.strands = {};
+  draft.order = [];
+  draft.locked_layers = [];
+  draft.selected_strand_name = null;
+}
+
+// Move order[from] to position `to` (both are indices into doc.order = z-order).
+export function reorderLayer(draft: EditorDocument, from: number, to: number): void {
+  const n = draft.order.length;
+  if (from === to || from < 0 || to < 0 || from >= n || to >= n) return;
+  const [moved] = draft.order.splice(from, 1);
+  draft.order.splice(to, 0, moved);
+}
+
+export function toggleHidden(draft: EditorDocument, name: string): void {
+  const s = draft.strands[name];
+  if (s) s.is_hidden = !s.is_hidden;
+}
+
+export function toggleLock(draft: EditorDocument, name: string): void {
+  const i = draft.locked_layers.indexOf(name);
+  if (i >= 0) draft.locked_layers.splice(i, 1);
+  else draft.locked_layers.push(name);
 }
 
 // Create an over/under MaskedStrand from two existing strands. `first` is OVER,
