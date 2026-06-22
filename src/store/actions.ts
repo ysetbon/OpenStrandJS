@@ -124,12 +124,12 @@ export function createMask(draft: EditorDocument, first: string, second: string)
     is_hidden: false,
     shadow_only: false,
     circle_stroke_color: null,
-    manual_circle_visibility: [null, null],
     knot_connections: {},
     deletion_rectangles: [],
     using_absolute_coords: false,
     extra: {
       is_start_side: true,
+      manual_circle_visibility: [null, null],
       start_line_visible: true,
       end_line_visible: true,
       start_extension_visible: false,

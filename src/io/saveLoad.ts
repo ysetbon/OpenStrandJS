@@ -18,7 +18,7 @@ const MODELED_KEYS = new Set([
   'type', 'index', 'layer_name', 'set_number', 'start', 'end',
   'control_points', 'control_point_center', 'control_point_center_locked',
   'width', 'stroke_width', 'color', 'stroke_color', 'has_circles',
-  'is_hidden', 'shadow_only', 'circle_stroke_color', 'manual_circle_visibility',
+  'is_hidden', 'shadow_only', 'circle_stroke_color',
   'knot_connections', 'attached_to', 'attachment_side',
   'deletion_rectangles', 'using_absolute_coords',
   'triangle_has_moved', 'control_point2_shown', 'control_point2_activated',
@@ -98,9 +98,6 @@ function loadStrand(raw: any): StrandRecord {
     is_hidden: !!raw.is_hidden,
     shadow_only: !!raw.shadow_only,
     circle_stroke_color: raw.circle_stroke_color != null ? asColor(raw.circle_stroke_color, BLACK) : null,
-    manual_circle_visibility: Array.isArray(raw.manual_circle_visibility)
-      ? [raw.manual_circle_visibility[0] ?? null, raw.manual_circle_visibility[1] ?? null]
-      : [null, null],
     knot_connections: knot,
     triangle_has_moved: raw.triangle_has_moved ?? undefined,
     control_point2_shown: raw.control_point2_shown ?? undefined,
@@ -179,7 +176,6 @@ function serializeStrand(s: StrandRecord, index: number): Record<string, unknown
   out.control_point_center = s.control_point_center
     ? { x: s.control_point_center.x, y: s.control_point_center.y } : null;
   out.control_point_center_locked = s.control_point_center_locked;
-  out.manual_circle_visibility = s.manual_circle_visibility;
   if (s.triangle_has_moved !== undefined) out.triangle_has_moved = s.triangle_has_moved;
   if (s.control_point2_shown !== undefined) out.control_point2_shown = s.control_point2_shown;
   if (s.control_point2_activated !== undefined) out.control_point2_activated = s.control_point2_activated;
@@ -190,6 +186,9 @@ function serializeStrand(s: StrandRecord, index: number): Record<string, unknown
   }
   if (s.type === 'MaskedStrand') {
     out.deletion_rectangles = s.deletion_rectangles ?? [];
+    // MaskedStrands have no independent control points; the desktop app writes
+    // them as [null, null] (the renderer resolves the mask from its components).
+    out.control_points = [null, null];
   }
   return out;
 }
@@ -205,4 +204,9 @@ export function serializeProject(doc: EditorDocument): Record<string, unknown> {
     show_control_points: doc.show_control_points,
     shadow_overrides: doc.shadow_overrides,
   };
+}
+
+// Dev-only debug handle for round-trip testing.
+if (import.meta.env?.DEV) {
+  (globalThis as Record<string, unknown>).__io = { loadProject, serializeProject, unwrapProject };
 }

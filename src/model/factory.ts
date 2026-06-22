@@ -43,7 +43,6 @@ export function makeStrand(o: MakeStrandOpts): StrandRecord {
     is_hidden: false,
     shadow_only: false,
     circle_stroke_color: clone(DEFAULT_STROKE_COLOR),
-    manual_circle_visibility: [null, null],
     knot_connections: {},
     triangle_has_moved: false,
     control_point2_shown: false,
@@ -59,6 +58,7 @@ export function makeStrand(o: MakeStrandOpts): StrandRecord {
       end_arrow_visible: false,
       full_arrow_visible: false,
       closed_connections: [false, false],
+      manual_circle_visibility: [null, null],
     },
   };
 }

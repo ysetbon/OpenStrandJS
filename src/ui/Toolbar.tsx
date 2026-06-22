@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { useEditorStore } from '../store/editorStore';
-import { loadProject } from '../io/saveLoad';
+import { loadProject, serializeProject } from '../io/saveLoad';
+import { downloadJSON } from '../io/fileDialog';
 import { fitPan } from '../interaction/viewTransform';
 import type { ModeName } from '../model/types';
 
@@ -43,6 +44,11 @@ export function Toolbar() {
     }
   }
 
+  function onSave() {
+    const doc = useEditorStore.getState().doc;
+    downloadJSON('openstrand_project.json', serializeProject(doc));
+  }
+
   return (
     <div className="toolbar">
       <strong>OpenStrandJS</strong>
@@ -78,6 +84,7 @@ export function Toolbar() {
       </div>
 
       <button onClick={() => fileRef.current?.click()}>Load…</button>
+      <button onClick={onSave}>Save</button>
       <input
         ref={fileRef}
         type="file"

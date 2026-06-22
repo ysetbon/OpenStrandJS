@@ -55,7 +55,6 @@ export interface StrandRecord {
   shadow_only: boolean;
 
   circle_stroke_color: RGBA | null;
-  manual_circle_visibility: [boolean | null, boolean | null];
   knot_connections: Record<string, KnotConnection>;
 
   // AttachedStrand only
