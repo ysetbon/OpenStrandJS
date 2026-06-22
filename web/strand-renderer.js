@@ -231,6 +231,12 @@ window.renderFixture = function (strands, meta) {
   // (Playwright's canvas screenshot captures the backing store, not the CSS
   // box, so an in-page downscale is the reliable way to supersample.)
   const ss = meta.supersample || 2;
+  // Zoom is additive: when absent it is 1 and S === ss, so every length below is
+  // identical to the pre-zoom renderer (fixtures stay pixel-identical). `S` is
+  // the full content scale (supersample * zoom) applied to positions AND widths;
+  // the content offset stays at `ss` so panning isn't scaled by zoom.
+  const zoom = meta.zoom || 1;
+  const S = ss * zoom;
 
   const hi = document.createElement('canvas');
   // Opt out of paper.js's automatic devicePixelRatio scaling: this renderer does
@@ -248,7 +254,9 @@ window.renderFixture = function (strands, meta) {
   bg.fillColor = 'white';
 
   const ox = meta.x_offset, oy = meta.y_offset;
-  const P = (pt) => new paper.Point((pt.x + ox) * ss, (pt.y + oy) * ss);
+  // world -> backing: position scaled by S (= ss*zoom), offset by ss. At zoom 1
+  // this is exactly (pt + offset) * ss.
+  const P = (pt) => new paper.Point(pt.x * S + ox * ss, pt.y * S + oy * ss);
   const enableThird = strands.some((s) => s.control_point_center != null);
 
   const byLayer = {};
@@ -277,8 +285,8 @@ window.renderFixture = function (strands, meta) {
     for (const s of strands) {
       if (s.type === 'MaskedStrand') continue;
       const w = s.width || 0, sw = s.stroke_width || 0;
-      const fb = strokedBodyAtWidth(s, P, enableThird, (w + 2 * sw) * ss);
-      const eb = strokedBodyAtWidth(s, P, enableThird, (w + 2 * sw + MAX_BLUR) * ss);
+      const fb = strokedBodyAtWidth(s, P, enableThird, (w + 2 * sw) * S);
+      const eb = strokedBodyAtWidth(s, P, enableThird, (w + 2 * sw + MAX_BLUR) * S);
       if (fb) fb.visible = false;
       if (eb) eb.visible = false;
       fullBody[s.layer_name] = fb;
@@ -292,7 +300,7 @@ window.renderFixture = function (strands, meta) {
   // strands repaint the top strand over the bottom.
   for (let i = 0; i < strands.length; i++) {
     const s = strands[i];
-    if (s.type === 'MaskedStrand') { drawMasked(s, byLayer, P, enableThird, ss); continue; }
+    if (s.type === 'MaskedStrand') { drawMasked(s, byLayer, P, enableThird, S); continue; }
 
     if (shadowEnabled && expBody[s.layer_name]) {
       for (let j = 0; j < i; j++) {
@@ -309,7 +317,7 @@ window.renderFixture = function (strands, meta) {
         }
       }
     }
-    drawStrand(s, P, enableThird, ss);
+    drawStrand(s, P, enableThird, S);
   }
 
   // Remove the invisible helper bodies.

@@ -141,6 +141,7 @@ export interface RenderMeta {
   x_offset: number;
   y_offset: number;
   supersample: number;
+  zoom?: number;            // content scale; absent/1 == pre-zoom behavior
   shadow_enabled: boolean;
   curve_params: { base_fraction: number; dist_multiplier: number; exponent: number };
 }

@@ -103,10 +103,16 @@ export class InteractionHost {
   };
 
   private onWheel = (e: WheelEvent) => {
-    // Phase 1: wheel pans (zoom is pinned to 1.0 until Phase 6).
+    // Wheel zooms about the cursor, clamped to [0.1, 5]. The world point under the
+    // pointer stays fixed: screen = world*zoom + pan  =>  pan = screen - world*zoom.
     e.preventDefault();
-    const view = useEditorStore.getState().view;
-    useEditorStore.getState().setView({ panX: view.panX - e.deltaX, panY: view.panY - e.deltaY });
+    const st = useEditorStore.getState();
+    const view = st.view;
+    const screen = this.toScreen(e);
+    const world = screenToWorld(screen, view);
+    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    const zoom = Math.max(0.1, Math.min(5, view.zoom * factor));
+    st.setView({ zoom, panX: screen.x - world.x * zoom, panY: screen.y - world.y * zoom });
   };
 
   private onContextMenu = (e: MouseEvent) => { e.preventDefault(); };

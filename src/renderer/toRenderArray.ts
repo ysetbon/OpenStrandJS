@@ -43,6 +43,7 @@ export function buildMeta(doc: EditorDocument, view: ViewState, settings: Settin
     x_offset: view.panX,
     y_offset: view.panY,
     supersample: view.supersample,
+    zoom: view.zoom,
     shadow_enabled: doc.shadow_enabled,
     curve_params: settings.curve_params,
   };
