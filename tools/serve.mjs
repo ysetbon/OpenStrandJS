@@ -3,6 +3,7 @@
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
 import path from 'node:path';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -33,6 +34,15 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(port, () => {
-  console.log(`\n  OpenStrandJS viewer:  http://localhost:${port}/\n`);
+  const url = `http://localhost:${port}/`;
+  console.log(`\n  OpenStrandJS viewer:  ${url}\n`);
   console.log('  (serves the repo root; Ctrl-C to stop)\n');
+  // Auto-open the default browser unless disabled (OSJS_NO_OPEN=1).
+  if (!process.env.OSJS_NO_OPEN) {
+    try {
+      if (process.platform === 'win32') spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore' }).unref();
+      else if (process.platform === 'darwin') spawn('open', [url], { detached: true, stdio: 'ignore' }).unref();
+      else spawn('xdg-open', [url], { detached: true, stdio: 'ignore' }).unref();
+    } catch { /* user can open the URL manually */ }
+  }
 });
