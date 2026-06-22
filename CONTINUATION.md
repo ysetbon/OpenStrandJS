@@ -41,9 +41,15 @@ mutates synchronously). MCP screenshots are scaled NON-uniformly vs the real
 client, so target pointer events by transform-computed client coords, not by
 eyeballing screenshots. Dev-only `window.__store` / `__io` debug handles exist.
 
-**Next:** Phase 2 (curve handle state machine, hover/cursor polish, mask-edit
-eraser). Phases 3+ (layer panel, per-layer color/toggles, undo/redo, rotate/
-settings/zoom/tabs/groups/export) per `EDITOR_PLAN.md` — 3, 4, 6 are
+**Phase 2 DONE** (commits 15d471b, 552a10a): faithful control-point move
+(`update_end` rule: a cp follows its endpoint only when coincident; center =
+cp midpoint unless pinned), cp2 passive→active state machine
+(triangle_has_moved / control_point2_shown / control_point2_activated), grab
+cursor on handle hover, and the mask-edit eraser (drag inside a mask's overlap
+to add a deletion rectangle; "Reset mask" clears them).
+
+**Next:** Phase 3 (layer panel), then 4 (per-layer color/toggles), 5 (undo/redo),
+6 (rotate/settings/zoom/tabs/groups/export) per `EDITOR_PLAN.md` — 3, 4, 6 are
 workflow-parallelizable.
 
 ---
