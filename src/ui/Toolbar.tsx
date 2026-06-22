@@ -1,5 +1,7 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
+import { SettingsDialog } from './SettingsDialog';
+import { t } from './i18n';
 import { loadProject, serializeProject } from '../io/saveLoad';
 import { downloadJSON } from '../io/fileDialog';
 import { exportPng } from '../io/exportPng';
@@ -24,6 +26,8 @@ export function Toolbar() {
   const canRedo = useEditorStore((s) => s.future.length > 0);
   const undo = useEditorStore((s) => s.undo);
   const redo = useEditorStore((s) => s.redo);
+  const lang = useEditorStore((s) => s.settings.language);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   function applyDoc(json: unknown) {
     const doc = loadProject(json);
@@ -103,8 +107,10 @@ export function Toolbar() {
       </div>
 
       <button onClick={() => fileRef.current?.click()}>Load…</button>
-      <button onClick={onSave}>Save</button>
+      <button onClick={onSave}>{t('save', lang)}</button>
       <button onClick={() => exportPng()}>Export PNG</button>
+      <button onClick={() => setSettingsOpen(true)} title={t('settings', lang)}>⚙</button>
+      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
       <input
         ref={fileRef}
         type="file"

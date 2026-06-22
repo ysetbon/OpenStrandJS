@@ -46,7 +46,23 @@ const DEFAULT_SETTINGS: Settings = {
   default_stroke_color: DEFAULT_STROKE_COLOR,
   default_strand_width: DEFAULT_STRAND_WIDTH,
   default_stroke_width: DEFAULT_STROKE_WIDTH,
+  theme: 'default',
+  language: 'en',
 };
+
+const SETTINGS_KEY = 'openstrandjs.settings';
+
+function loadSettings(): Settings {
+  try {
+    const raw = typeof localStorage !== 'undefined' && localStorage.getItem(SETTINGS_KEY);
+    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+  } catch { /* ignore */ }
+  return { ...DEFAULT_SETTINGS };
+}
+
+function saveSettings(s: Settings): void {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch { /* ignore */ }
+}
 
 const DEFAULT_VIEW: ViewState = {
   zoom: 1, panX: 0, panY: 0, width: 1000, height: 700, supersample: 2,
@@ -80,6 +96,7 @@ export interface EditorState {
   undo: () => void;
   redo: () => void;
   setView: (patch: Partial<ViewState>) => void;
+  setSettings: (patch: Partial<Settings>) => void;
   setMode: (mode: ModeName) => void;
   setSelection: (sel: Selection) => void;
   setDragging: (b: boolean) => void;
@@ -102,7 +119,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   selection: { layerName: null, handle: null },
   mode: 'select',
   view: { ...DEFAULT_VIEW },
-  settings: DEFAULT_SETTINGS,
+  settings: loadSettings(),
   dragging: false,
   hover: { layerName: null, handle: null },
   pending: null,
@@ -184,6 +201,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   }),
 
   setView: (patch) => set((s) => ({ view: { ...s.view, ...patch } })),
+  setSettings: (patch) => set((s) => {
+    const settings = { ...s.settings, ...patch };
+    saveSettings(settings);
+    return { settings, docRevision: s.docRevision + 1 };
+  }),
   setMode: (mode) => set({ mode }),
   setSelection: (selection) => set({ selection }),
   setDragging: (dragging) => set({ dragging }),

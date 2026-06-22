@@ -6,6 +6,7 @@ import {
 import { maskComponents } from '../model/layerName';
 import { screenToWorld } from '../interaction/viewTransform';
 import { StrandProperties } from './StrandProperties';
+import { t } from './i18n';
 import type { RGBA } from '../model/types';
 
 const rgba = (c: RGBA) => `rgba(${c.r},${c.g},${c.b},${(c.a ?? 255) / 255})`;
@@ -18,6 +19,7 @@ export function LayerPanel() {
   const strands = useEditorStore((s) => s.doc.strands);
   const locked = useEditorStore((s) => s.doc.locked_layers);
   const selected = useEditorStore((s) => s.selection.layerName);
+  const lang = useEditorStore((s) => s.settings.language);
   const commitEdit = useEditorStore((s) => s.commitEdit);
   const setSelection = useEditorStore((s) => s.setSelection);
   const dragIdx = useRef<number | null>(null);
@@ -52,7 +54,7 @@ export function LayerPanel() {
   return (
     <div className="layer-panel">
       <div className="lp-head">
-        <span>Layers</span>
+        <span>{t('layers', lang)}</span>
         <div className="lp-actions">
           <button title="Add strand" onClick={addStrand}>＋</button>
           <button title="Deselect" onClick={() => setSelection({ layerName: null, handle: null })}>▢</button>

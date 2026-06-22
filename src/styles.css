@@ -66,6 +66,29 @@ body { font: 14px/1.4 system-ui, -apple-system, sans-serif; color: #1a1a1a; }
 .props-row input[type=range] { flex: 1; }
 .props-row b { width: 26px; text-align: right; }
 .props-check { display: flex; align-items: center; gap: 6px; color: #555; }
+
+/* settings modal */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.modal { background: #fff; border-radius: 10px; padding: 18px 20px; min-width: 320px; box-shadow: 0 10px 40px rgba(0,0,0,.3); display: flex; flex-direction: column; gap: 8px; }
+.modal h2 { margin: 0 0 6px; font-size: 16px; }
+.modal .mrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.modal .mrow span { color: #555; }
+.modal input[type=number] { width: 80px; }
+.mcurve { border: 1px solid #ddd; border-radius: 6px; padding: 6px 10px; display: flex; flex-direction: column; gap: 6px; }
+.mcurve legend { color: #555; padding: 0 4px; }
+.modal > button { margin-top: 8px; align-self: flex-end; padding: 5px 14px; }
+
+/* dark theme (class on <html>) */
+.theme-dark body { background: #1e1e22; color: #e6e6e6; }
+.theme-dark .toolbar { background: #26262b; border-color: #3a3a40; }
+.theme-dark .toolbar button { background: #33333a; color: #e6e6e6; border-color: #44444c; }
+.theme-dark .toolbar button.active { background: #0a7d22; border-color: #0a7d22; }
+.theme-dark .layer-panel { background: #26262b; border-color: #3a3a40; }
+.theme-dark .lp-head, .theme-dark .props { border-color: #3a3a40; }
+.theme-dark .props-title, .theme-dark .cf-label, .theme-dark .props-row span, .theme-dark .props-check { color: #cfcfcf; }
+.theme-dark .modal { background: #2a2a30; color: #e6e6e6; }
+.theme-dark .mcurve { border-color: #44444c; }
+.theme-dark .mcurve legend, .theme-dark .modal .mrow span { color: #cfcfcf; }
 #c, #overlay { position: absolute; top: 0; left: 0; }
 #c { background: #fff; touch-action: none; }
 #overlay { pointer-events: none; }

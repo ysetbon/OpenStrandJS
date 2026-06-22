@@ -5,7 +5,7 @@
 
 import type { EditorDocument, HandleKind, Selection, Settings, ViewState } from '../model/types';
 import type { PendingStrand } from '../store/editorStore';
-import { worldToScreen } from '../interaction/viewTransform';
+import { screenToWorld, worldToScreen } from '../interaction/viewTransform';
 import { strandHandles } from '../interaction/hitTest';
 import { sampleCenterline } from '../interaction/hitGeometry';
 
@@ -59,8 +59,30 @@ function highlightCenterline(ctx: CanvasRenderingContext2D, st: OverlayState, la
   ctx.globalAlpha = 1;
 }
 
+function drawGrid(ctx: CanvasRenderingContext2D, st: OverlayState): void {
+  const g = st.settings.grid_size;
+  if (!st.settings.show_grid || g <= 0 || g * st.view.zoom < 4) return; // skip when too dense
+  const w = st.view.width, h = st.view.height;
+  const tl = screenToWorld({ x: 0, y: 0 }, st.view);
+  const br = screenToWorld({ x: w, y: h }, st.view);
+  ctx.save();
+  ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+  ctx.lineWidth = 1;
+  for (let x = Math.floor(tl.x / g) * g; x <= br.x; x += g) {
+    const s = worldToScreen({ x, y: 0 }, st.view);
+    ctx.beginPath(); ctx.moveTo(s.x, 0); ctx.lineTo(s.x, h); ctx.stroke();
+  }
+  for (let y = Math.floor(tl.y / g) * g; y <= br.y; y += g) {
+    const s = worldToScreen({ x: 0, y }, st.view);
+    ctx.beginPath(); ctx.moveTo(0, s.y); ctx.lineTo(w, s.y); ctx.stroke();
+  }
+  ctx.restore();
+}
+
 export function drawOverlay(ctx: CanvasRenderingContext2D, st: OverlayState): void {
   const { doc, view, selection, hover } = st;
+
+  drawGrid(ctx, st);
 
   // Mask-pending: highlight already-picked strands.
   for (const layer of st.maskPending) highlightCenterline(ctx, st, layer, MASK_COLOR);

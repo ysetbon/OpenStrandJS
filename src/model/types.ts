@@ -107,6 +107,9 @@ export interface ViewState {
   supersample: number;   // offscreen render multiplier (quality)
 }
 
+export type Theme = 'default' | 'light' | 'dark';
+export type Language = 'en' | 'fr' | 'it' | 'es' | 'pt' | 'he';
+
 export interface Settings {
   curve_params: { base_fraction: number; dist_multiplier: number; exponent: number };
   grid_size: number;
@@ -116,6 +119,8 @@ export interface Settings {
   default_stroke_color: RGBA;
   default_strand_width: number;
   default_stroke_width: number;
+  theme: Theme;
+  language: Language;
 }
 
 // What the renderer (window.renderFixture) consumes.
