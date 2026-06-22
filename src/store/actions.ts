@@ -209,6 +209,66 @@ export function toggleHidden(draft: EditorDocument, name: string): void {
   if (s) s.is_hidden = !s.is_hidden;
 }
 
+// Set fill or stroke color on a strand, optionally across its whole set (every
+// non-masked strand sharing set_number) — the desktop's color-propagation rule.
+export function setColor(
+  draft: EditorDocument,
+  name: string,
+  kind: 'fill' | 'stroke',
+  color: RGBA,
+  wholeSet: boolean,
+): void {
+  const s = draft.strands[name];
+  if (!s) return;
+  const apply = (t: StrandRecord) => {
+    if (kind === 'fill') t.color = { ...color };
+    else t.stroke_color = { ...color };
+  };
+  if (wholeSet) {
+    for (const k of Object.keys(draft.strands)) {
+      const t = draft.strands[k];
+      if (t.type !== 'MaskedStrand' && t.set_number === s.set_number) apply(t);
+    }
+  } else {
+    apply(s);
+  }
+}
+
+// Set fill width or stroke width, optionally across the whole set.
+export function setWidth(
+  draft: EditorDocument,
+  name: string,
+  kind: 'width' | 'stroke_width',
+  value: number,
+  wholeSet: boolean,
+): void {
+  const s = draft.strands[name];
+  if (!s) return;
+  const apply = (t: StrandRecord) => { t[kind] = value; };
+  if (wholeSet) {
+    for (const k of Object.keys(draft.strands)) {
+      const t = draft.strands[k];
+      if (t.type !== 'MaskedStrand' && t.set_number === s.set_number) apply(t);
+    }
+  } else {
+    apply(s);
+  }
+}
+
+export function setShadowOnly(draft: EditorDocument, name: string, value: boolean): void {
+  const s = draft.strands[name];
+  if (s) s.shadow_only = value;
+}
+
+// Dev-only debug handle for testing actions directly.
+if (import.meta.env?.DEV) {
+  (globalThis as Record<string, unknown>).__actions = {
+    moveHandle, addNewStrand, attachChild, createMask, addDeletionRect, resetMask,
+    deleteStrand, deleteAllStrands, reorderLayer, toggleHidden, toggleLock,
+    setColor, setWidth, setShadowOnly,
+  };
+}
+
 export function toggleLock(draft: EditorDocument, name: string): void {
   const i = draft.locked_layers.indexOf(name);
   if (i >= 0) draft.locked_layers.splice(i, 1);

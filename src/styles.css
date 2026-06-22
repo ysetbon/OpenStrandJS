@@ -51,6 +51,21 @@ body { font: 14px/1.4 system-ui, -apple-system, sans-serif; color: #1a1a1a; }
 .lp-row.locked { filter: grayscale(.4); }
 .lp-name { font-weight: 600; }
 .lp-row-actions { display: flex; gap: 1px; }
+
+.props { border-top: 1px solid #e2e2e2; padding: 8px 10px; font-size: 12px; display: flex; flex-direction: column; gap: 6px; }
+.props.empty { color: #999; }
+.props-title { font-weight: 600; }
+.props-hint { color: #888; }
+.cf { display: flex; align-items: center; gap: 6px; }
+.cf-label { width: 42px; color: #555; }
+.cf input[type=color] { width: 30px; height: 22px; padding: 0; border: 1px solid #ccc; border-radius: 4px; background: none; }
+.cf input[type=range] { flex: 1; }
+.cf-a { width: 26px; text-align: right; color: #666; }
+.props-row { display: flex; align-items: center; gap: 6px; }
+.props-row span { width: 42px; color: #555; }
+.props-row input[type=range] { flex: 1; }
+.props-row b { width: 26px; text-align: right; }
+.props-check { display: flex; align-items: center; gap: 6px; color: #555; }
 #c, #overlay { position: absolute; top: 0; left: 0; }
 #c { background: #fff; touch-action: none; }
 #overlay { pointer-events: none; }

@@ -5,6 +5,7 @@ import {
 } from '../store/actions';
 import { maskComponents } from '../model/layerName';
 import { screenToWorld } from '../interaction/viewTransform';
+import { StrandProperties } from './StrandProperties';
 import type { RGBA } from '../model/types';
 
 const rgba = (c: RGBA) => `rgba(${c.r},${c.g},${c.b},${(c.a ?? 255) / 255})`;
@@ -95,6 +96,8 @@ export function LayerPanel() {
           );
         })}
       </div>
+
+      <StrandProperties />
     </div>
   );
 }
