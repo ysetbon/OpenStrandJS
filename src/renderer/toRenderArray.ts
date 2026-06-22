@@ -16,6 +16,11 @@ export function toRenderArray(doc: EditorDocument): RenderStrand[] {
     const s = doc.strands[name];
     if (!s) continue;
     if (s.is_hidden) continue;
+    // Side-line / cap flags live in the model's `extra` passthrough bag (see
+    // factory.ts); the renderer reads them as top-level strand props, so surface
+    // them here. Without this the renderer never draws flat-end side lines and
+    // can't honor closed/unfolded cap state in the editor.
+    const ex = (s.extra ?? {}) as Record<string, unknown>;
     const r: RenderStrand = {
       type: s.type,
       layer_name: s.layer_name,
@@ -29,6 +34,14 @@ export function toRenderArray(doc: EditorDocument): RenderStrand[] {
       control_points: s.control_points,
       control_point_center: s.control_point_center,
       control_point_center_locked: s.control_point_center_locked,
+      start_line_visible: ex.start_line_visible as boolean | undefined,
+      end_line_visible: ex.end_line_visible as boolean | undefined,
+      closed_connections: ex.closed_connections as [boolean, boolean] | undefined,
+      manual_circle_visibility: ex.manual_circle_visibility as [boolean | null, boolean | null] | undefined,
+      circle_stroke_color: s.circle_stroke_color,
+      start_circle_stroke_color: (ex.start_circle_stroke_color as RenderStrand['start_circle_stroke_color']) ?? s.circle_stroke_color,
+      end_circle_stroke_color: (ex.end_circle_stroke_color as RenderStrand['end_circle_stroke_color']) ?? s.circle_stroke_color,
+      is_setting_staring_circle: ex.is_setting_staring_circle as boolean | undefined,
     };
     if (s.type === 'MaskedStrand') r.deletion_rectangles = s.deletion_rectangles ?? [];
     out.push(r);

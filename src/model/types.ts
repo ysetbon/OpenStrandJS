@@ -138,6 +138,16 @@ export interface RenderStrand {
   control_point_center: Point | null;
   control_point_center_locked: boolean;
   deletion_rectangles?: DeletionRect[];
+  // Cap / side-line inputs the renderer reads (flat-end side lines, closed-knot
+  // caps, folded/unfolded state, has_circles recompute).
+  start_line_visible?: boolean;
+  end_line_visible?: boolean;
+  closed_connections?: [boolean, boolean];
+  manual_circle_visibility?: [boolean | null, boolean | null];
+  circle_stroke_color?: RGBA | null;
+  start_circle_stroke_color?: RGBA | null;
+  end_circle_stroke_color?: RGBA | null;
+  is_setting_staring_circle?: boolean;
 }
 
 export interface RenderMeta {
