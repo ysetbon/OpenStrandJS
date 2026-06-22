@@ -33,7 +33,9 @@ export function strandHandles(s: StrandRecord): { handle: HandleKind; pos: Point
   }
   const [cp1, cp2] = s.control_points;
   if (sep(cp1, s.start, s.end)) out.push({ handle: 'control_point1', pos: cp1 });
-  if (sep(cp2, s.start, s.end)) out.push({ handle: 'control_point2', pos: cp2 });
+  // cp2 (the "circle") appears once cp1 has first moved (control_point2_shown),
+  // or whenever it already sits away from the endpoints (loaded curves stay editable).
+  if (s.control_point2_shown || sep(cp2, s.start, s.end)) out.push({ handle: 'control_point2', pos: cp2 });
   out.push({ handle: 'start', pos: s.start });
   out.push({ handle: 'end', pos: s.end });
   return out;

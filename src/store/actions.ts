@@ -38,27 +38,56 @@ export function moveHandle(
   const s = draft.strands[layerName];
   if (!s) return;
 
-  if (handle === 'control_point1') { s.control_points[0] = pos; s.triangle_has_moved = true; return; }
-  if (handle === 'control_point2') { s.control_points[1] = pos; s.control_point2_activated = true; return; }
-  if (handle === 'control_point_center') { s.control_point_center = pos; return; }
+  // The center is the cp midpoint unless it has been pinned (locked).
+  const recenter = (t: StrandRecord) => {
+    if (!t.control_point_center_locked) {
+      t.control_point_center = {
+        x: (t.control_points[0].x + t.control_points[1].x) / 2,
+        y: (t.control_points[0].y + t.control_points[1].y) / 2,
+      };
+    }
+  };
 
-  // Endpoint move: rigid propagation across the weld group.
+  if (handle === 'control_point1') {
+    s.control_points[0] = pos;
+    s.triangle_has_moved = true;
+    s.control_point2_shown = true;        // cp1's first move reveals cp2 (passive -> shown)
+    recenter(s);
+    return;
+  }
+  if (handle === 'control_point2') {
+    s.control_points[1] = pos;
+    s.control_point2_activated = true;    // dragging cp2 makes it independent
+    recenter(s);
+    return;
+  }
+  if (handle === 'control_point_center') {
+    // Dragging the third control point pins it; the renderer then uses the
+    // 3-point profile and the center no longer tracks the cp midpoint.
+    s.control_point_center = pos;
+    s.control_point_center_locked = true;
+    return;
+  }
+
+  // Endpoint move: faithful port of update_end -- a control point follows its
+  // endpoint ONLY when it sits at that endpoint's default (coincident) position;
+  // a manually-placed control point stays put so the curve reshapes. Welded
+  // peers move with it. Center is recomputed as the cp midpoint unless pinned.
   const cur = handle === 'start' ? s.start : s.end;
   const delta = { x: pos.x - cur.x, y: pos.y - cur.y };
   if (delta.x === 0 && delta.y === 0) return;
+  const EPS = 1e-3;
 
   for (const ep of weldedEndpoints(draft, layerName, handle)) {
     const t = draft.strands[ep.layer];
     if (!t) continue;
     const pt = ep.end === 'start' ? t.start : t.end;
+    const old = { x: pt.x, y: pt.y };
     pt.x += delta.x; pt.y += delta.y;
-    // Carry the associated control point so straight strands stay straight and
-    // curves keep their shape relative to the moved end.
     const cpIdx = ep.end === 'start' ? 0 : 1;
-    t.control_points[cpIdx] = { x: t.control_points[cpIdx].x + delta.x, y: t.control_points[cpIdx].y + delta.y };
-    if (t.control_point_center) {
-      t.control_point_center = { x: t.control_point_center.x + delta.x * 0.5, y: t.control_point_center.y + delta.y * 0.5 };
-    }
+    const cp = t.control_points[cpIdx];
+    if (Math.hypot(cp.x - old.x, cp.y - old.y) < EPS) { cp.x += delta.x; cp.y += delta.y; }
+    recenter(t);
   }
 }
 
