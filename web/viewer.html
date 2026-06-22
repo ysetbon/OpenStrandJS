@@ -1,0 +1,90 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>OpenStrandJS — live viewer</title>
+  <style>
+    :root { color-scheme: light; }
+    body { margin: 0; font: 14px/1.4 system-ui, sans-serif; color: #1a1a1a; background: #f5f5f5; }
+    header { padding: 14px 20px; background: #fff; border-bottom: 1px solid #ddd; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+    header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+    select { font-size: 14px; padding: 4px 8px; }
+    .match { font-weight: 600; }
+    .match b { font-size: 18px; }
+    main { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; padding: 20px; }
+    .panel { background: #fff; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; }
+    .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #666; margin: 0; padding: 10px 12px; border-bottom: 1px solid #eee; }
+    .panel .body { padding: 12px; display: flex; align-items: center; justify-content: center; min-height: 200px; background:
+      repeating-conic-gradient(#fafafa 0% 25%, #fff 0% 50%) 50% / 20px 20px; }
+    .panel img, .panel canvas { max-width: 100%; height: auto; display: block; box-shadow: 0 1px 4px rgba(0,0,0,.1); background: #fff; }
+    .note { padding: 8px 20px 20px; color: #777; }
+    code { background: #eee; padding: 1px 5px; border-radius: 4px; }
+    .live h2 { color: #0a7d22; }
+  </style>
+  <script src="../node_modules/paper/dist/paper-full.min.js"></script>
+  <script src="strand-renderer.js"></script>
+</head>
+<body>
+  <header>
+    <h1>OpenStrandJS — live viewer</h1>
+    <label>Fixture:
+      <select id="fixture"></select>
+    </label>
+    <span class="match" id="match"></span>
+    <span style="color:#888">rendered live in your browser by <code>strand-renderer.js</code></span>
+  </header>
+
+  <main>
+    <div class="panel live">
+      <h2>JS render (live, in-browser)</h2>
+      <div class="body"><canvas id="c"></canvas></div>
+    </div>
+    <div class="panel">
+      <h2>Qt reference (ground truth)</h2>
+      <div class="body"><img id="ref" alt="reference" /></div>
+    </div>
+    <div class="panel">
+      <h2>Pixel diff (red = mismatch)</h2>
+      <div class="body"><img id="diff" alt="diff" /></div>
+    </div>
+  </main>
+  <p class="note">The left panel is computed on the fly from the fixture JSON — no pre-baked image. Middle is the real OpenStrand Studio (Qt) render; right is the <code>pixelmatch</code> diff. Match % is the AA-ignored pixel agreement.</p>
+
+  <script>
+    const FIXTURES = [
+      { name: 'single_strand', label: 'Single strand', match: '99.68%' },
+      { name: 'three_strand_braid', label: 'Three-strand braid', match: '97.85%' },
+      { name: 'overhand_knot', label: 'Overhand knot', match: '98.10%' },
+      { name: 'closed_knot', label: 'Closed knot', match: '98.80%' },
+    ];
+
+    const sel = document.getElementById('fixture');
+    for (const f of FIXTURES) {
+      const o = document.createElement('option');
+      o.value = f.name; o.textContent = f.label;
+      sel.appendChild(o);
+    }
+
+    async function load(name) {
+      const f = FIXTURES.find((x) => x.name === name);
+      document.getElementById('match').innerHTML = 'match: <b>' + f.match + '</b>';
+      document.getElementById('ref').src = '../artifacts/' + name + '/reference.png?t=' + Date.now();
+      document.getElementById('diff').src = '../artifacts/' + name + '/diff.png?t=' + Date.now();
+
+      const [fixture, meta] = await Promise.all([
+        fetch('../fixtures/' + name + '.json').then((r) => r.json()),
+        fetch('../artifacts/' + name + '/reference.meta.json').then((r) => r.json()),
+      ]);
+      const strands = window.extractStrands(fixture);
+      window.renderFixture(strands, meta);
+      // Let the renderer keep its W x H backing store but scale the display to fit.
+      const c = document.getElementById('c');
+      c.style.width = '100%';
+      c.style.height = 'auto';
+    }
+
+    sel.addEventListener('change', () => load(sel.value));
+    load(FIXTURES[0].name);
+  </script>
+</body>
+</html>
