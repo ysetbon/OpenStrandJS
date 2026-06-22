@@ -7,6 +7,7 @@
 
 import type { EditorDocument, HandleKind, Point, Settings, StrandRecord } from '../model/types';
 import { distToPolyline, sampleCenterline } from './hitGeometry';
+import { maskComponents } from '../model/layerName';
 
 export type HitResult =
   | { kind: 'handle'; layerName: string; handle: HandleKind }
@@ -63,4 +64,30 @@ export function hitTest(world: Point, doc: EditorDocument, settings: Settings): 
     if (distToPolyline(world, poly) <= reach) return { kind: 'body', layerName: name };
   }
   return null;
+}
+
+// Topmost MaskedStrand whose overlap region contains `world`. The overlap is
+// approximated as "inside both component bodies" (the renderer's exact region is
+// first.stroked ∩ second.stroked, but body containment is enough to grab a mask).
+export function maskHitTest(world: Point, doc: EditorDocument, settings: Settings): string | null {
+  for (const name of [...doc.order].reverse()) {
+    const s = doc.strands[name];
+    if (!s || s.type !== 'MaskedStrand' || s.is_hidden) continue;
+    const comp = maskComponents(name);
+    if (!comp) continue;
+    const a = doc.strands[comp.first], b = doc.strands[comp.second];
+    if (!a || !b) continue;
+    // Match the renderer's mask region: first.stroked(width) ∩
+    // second.stroked(width + 2*stroke + 4) -> first uses ±width/2, second is
+    // expanded by stroke + 2 on each side.
+    const inA = distToPolyline(world, sampleCenterline(a, settings.curve_params)) <= a.width / 2 + 1;
+    const inB = distToPolyline(world, sampleCenterline(b, settings.curve_params)) <= b.width / 2 + b.stroke_width + 3;
+    if (inA && inB) return name;
+  }
+  return null;
+}
+
+// Dev-only debug handle for hit-testing.
+if (import.meta.env?.DEV) {
+  (globalThis as Record<string, unknown>).__hit = { hitTest, maskHitTest };
 }

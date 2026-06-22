@@ -17,6 +17,7 @@ export interface OverlayState {
   hover: { layerName: string | null; handle: HandleKind | null };
   pending: PendingStrand | null;
   maskPending: string[];
+  eraser: { layerName: string; rect: { minX: number; minY: number; maxX: number; maxY: number } } | null;
 }
 
 const ENDPOINT_COLOR = '#0a7d22';
@@ -63,6 +64,20 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, st: OverlayState): vo
 
   // Mask-pending: highlight already-picked strands.
   for (const layer of st.maskPending) highlightCenterline(ctx, st, layer, MASK_COLOR);
+
+  // Mask-edit eraser rectangle.
+  if (st.eraser) {
+    const r = st.eraser.rect;
+    const a = worldToScreen({ x: r.minX, y: r.minY }, view);
+    const b = worldToScreen({ x: r.maxX, y: r.maxY }, view);
+    ctx.save();
+    ctx.fillStyle = 'rgba(232,101,26,0.18)';
+    ctx.fillRect(a.x, a.y, b.x - a.x, b.y - a.y);
+    ctx.setLineDash([6, 4]);
+    ctx.lineWidth = 2; ctx.strokeStyle = HOT_COLOR;
+    ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
+    ctx.restore();
+  }
 
   // New-strand / attach rubber-band preview.
   if (st.pending) {

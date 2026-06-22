@@ -61,6 +61,7 @@ export interface EditorState {
   hover: { layerName: string | null; handle: HandleKind | null };
   pending: PendingStrand | null;     // new-strand / attach rubber-band preview
   maskPending: string[];             // 0..2 strands picked for an over/under mask
+  eraser: { layerName: string; rect: { minX: number; minY: number; maxX: number; maxY: number } } | null;
   // bumped whenever the document changes so subscribers can re-render the canvas
   docRevision: number;
 
@@ -74,6 +75,7 @@ export interface EditorState {
   setHover: (hover: { layerName: string | null; handle: HandleKind | null }) => void;
   setPending: (pending: PendingStrand | null) => void;
   setMaskPending: (maskPending: string[]) => void;
+  setEraser: (eraser: EditorState['eraser']) => void;
 }
 
 // Shallow structural clone of a document (snapshots stay JSON-serializable
@@ -92,6 +94,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   hover: { layerName: null, handle: null },
   pending: null,
   maskPending: [],
+  eraser: null,
   docRevision: 0,
 
   loadDocument: (doc) => set((s) => ({
@@ -115,6 +118,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setHover: (hover) => set({ hover }),
   setPending: (pending) => set({ pending }),
   setMaskPending: (maskPending) => set({ maskPending }),
+  setEraser: (eraser) => set({ eraser }),
 }));
 
 // Convenience accessor for imperative (non-React) code.

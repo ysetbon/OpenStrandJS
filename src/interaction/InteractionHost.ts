@@ -91,6 +91,9 @@ export class InteractionHost {
       return;
     }
     this.mode().onPointerMove(this.info(e), this.ctx());
+    // Cursor feedback: show a grab cursor when a handle is under the pointer.
+    const hov = useEditorStore.getState().hover;
+    this.el.style.cursor = hov.handle ? 'grab' : this.mode().cursor;
   };
 
   private onPointerUp = (e: PointerEvent) => {

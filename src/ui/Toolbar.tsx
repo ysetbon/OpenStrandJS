@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import { loadProject, serializeProject } from '../io/saveLoad';
 import { downloadJSON } from '../io/fileDialog';
+import { resetMask } from '../store/actions';
 import { fitPan } from '../interaction/viewTransform';
 import type { ModeName } from '../model/types';
 
@@ -14,6 +15,10 @@ export function Toolbar() {
   const setMode = useEditorStore((s) => s.setMode);
   const shadowEnabled = useEditorStore((s) => s.doc.shadow_enabled);
   const mutateDoc = useEditorStore((s) => s.mutateDoc);
+  const selectedMask = useEditorStore((s) => {
+    const n = s.selection.layerName;
+    return n && s.doc.strands[n]?.type === 'MaskedStrand' ? n : null;
+  });
 
   function applyDoc(json: unknown) {
     const doc = loadProject(json);
@@ -64,6 +69,10 @@ export function Toolbar() {
           </button>
         ))}
       </div>
+
+      {selectedMask && (
+        <button onClick={() => mutateDoc((d) => resetMask(d, selectedMask))}>Reset mask</button>
+      )}
 
       <span className="spacer" />
 

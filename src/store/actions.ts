@@ -126,6 +126,31 @@ export function attachChild(
   return layer_name;
 }
 
+// Add an eraser rectangle (world space) to a mask's deletion_rectangles. The
+// renderer subtracts these from the over/under overlap, revealing the under
+// strand. Stored in the desktop's corner-array format (absolute coords).
+export function addDeletionRect(
+  draft: EditorDocument,
+  maskLayer: string,
+  rect: { minX: number; minY: number; maxX: number; maxY: number },
+): void {
+  const m = draft.strands[maskLayer];
+  if (!m || m.type !== 'MaskedStrand') return;
+  if (!m.deletion_rectangles) m.deletion_rectangles = [];
+  m.deletion_rectangles.push({
+    top_left: [rect.minX, rect.minY],
+    top_right: [rect.maxX, rect.minY],
+    bottom_left: [rect.minX, rect.maxY],
+    bottom_right: [rect.maxX, rect.maxY],
+  });
+}
+
+// Reset a mask to the full intersection (drop all eraser rectangles).
+export function resetMask(draft: EditorDocument, maskLayer: string): void {
+  const m = draft.strands[maskLayer];
+  if (m && m.type === 'MaskedStrand') m.deletion_rectangles = [];
+}
+
 // Create an over/under MaskedStrand from two existing strands. `first` is OVER,
 // `second` is UNDER. layer_name concatenates the components ("a_b_c_d"). The
 // renderer resolves components by name, so the mask inherits the first strand's
