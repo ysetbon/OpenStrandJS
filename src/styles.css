@@ -77,6 +77,15 @@ body { font: 14px/1.4 system-ui, -apple-system, sans-serif; color: #1a1a1a; }
 .props-row b { width: 26px; text-align: right; }
 .props-check { display: flex; align-items: center; gap: 6px; color: #555; }
 
+.groups { border-top: 1px solid #e2e2e2; padding: 8px 10px; font-size: 12px; }
+.groups-head { display: flex; align-items: center; justify-content: space-between; font-weight: 600; margin-bottom: 4px; }
+.groups-head button, .group-nudge button { border: 1px solid #ccc; background: #fff; border-radius: 5px; cursor: pointer; padding: 2px 6px; font-size: 12px; }
+.groups-head button:disabled { opacity: .4; cursor: default; }
+.group-row { display: flex; align-items: center; justify-content: space-between; padding: 3px 0; }
+.group-nudge { display: flex; gap: 1px; }
+.theme-dark .groups { border-color: #3a3a40; }
+.theme-dark .groups-head button, .theme-dark .group-nudge button { background: #33333a; color: #ddd; border-color: #44444c; }
+
 /* settings modal */
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .modal { background: #fff; border-radius: 10px; padding: 18px 20px; min-width: 320px; box-shadow: 0 10px 40px rgba(0,0,0,.3); display: flex; flex-direction: column; gap: 8px; }

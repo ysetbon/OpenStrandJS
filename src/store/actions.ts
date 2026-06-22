@@ -260,12 +260,59 @@ export function setShadowOnly(draft: EditorDocument, name: string, value: boolea
   if (s) s.shadow_only = value;
 }
 
+// ---- groups (Phase 6f, minimal) ----
+// A group is stored as { main_strands: layer_names } under doc.groups[name].
+// Membership here is "every non-masked strand sharing a set_number" (the
+// branch-prefix "<set>_*" family).
+interface GroupRecord { main_strands: string[] }
+
+export function createGroupFromSet(draft: EditorDocument, setNumber: number): string | null {
+  const members = Object.keys(draft.strands).filter(
+    (k) => draft.strands[k].type !== 'MaskedStrand' && draft.strands[k].set_number === setNumber,
+  );
+  if (!members.length) return null;
+  const name = `set ${setNumber}`;
+  (draft.groups as Record<string, GroupRecord>)[name] = { main_strands: members };
+  return name;
+}
+
+export function deleteGroup(draft: EditorDocument, name: string): void {
+  delete (draft.groups as Record<string, unknown>)[name];
+}
+
+// Translate every member strand (and the deletion rectangles of masks wholly
+// inside the group) by (dx, dy) — moving the group as a rigid unit.
+export function translateGroup(draft: EditorDocument, name: string, dx: number, dy: number): void {
+  const g = (draft.groups as Record<string, GroupRecord>)[name];
+  if (!g) return;
+  const members = new Set(g.main_strands || []);
+  const move = (p: Point | null | undefined) => { if (p) { p.x += dx; p.y += dy; } };
+  for (const layer of members) {
+    const s = draft.strands[layer];
+    if (!s) continue;
+    move(s.start); move(s.end);
+    move(s.control_points[0]); move(s.control_points[1]); move(s.control_point_center);
+  }
+  for (const k of Object.keys(draft.strands)) {
+    const m = draft.strands[k];
+    if (m.type !== 'MaskedStrand') continue;
+    const comp = maskComponents(k);
+    if (!comp || !members.has(comp.first) || !members.has(comp.second)) continue;
+    for (const r of m.deletion_rectangles || []) {
+      for (const c of [r.top_left, r.top_right, r.bottom_left, r.bottom_right]) if (c) { c[0] += dx; c[1] += dy; }
+      if (r.x != null) { r.x += dx; }
+      if (r.y != null) { r.y += dy; }
+    }
+  }
+}
+
 // Dev-only debug handle for testing actions directly.
 if (import.meta.env?.DEV) {
   (globalThis as Record<string, unknown>).__actions = {
     moveHandle, addNewStrand, attachChild, createMask, addDeletionRect, resetMask,
     deleteStrand, deleteAllStrands, reorderLayer, toggleHidden, toggleLock,
     setColor, setWidth, setShadowOnly,
+    createGroupFromSet, deleteGroup, translateGroup,
   };
 }
 

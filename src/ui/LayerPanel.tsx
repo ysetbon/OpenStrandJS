@@ -1,7 +1,8 @@
 import { useRef } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import {
-  addNewStrand, deleteAllStrands, deleteStrand, reorderLayer, toggleHidden, toggleLock,
+  addNewStrand, createGroupFromSet, deleteAllStrands, deleteGroup, deleteStrand,
+  reorderLayer, toggleHidden, toggleLock, translateGroup,
 } from '../store/actions';
 import { maskComponents } from '../model/layerName';
 import { screenToWorld } from '../interaction/viewTransform';
@@ -99,7 +100,43 @@ export function LayerPanel() {
         })}
       </div>
 
+      <GroupsSection />
       <StrandProperties />
+    </div>
+  );
+}
+
+// Minimal groups: create a group from the selected strand's set (the "<set>_*"
+// family), then nudge the whole group by the grid step (one undo step each).
+function GroupsSection() {
+  const groups = useEditorStore((s) => s.doc.groups) as Record<string, { main_strands: string[] }>;
+  const selName = useEditorStore((s) => s.selection.layerName);
+  const strands = useEditorStore((s) => s.doc.strands);
+  const grid = useEditorStore((s) => s.settings.grid_size);
+  const commitEdit = useEditorStore((s) => s.commitEdit);
+  const selSet = selName && strands[selName] ? strands[selName].set_number : null;
+  const names = Object.keys(groups || {});
+
+  return (
+    <div className="groups">
+      <div className="groups-head">
+        <span>Groups</span>
+        <button disabled={selSet == null} onClick={() => selSet != null && commitEdit((d) => createGroupFromSet(d, selSet))}>
+          Group set
+        </button>
+      </div>
+      {names.map((n) => (
+        <div key={n} className="group-row">
+          <span className="group-name">{n}</span>
+          <span className="group-nudge">
+            <button title="left" onClick={() => commitEdit((d) => translateGroup(d, n, -grid, 0))}>←</button>
+            <button title="right" onClick={() => commitEdit((d) => translateGroup(d, n, grid, 0))}>→</button>
+            <button title="up" onClick={() => commitEdit((d) => translateGroup(d, n, 0, -grid))}>↑</button>
+            <button title="down" onClick={() => commitEdit((d) => translateGroup(d, n, 0, grid))}>↓</button>
+            <button title="delete group" onClick={() => commitEdit((d) => deleteGroup(d, n))}>✕</button>
+          </span>
+        </div>
+      ))}
     </div>
   );
 }
