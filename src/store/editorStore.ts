@@ -5,7 +5,7 @@
 
 import { create } from 'zustand';
 import type {
-  EditorDocument, ModeName, Selection, Settings, StrandRecord, ViewState,
+  EditorDocument, HandleKind, ModeName, Selection, Settings, StrandRecord, ViewState,
 } from '../model/types';
 import {
   DEFAULT_STRAND_COLOR, DEFAULT_STROKE_COLOR,
@@ -48,6 +48,7 @@ export interface EditorState {
   view: ViewState;
   settings: Settings;
   dragging: boolean;
+  hover: { layerName: string | null; handle: HandleKind | null };
   // bumped whenever the document changes so subscribers can re-render the canvas
   docRevision: number;
 
@@ -58,6 +59,7 @@ export interface EditorState {
   setMode: (mode: ModeName) => void;
   setSelection: (sel: Selection) => void;
   setDragging: (b: boolean) => void;
+  setHover: (hover: { layerName: string | null; handle: HandleKind | null }) => void;
 }
 
 // Shallow structural clone of a document (snapshots stay JSON-serializable
@@ -73,6 +75,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   view: { ...DEFAULT_VIEW },
   settings: DEFAULT_SETTINGS,
   dragging: false,
+  hover: { layerName: null, handle: null },
   docRevision: 0,
 
   loadDocument: (doc) => set((s) => ({
@@ -93,8 +96,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setMode: (mode) => set({ mode }),
   setSelection: (selection) => set({ selection }),
   setDragging: (dragging) => set({ dragging }),
+  setHover: (hover) => set({ hover }),
 }));
 
 // Convenience accessor for imperative (non-React) code.
 export const editorStore = useEditorStore;
 export type { StrandRecord };
+
+// Dev-only debug handle.
+if (import.meta.env?.DEV) (globalThis as Record<string, unknown>).__store = useEditorStore;

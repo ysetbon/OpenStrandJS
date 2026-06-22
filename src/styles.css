@@ -23,5 +23,5 @@ body { font: 14px/1.4 system-ui, -apple-system, sans-serif; color: #1a1a1a; }
   background: repeating-conic-gradient(#fafafa 0% 25%, #fff 0% 50%) 50% / 24px 24px;
 }
 #c, #overlay { position: absolute; top: 0; left: 0; }
-#c { background: #fff; }
+#c { background: #fff; touch-action: none; }
 #overlay { pointer-events: none; }

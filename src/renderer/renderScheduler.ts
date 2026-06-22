@@ -41,6 +41,11 @@ export function requestOverlay(): void {
   requestAnimationFrame(() => { scheduled = false; syncOverlay(); });
 }
 
+if (import.meta.env?.DEV) {
+  (globalThis as Record<string, unknown>).__requestOverlay = () => requestOverlay();
+  (globalThis as Record<string, unknown>).__requestRender = () => requestRender();
+}
+
 export function requestRender(): void {
   if (scheduled) return;
   scheduled = true;
