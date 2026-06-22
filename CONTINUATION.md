@@ -48,9 +48,18 @@ cp midpoint unless pinned), cp2 passive→active state machine
 cursor on handle hover, and the mask-edit eraser (drag inside a mask's overlap
 to add a deletion rectangle; "Reset mask" clears them).
 
-**Next:** Phase 3 (layer panel), then 4 (per-layer color/toggles), 5 (undo/redo),
-6 (rotate/settings/zoom/tabs/groups/export) per `EDITOR_PLAN.md` — 3, 4, 6 are
-workflow-parallelizable.
+**Phase 3 DONE** (133f721): layer panel — reversed list, click-to-select (two-way
+sync), DnD z-order reorder, per-row hide/lock/delete (delete cascades attached
+descendants + masks), Add / Deselect / Delete All.
+
+**Phase 4 DONE** (990031c): StrandProperties panel — fill/stroke RGBA picker
+(ColorField = native color input + alpha slider), width/stroke sliders, "apply to
+whole set" propagation (by set_number), shadow_only; masked rows get Reset mask.
+(Arrow/line/extension/circle toggles deferred — renderer doesn't draw them yet.)
+
+**Next:** Phase 5 (undo/redo + areVisuallyEqual dedup), then 6 (rotate/angle,
+settings+i18n, full zoom/pan via the one additive `meta.zoom`/`meta.pan` renderer
+edit, tabs, groups, PNG export).
 
 ---
 
