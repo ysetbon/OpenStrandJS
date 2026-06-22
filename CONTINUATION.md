@@ -3,6 +3,51 @@
 Fidelity-first JS/Canvas port of OpenStrand Studio. The Qt app
 (`../OpenStrandStudio`) is the spec; its headless render is the pixel oracle.
 
+## Interactive editor — Phase 1 MVP **DONE** (TS + React + Vite + Zustand)
+
+Architecture and roadmap in `EDITOR_PLAN.md`. The editor reuses the verified
+`web/strand-renderer.js` UNCHANGED (one harness-safe fix: `hidpi="off"` on the
+offscreen canvas so paper.js doesn't double-apply devicePixelRatio at DPR != 1).
+
+**Run it:**
+```
+npm install      # first time (adds react, vite, zustand)
+npm run dev      # Vite dev server, opens http://localhost:5173
+```
+Toolbar: mode buttons (select / move / attach / mask), shadows toggle, sample
+fixtures, Load…, Save. Pan = middle/right-drag or space+drag or wheel.
+
+**What works (all verified in a real browser + deterministic pointer-event tests):**
+- Load a real OpenStrandStudio `.json` (bare or `OpenStrandStudioHistory` wrapper)
+  and render it pixel-faithfully; live shadow toggle.
+- Select (click body/handle); Move endpoints (attached strands follow rigidly via
+  the weld graph) and control points (curve reshapes live).
+- Draw a new strand (45-degree locked first-of-set) and attach a child from a free
+  endpoint (lowest-free layer_name, parent endpoint marked occupied).
+- Two-click over/under mask -> `MaskedStrand` "a_b_c_d" appended on top.
+- **Save** -> authentic JSON. Round-trip is field-identical + idempotent for all
+  fixtures, and the real Qt loader renders an editor-saved file PIXEL-IDENTICAL to
+  the original (overhand_knot: 0 diff pixels). Editor saves re-open in `main.py`.
+
+**Editor source layout** (`src/`): `model/` (types, factory, layerName),
+`store/` (editorStore, actions), `renderer/` (rendererBridge, toRenderArray,
+renderScheduler), `interaction/` (viewTransform, InteractionHost, hitTest,
+hitGeometry, connections), `modes/` (Select/Move/Attach/Mask), `overlay/`, `io/`
+(saveLoad, fileDialog), `ui/` (App/CanvasStage/Toolbar).
+
+**Editor gotchas:** the render uses `requestAnimationFrame` (throttled in a
+backgrounded tab — headless probes must foreground or check store state, which
+mutates synchronously). MCP screenshots are scaled NON-uniformly vs the real
+client, so target pointer events by transform-computed client coords, not by
+eyeballing screenshots. Dev-only `window.__store` / `__io` debug handles exist.
+
+**Next:** Phase 2 (curve handle state machine, hover/cursor polish, mask-edit
+eraser). Phases 3+ (layer panel, per-layer color/toggles, undo/redo, rotate/
+settings/zoom/tabs/groups/export) per `EDITOR_PLAN.md` — 3, 4, 6 are
+workflow-parallelizable.
+
+---
+
 ## Current fidelity (pixelmatch, AA-ignored, vs Qt @ 2x supersample)
 
 | fixture | match | notes |
