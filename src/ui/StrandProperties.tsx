@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
-import { resetMask, setColor, setShadowOnly, setWidth } from '../store/actions';
+import { moveHandle, resetMask, setColor, setShadowOnly, setWidth } from '../store/actions';
 import { ColorField } from './ColorField';
 
 // Editor for the selected strand: fill/stroke color (RGBA), width + stroke width,
@@ -23,9 +23,32 @@ export function StrandProperties() {
     );
   }
 
+  // Angle/Length: rotate the end around the start (length preserved when only
+  // the angle changes). Routed through moveHandle so attached children follow.
+  const dx = strand.end.x - strand.start.x;
+  const dy = strand.end.y - strand.start.y;
+  const angle = Math.round(Math.atan2(dy, dx) * 180 / Math.PI);
+  const length = Math.round(Math.hypot(dx, dy));
+  const setAngleLen = (angDeg: number, len: number) => {
+    const rad = (angDeg * Math.PI) / 180;
+    const end = { x: strand.start.x + len * Math.cos(rad), y: strand.start.y + len * Math.sin(rad) };
+    commitEdit((d) => moveHandle(d, name, 'end', end));
+  };
+
   return (
     <div className="props">
       <div className="props-title">{name} · set {strand.set_number}</div>
+      <label className="props-row">
+        <span>Angle</span>
+        <input type="number" value={angle} step={1}
+          onChange={(e) => setAngleLen(Number(e.target.value), length)} />
+        <span style={{ width: 'auto' }}>°</span>
+      </label>
+      <label className="props-row">
+        <span>Length</span>
+        <input type="number" value={length} min={1} step={1}
+          onChange={(e) => setAngleLen(angle, Math.max(1, Number(e.target.value)))} />
+      </label>
       <ColorField label="Fill" value={strand.color} onChange={(c) => commitEdit((d) => setColor(d, name, 'fill', c, wholeSet))} />
       <ColorField label="Stroke" value={strand.stroke_color} onChange={(c) => commitEdit((d) => setColor(d, name, 'stroke', c, wholeSet))} />
       <label className="props-row">
