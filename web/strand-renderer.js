@@ -21,6 +21,15 @@ function toColor(c) {
 // into meta.curve_params. Defaults match the braid fixtures.
 let CURVE = { base_fraction: 1.0, dist_multiplier: 2.0, exponent: 2.0 };
 
+// Centerline sampling step (px) used to build stroked outlines. renderFixture (the
+// pixel oracle) always uses 1 (~1px, full accuracy). The interactive drag path sets
+// it coarser via DRAG_SAMPLE_STEP so a long curvy strand isn't sampled thousands of
+// times per frame; the body is a hair less smooth mid-drag and snaps back to full
+// accuracy on pointer-up. Only _dragPaint raises it, and renderFixture resets it to
+// 1 on entry, so the harness output is unaffected.
+let SAMPLE_STEP = 1;
+const DRAG_SAMPLE_STEP = 3;
+
 // Shadow parameters (canvas defaults): default_shadow_color (0,0,0,150) and
 // max_blur_radius 30. A strand casts a shadow onto every lower-ordered strand
 // as (over-body expanded by blur) ∩ (under-body), drawn just under the over
@@ -105,7 +114,7 @@ function strokedOutline(centerline, width) {
   const len = centerline.length;
   if (len === 0 || width <= 0) return null;
   const half = width / 2;
-  const N = Math.max(8, Math.ceil(len)); // ~1px sampling
+  const N = Math.max(8, Math.ceil(len / SAMPLE_STEP)); // ~1px sampling (coarser while dragging)
   const left = [], right = [];
   for (let i = 0; i <= N; i++) {
     const off = Math.min(len * i / N, len - 1e-4);
@@ -363,7 +372,87 @@ function bodyLayers(s, P, enableThird, S, centerline) {
   return { stroke, fill };
 }
 
+// Selection highlight — faithful port of strand.py::_draw_unified_highlight /
+// attached_strand.py::_draw_unified_highlight. Drawn UNDER the body (drawStrand
+// paints the body fill+stroke over it, exactly as OSS draws the highlight at
+// strand.py:2483 then the body at :2485+), so only the outer ~5px halo, the
+// protruding flat-end side-line bars, and the C-shape rings remain visible while
+// the black stroke stays on top. Gated on s.is_selected (absent in oracle
+// fixtures, so it never affects a pixel-diff that doesn't opt in).
+function drawHighlight(s, strands, P, enableThird, S) {
+  if (!s.is_selected || s.type === 'MaskedStrand') return;
+  const w = s.width || 0, sw = s.stroke_width || 0;
+  const td = (w + 2 * sw) * S;       // total diameter (px)
+  const cr = td / 2;                 // circle radius (px)
+  const hcA = s.highlight_color;
+  const red = toColor(hcA && hcA.a != null ? hcA : { r: 255, g: 0, b: 0, a: 255 });
+  const hc = s.has_circles || [false, false];
+  const cc = s.closed_connections || [false, false];
+  const startA = circleStrokeAlpha(s.start_circle_stroke_color);
+  const endA = circleStrokeAlpha(s.end_circle_stroke_color);
+  const isAttached = s.type === 'AttachedStrand';
+  const childStart = hasAttachedChildAt(s.start, strands, s);
+  const childEnd = hasAttachedChildAt(s.end, strands, s);
+
+  const cl = buildCenterline(s, P, enableThird);
+  const len = cl.length;
+  const items = [];
+
+  // (1) body band: centerline stroked at total+10 (solid; the body covers its
+  // inner half, leaving the 5px outer halo).
+  const band = cl.clone();
+  band.strokeColor = red;
+  band.strokeWidth = td + 10 * S;
+  band.strokeCap = 'butt';
+  band.strokeJoin = 'round';
+  band.fillColor = null;
+  items.push(band);
+
+  // Which ends carry a circle (-> C-shape ring) vs a flat side line. Mirrors the
+  // cap/side-line gating in collectCaps / collectSideLines so the highlight always
+  // matches the junction the body actually draws.
+  const startCircle = isAttached
+    ? (hc[0] && startA > 0)
+    : ((hc[0] && startA > 0 && childStart) || (cc[0] && startA > 0));
+  const endCircle = isAttached
+    ? (hc[1] && endA > 0 && (childEnd || cc[1]))
+    : ((hc[1] && endA > 0 && childEnd) || (cc[1] && endA > 0));
+
+  // (2) C-shape rings: highlight_circle(cr+5) - mask(half-plane toward body) -
+  // outer_circle(cr). Same boolean construction as Qt.
+  const cShape = (center, angle) => {
+    const outer = new paper.Path.Circle(center, cr + 5 * S);
+    const inner = new paper.Path.Circle(center, cr);
+    const ring = outer.subtract(inner); outer.remove(); inner.remove();
+    const mask = localRect(center, 0, -td, 2 * td, 2 * td, angle); // +x_local = toward body
+    const c = ring.subtract(mask); ring.remove(); mask.remove();
+    c.fillColor = red; c.strokeColor = null;
+    items.push(c);
+  };
+  if (startCircle) cShape(P(s.start), tangentAngle(cl, 0));            // tangent into body
+  if (endCircle) cShape(P(s.end), tangentAngle(cl, len) + Math.PI);   // angle_end - pi
+
+  // (3) side lines: a flat red bar across each circle-less, visible end.
+  const hhw = cr + 5 * S;            // highlight half width
+  const barW = (sw + 10) * S;
+  const bar = (center, a, shiftSign) => {
+    const cx = center.x + (sw * S / 2) * Math.cos(a) * shiftSign;
+    const cy = center.y + (sw * S / 2) * Math.sin(a) * shiftSign;
+    const perp = a + Math.PI / 2;
+    const dx = hhw * Math.cos(perp), dy = hhw * Math.sin(perp);
+    const line = new paper.Path.Line(new paper.Point(cx - dx, cy - dy), new paper.Point(cx + dx, cy + dy));
+    line.strokeColor = red; line.strokeWidth = barW; line.strokeCap = 'butt';
+    items.push(line);
+  };
+  if (s.start_line_visible !== false && !hc[0] && startA > 0) bar(P(s.start), tangentAngle(cl, 0), -1);  // shift opposite tangent
+  if (s.end_line_visible !== false && !hc[1] && endA > 0) bar(P(s.end), tangentAngle(cl, len), 1);       // shift along tangent
+
+  cl.remove();
+  if (items.length) new paper.Group(items);
+}
+
 function drawStrand(s, strands, P, enableThird, S) {
+  drawHighlight(s, strands, P, enableThird, S);   // under the body
   const centerline = buildCenterline(s, P, enableThird);
   const layers = bodyLayers(s, P, enableThird, S, centerline);
   if (!layers) { centerline.remove(); return; }
@@ -505,6 +594,7 @@ function drawMasked(ms, byLayer, P, enableThird, S) {
 // Render `strands` (flat array) using `meta` into the canvas #c.
 window.renderFixture = function (strands, meta) {
   if (meta.curve_params) CURVE = meta.curve_params;
+  SAMPLE_STEP = 1; // full-accuracy sampling for the oracle / pointer-up render
   const W = meta.image_width, H = meta.image_height;
   // Match the reference, which renders at `supersample`x then downscales.
   // Paper draws into an offscreen W*ss x H*ss canvas; we then downscale into
@@ -596,6 +686,12 @@ window.renderFixture = function (strands, meta) {
         const o = strands[j];
         if (o.type === 'MaskedStrand' || !fullBody[o.layer_name]) continue;
         if (maskPairs.has(s.layer_name + '|' + o.layer_name)) continue;
+        // Inflated-bbox quick reject (mirrors shader_utils.py:688-702): the caster
+        // body here is already blur-expanded (expBody), so if its bounds don't
+        // overlap the receiver body's bounds the intersection is provably empty.
+        // Skip the expensive paper boolean. Pixel-identical: a non-overlapping
+        // intersect yields an empty region that is removed below anyway.
+        if (!expBody[s.layer_name].bounds.intersects(fullBody[o.layer_name].bounds)) continue;
         const region = expBody[s.layer_name].intersect(fullBody[o.layer_name]);
         if (!region) continue;
         if (region.area && Math.abs(region.area) > 0.5) {
@@ -656,8 +752,109 @@ window.renderFixture = function (strands, meta) {
     ctx.putImageData(out, 0, 0);
   }
 
+  // Tear down this frame's Paper project. renderFixture calls paper.setup() on a
+  // fresh offscreen canvas every call; without removing the project here, every
+  // render leaks a paper.Project into paper.projects. During a drag (one render
+  // per frame) these pile up, so successive frames get progressively slower and
+  // memory grows. The visible #c already holds the copied-out pixels, so dropping
+  // the project changes no output (the harness screenshots #c, not Paper's view).
+  paper.project.remove();
+
   return { drawn: strands.length, width: W, height: H, supersample: ss };
 };
+
+// ---- interactive drag fast-path (EDITOR ONLY; the headless harness never calls
+// these — it only uses renderFixture/extractStrands) ---------------------------
+// Dragging an endpoint re-renders every frame, and re-stroking ALL strands through
+// Paper each frame is ~O(n) heavy boolean ops (hundreds of ms for busy scenes — see
+// tools/bench_drag.mjs). The original OpenStrand Studio avoids this by drawing ONLY
+// the moving strand over a cached "background" of everything else (move_mode.py's
+// optimized paint handler, painting at native resolution with shadows effectively
+// dropped). We mirror that: bake the static strands once into DRAG_BG, then per
+// move draw only the moving strands on top — at supersample 1 (so no box-average
+// downscale) and with shadows off. Full quality + shadows return via a normal
+// renderFixture on pointer-up.
+let DRAG_BG = null; // { canvas, W, H, ox, oy, zoom }
+
+// Paint the strands for which shouldDraw(layer_name) is true into targetCanvas at
+// native (supersample-1) scale, no shadows. Shared by the bake and per-frame paths.
+// computeHasCircles still runs over ALL strands (it is topology, not position, so
+// caps stay correct). Leaves the Paper project active for the caller to read /
+// composite, then remove.
+function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg) {
+  if (meta.curve_params) CURVE = meta.curve_params;
+  SAMPLE_STEP = DRAG_SAMPLE_STEP; // coarse sampling keeps per-frame stroking cheap
+
+  const W = meta.image_width, H = meta.image_height;
+  const S = meta.zoom || 1; // supersample fixed at 1 on the drag path
+  targetCanvas.setAttribute('hidpi', 'off');
+  targetCanvas.width = W;
+  targetCanvas.height = H;
+  paper.setup(targetCanvas);
+  if (whiteBg) {
+    const bg = new paper.Path.Rectangle(new paper.Point(0, 0), new paper.Size(W, H));
+    bg.fillColor = 'white';
+  }
+  const ox = meta.x_offset, oy = meta.y_offset;
+  // Matches renderFixture's P at ss=1: P(pt) = pt*S + offset.
+  const P = (pt) => new paper.Point(pt.x * S + ox, pt.y * S + oy);
+  const enableThird = strands.some((s) => s.control_point_center != null);
+  const byLayer = {};
+  for (const s of strands) byLayer[s.layer_name] = s;
+  for (const s of strands) {
+    if (s.type === 'MaskedStrand') continue;
+    s.has_circles = computeHasCircles(s, strands);
+  }
+  SHADOW_ENABLED = false; // no shadows while dragging (restored by renderFixture on release)
+  for (let i = 0; i < strands.length; i++) {
+    const s = strands[i];
+    if (!shouldDraw(s.layer_name)) continue;
+    if (s.type === 'MaskedStrand') drawMasked(s, byLayer, P, enableThird, S);
+    else drawStrand(s, strands, P, enableThird, S);
+  }
+  paper.view.update();
+}
+
+// Bake all STATIC strands (everything except meta.drag.moving) into a reusable
+// offscreen bitmap. Call once at the start of a drag gesture.
+window.renderDragBackground = function (strands, meta) {
+  const W = meta.image_width, H = meta.image_height;
+  const moving = new Set((meta.drag && meta.drag.moving) || []);
+  const bg = document.createElement('canvas');
+  _dragPaint(bg, strands, meta, (name) => !moving.has(name), true);
+  paper.project.remove();
+  DRAG_BG = { canvas: bg, W, H, ox: meta.x_offset, oy: meta.y_offset, zoom: meta.zoom || 1 };
+  return { baked: true, staticCount: strands.length - moving.size };
+};
+
+// Per-move frame: blit the cached static background, then draw only the moving
+// strands on top. Falls back to a full renderFixture if no matching bake exists
+// (e.g. the view changed mid-gesture).
+window.renderDragFrame = function (strands, meta) {
+  const W = meta.image_width, H = meta.image_height;
+  if (!DRAG_BG || DRAG_BG.W !== W || DRAG_BG.H !== H ||
+      DRAG_BG.ox !== meta.x_offset || DRAG_BG.oy !== meta.y_offset ||
+      DRAG_BG.zoom !== (meta.zoom || 1)) {
+    return window.renderFixture(strands, meta);
+  }
+  const moving = new Set((meta.drag && meta.drag.moving) || []);
+  const mv = document.createElement('canvas');
+  _dragPaint(mv, strands, meta, (name) => moving.has(name), false);
+  paper.project.remove();
+  const vis = document.getElementById('c');
+  vis.width = W;
+  vis.height = H;
+  vis.style.width = W + 'px';
+  vis.style.height = H + 'px';
+  const ctx = vis.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+  ctx.drawImage(DRAG_BG.canvas, 0, 0); // static scene
+  ctx.drawImage(mv, 0, 0);             // moving strands on top
+  return { drawn: moving.size, mode: 'dragframe' };
+};
+
+// Drop the cached background at the end of a gesture (or before any full render).
+window.endDrag = function () { DRAG_BG = null; };
 
 // Extract the flat strands array from a fixture file (handles the
 // OpenStrandStudioHistory wrapper). Mirrors js_render.mjs / reference_render.py.

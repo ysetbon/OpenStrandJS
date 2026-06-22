@@ -16,6 +16,9 @@ declare global {
   interface Window {
     renderFixture: (strands: RenderStrand[], meta: RenderMeta) => unknown;
     extractStrands: (data: unknown, step?: number) => unknown[];
+    renderDragBackground?: (strands: RenderStrand[], meta: RenderMeta) => unknown;
+    renderDragFrame?: (strands: RenderStrand[], meta: RenderMeta) => unknown;
+    endDrag?: () => void;
   }
 }
 
@@ -24,6 +27,22 @@ export function callRender(strands: RenderStrand[], meta: RenderMeta): void {
     throw new Error('strand-renderer.js did not define window.renderFixture');
   }
   window.renderFixture(strands, meta);
+}
+
+// Drag fast-path bridges. Each degrades gracefully to a full renderFixture if the
+// renderer predates these functions, so the editor never breaks.
+export function callRenderDragBackground(strands: RenderStrand[], meta: RenderMeta): void {
+  if (typeof window.renderDragBackground === 'function') window.renderDragBackground(strands, meta);
+  else callRender(strands, meta);
+}
+
+export function callRenderDragFrame(strands: RenderStrand[], meta: RenderMeta): void {
+  if (typeof window.renderDragFrame === 'function') window.renderDragFrame(strands, meta);
+  else callRender(strands, meta);
+}
+
+export function callEndDrag(): void {
+  if (typeof window.endDrag === 'function') window.endDrag();
 }
 
 export function extractStrands(data: unknown, step?: number): unknown[] {

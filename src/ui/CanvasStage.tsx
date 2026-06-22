@@ -28,6 +28,7 @@ export function CanvasStage() {
       drawOverlay(ctx2d, {
         doc: s.doc, view: s.view, selection: s.selection, settings: s.settings,
         hover: s.hover, pending: s.pending, maskPending: s.maskPending, eraser: s.eraser,
+        mode: s.mode, dragging: s.dragging,
       });
     });
 

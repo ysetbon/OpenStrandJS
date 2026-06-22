@@ -1,34 +1,69 @@
 # Next session — start here
 
-**Read this file, then `OVERLAY_UI_SPEC.md`, then begin the task below.** This is the
-auto-start handoff: when you open a fresh session in this repo, do the task in
-"The task" verbatim.
+**Read this file, then begin the task below.** This is the auto-start handoff: when you
+open a fresh session in this repo, do the task in "The task" verbatim.
 
-## The task — port the editor overlay to match OpenStrand Studio
+## The task — renderer follow-ups (the overlay port is DONE)
 
-Port the OpenStrandJS editor overlay (control points + endpoints + selection/move/attach
-handles) to match OpenStrand Studio exactly. The full source-extracted spec is committed at
-`OVERLAY_UI_SPEC.md` (read it first — it has exact glyph shapes, radii, colors, z-order,
-gating, plus a constants table and 18 open questions). The Qt app `../OpenStrandStudio/src`
-is the spec; key files: `strand_drawing_canvas.py` (`draw_control_points` ~5929,
-`_draw_control_points_supersampled` ~5879), `strand.py` (`_draw_unified_highlight`,
-`draw_selection_path` ~568), `move_mode.py`, `attach_mode.py`.
+The editor overlay port is complete and verified (see "Overlay overlay port — DONE"
+below). Pick up the **optional renderer follow-ups** at the bottom of this file:
+chase the overhand_knot 1.4% soft-shadow residual and re-confirm the braid 0.14% is
+true AA. Use the headless harness: `node tools/js_render.mjs fixtures/<f>.json
+artifacts/<f>` then `node tools/diff.mjs artifacts/<f>` (run serially). Live editor:
+`npm run dev` (http://localhost:5173). Side-by-side fixture viewer: `npm run view`. Do
+NOT touch the Python `main.py`.
 
-Implement in the editor overlay renderer `src/overlay/overlayRenderer.ts` (134 lines; it
-currently draws its own handles). Match: cp1 = upward triangle (vertex radius ≈
-control_point_radius·1.06), cp2 = circle (radius = control_point_radius ≈ 14.66px), center =
-square — each as black-outlined / green-fill / strand-color-core; the dashed green connector
-lines; the move-mode 120px endpoint squares & 50px control-point squares with per-state
-colors; the attach-mode 120px endpoint circles + preview. Note the canvas units vs the
-editor's zoom/DPI — convert the spec's px constants into the overlay's coordinate space.
+## Overlay port — DONE (2026-06-22)
 
-The renderer pixel oracle (`web/strand-renderer.js`) draws with `show_control_points` OFF,
-so these handles are an editor-experience match, not a pixel-diff number — verify visually.
-The headless harness works: `node tools/js_render.mjs fixtures/<f>.json artifacts/<f>` then
-`node tools/diff.mjs artifacts/<f>` (run serially). Live editor: `npm run dev`
-(http://localhost:5173). Side-by-side fixture viewer: `npm run view` (auto-opens; serves at
-`/` → `/web/viewer.html`). Do NOT touch the Python `main.py`. Resolve the 18 open questions
-in `OVERLAY_UI_SPEC.md` against the source as you go.
+`src/overlay/overlayRenderer.ts` was rewritten to match OpenStrand Studio (spec:
+`OVERLAY_UI_SPEC.md`). Implemented and pixel-verified live (sampling the `#overlay`
+canvas via `getContext('2d').getImageData`):
+- **CP glyphs** drawn for all visible strands when `doc.show_control_points`: cp1 =
+  upward triangle (vertex radius `control_point_radius·1.06`, y-offset +1.06), cp2 =
+  circle (R = `control_point_radius` = 14.663px), center = square — each three-layer:
+  black 5px outline → green `rgb(0,128,0)` fill (R−1) → strand-color core (0.5 scale).
+  Triangle always; circle when curve shaped (`control_point2_shown || cp2 off-ends`);
+  square only when `control_point_center_locked` (matches `strandHandles` grabbability).
+- **Green dashed connectors** (`[4,3]`, 1px, green) when shaped: start→cp1, end/start→cp2,
+  and center→cp1/cp2 when the center is locked.
+- **Move mode**: per `strandHandles`, 120px endpoint squares (idle red `255,0,0,38`,
+  hover/moving yellow `255,230,160,70`) + 50px CP squares (idle green `0,100,0,38`,
+  hover/moving yellow), black 2px borders.
+- **Attach mode**: 120px circles at free endpoints — start red `255,0,0,60`, end blue
+  `0,0,255,60`, hover/affected yellow `255,230,160,140`; + translucent body preview.
+  Added idle-hover detection to `src/modes/AttachMode.ts` so circles light up.
+- **Selection ring**: red band hugging the selected body via a wide red stroke with the
+  interior punched out (`destination-out`), revealing the strand on `#c` (so the body
+  isn't tinted). Shown in select/move modes.
+- All spec px constants are in canvas/world units; the overlay multiplies each by
+  `view.zoom` (pinned to 1.0). At zoom 1 / pan 0 the `#overlay` backing store is 1:1 with
+  world coords — handy for pixel-sampling verification.
+- `CanvasStage.tsx` now passes `mode` + `dragging` into the overlay state. Typecheck
+  (`npm run build` = `tsc`) is clean; no console errors.
+
+Follow-up fixes (same session):
+- **cp1 is now always grabbable** (`hitTest.ts::strandHandles`): the triangle handle
+  is returned even when it sits on the start, so you can begin shaping a fresh strand.
+  Its 25px grab area nests inside the 60px endpoint area (radii bumped 26/40 → 25/60 to
+  match OSS 50/120), so a dead-center click grabs cp1 and an off-center click grabs the
+  endpoint. `moveHandle` already flips `triangle_has_moved` + `control_point2_shown` on
+  the first cp1 move (revealing cp2). Mirrors `move_mode.py:2041,2049`.
+- **Selection highlight moved into the renderer** (`web/strand-renderer.js::drawHighlight`)
+  and drawn UNDER the body — a faithful port of `strand.py::_draw_unified_highlight` /
+  `attached_strand.py:542`. OSS paints the highlight first (strand.py:2483) then the body
+  fill+stroke on top (:2485+), so the black stroke stays visible and the red is only an
+  outer halo + protruding flat-end side-line bars + C-shape rings. The earlier overlay
+  approach painted OVER the stroke (covering it); that whole overlay highlight (and its
+  destination-out hack) was removed. Gated on per-strand `is_selected`.
+  - Wiring: `toRenderArray(doc, selectedLayer)` sets `is_selected`; `renderScheduler`
+    passes `selection.layerName`; Select/Move modes call `requestRender` (not just
+    `requestOverlay`) on selection so #c redraws; the drag fast-path (`_dragPaint`) routes
+    the moving strand through `drawStrand` so the highlight tracks live during a drag.
+  - **Pixel-diffable now**: `reference_render.py` honors a per-strand `"is_selected": true`
+    in a fixture (sets `strand.is_selected` so OSS draws its highlight). Three fixtures —
+    `hl_single`, `hl_attach_parent`, `hl_attach_child` — all diff **100.00%** vs OSS
+    (`node tools/js_render.mjs fixtures/<f>.json artifacts/<f>` then `node tools/diff.mjs`).
+    Added to the `npm run view` dropdown under "HIGHLIGHT —".
 
 ## Current status (what's already done)
 

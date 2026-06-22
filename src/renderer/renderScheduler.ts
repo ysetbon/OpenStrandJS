@@ -4,10 +4,12 @@
 // pixel-aligned.
 
 import { useEditorStore } from '../store/editorStore';
-import { callRender } from './rendererBridge';
+import { callRender, callRenderDragBackground, callRenderDragFrame, callEndDrag } from './rendererBridge';
 import { buildMeta, toRenderArray } from './toRenderArray';
 
 let scheduled = false;
+// True once the current drag gesture's static background has been baked.
+let dragBaked = false;
 let overlayCanvas: HTMLCanvasElement | null = null;
 let overlayDraw: ((ctx: CanvasRenderingContext2D) => void) | null = null;
 
@@ -51,9 +53,31 @@ export function requestRender(): void {
   scheduled = true;
   requestAnimationFrame(() => {
     scheduled = false;
-    const { doc, view, settings } = useEditorStore.getState();
+    const { doc, view, settings, dragging, dragMoving, selection } = useEditorStore.getState();
     try {
-      callRender(toRenderArray(doc), buildMeta(doc, view, settings));
+      const arr = toRenderArray(doc, selection.layerName);
+      if (dragging && dragMoving.length) {
+        // DRAG FAST-PATH (mirrors the original's draw-only-affected-strand path).
+        // Render at native resolution with shadows off: bake every STATIC strand
+        // once into a cached bitmap, then each frame draw ONLY the moving strands
+        // over that cache. Per-frame work is O(moving strands), not O(all strands),
+        // so dragging stays smooth regardless of scene size. The fidelity harness
+        // calls renderFixture directly and never sets meta.drag, so the oracle's
+        // default output is unchanged. Full quality + shadows return on pointer-up
+        // (dragging=false -> the else branch's full renderFixture).
+        const meta = {
+          ...buildMeta(doc, view, settings),
+          supersample: 1,
+          shadow_enabled: false,
+          drag: { moving: dragMoving },
+        };
+        if (!dragBaked) { callRenderDragBackground(arr, meta); dragBaked = true; }
+        callRenderDragFrame(arr, meta);
+      } else {
+        // Not dragging: full-quality render. Drop any stale drag background first.
+        if (dragBaked) { callEndDrag(); dragBaked = false; }
+        callRender(arr, buildMeta(doc, view, settings));
+      }
     } catch (err) {
       // Surface renderer errors without killing the rAF loop.
       console.error('[OpenStrandJS] render failed:', err);

@@ -89,6 +89,7 @@ def main():
             print(f"ERROR: step {target_step} not found in history "
                   f"(steps: {[s['step'] for s in states]})")
             return 1
+        raw_strands = current_data.get("strands", [])
         import tempfile
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
             json.dump(current_data, tmp)
@@ -98,11 +99,20 @@ def main():
         finally:
             os.unlink(temp_path)
     else:
+        raw_strands = data.get("strands", [])
         load_result = load_strands(in_json, canvas)
 
     (strands, groups, selected_strand_name, locked_layers, lock_mode,
      shadow_enabled, show_control_points, shadow_overrides) = load_result
     apply_loaded_strands(canvas, strands, groups, shadow_overrides)
+
+    # Opt-in selection highlight: a fixture marks a strand with "is_selected": true
+    # to render its unified selection highlight (matches the editor experience).
+    selected = {r.get("layer_name") for r in raw_strands if r.get("is_selected")}
+    for strand in canvas.strands:
+        if getattr(strand, "layer_name", None) in selected:
+            strand.is_selected = True
+            canvas.selected_strand = strand
 
     # Enable third control point if any strand uses one (mirrors the exporter).
     for strand in canvas.strands:

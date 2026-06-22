@@ -14,8 +14,8 @@ export type HitResult =
   | { kind: 'body'; layerName: string }
   | null;
 
-const ENDPOINT_R = 40;     // world px grab radius for start/end
-const CP_R = 26;           // world px grab radius for control points
+const ENDPOINT_R = 60;     // world px grab radius for start/end (OSS 120px area, half 60)
+const CP_R = 25;           // world px grab radius for control points (OSS 50px square, half 25)
 const CP_SEP = 6;          // a control point is grabbable once this far from both endpoints
 
 const near = (a: Point, b: Point, r: number) => Math.hypot(a.x - b.x, a.y - b.y) <= r;
@@ -33,7 +33,13 @@ export function strandHandles(s: StrandRecord): { handle: HandleKind; pos: Point
     out.push({ handle: 'control_point_center', pos: s.control_point_center });
   }
   const [cp1, cp2] = s.control_points;
-  if (sep(cp1, s.start, s.end)) out.push({ handle: 'control_point1', pos: cp1 });
+  // cp1 (the triangle) is ALWAYS grabbable — even on a fresh strand where it sits
+  // exactly on the start. Its 25px grab area nests inside the 60px endpoint area
+  // and is listed first, so a dead-center click grabs cp1 (begins shaping the
+  // curve) while an off-center click grabs the endpoint. Grabbing & moving cp1
+  // sets triangle_has_moved + control_point2_shown (actions.ts::moveHandle),
+  // which then reveals cp2. Mirrors OpenStrand Studio (move_mode.py:2041,2049).
+  out.push({ handle: 'control_point1', pos: cp1 });
   // cp2 (the "circle") appears once cp1 has first moved (control_point2_shown),
   // or whenever it already sits away from the endpoints (loaded curves stay editable).
   if (s.control_point2_shown || sep(cp2, s.start, s.end)) out.push({ handle: 'control_point2', pos: cp2 });

@@ -148,6 +148,7 @@ export interface RenderStrand {
   start_circle_stroke_color?: RGBA | null;
   end_circle_stroke_color?: RGBA | null;
   is_setting_staring_circle?: boolean;
+  is_selected?: boolean;          // draws the unified selection highlight (under the body)
 }
 
 export interface RenderMeta {
@@ -159,4 +160,9 @@ export interface RenderMeta {
   zoom?: number;            // content scale; absent/1 == pre-zoom behavior
   shadow_enabled: boolean;
   curve_params: { base_fraction: number; dist_multiplier: number; exponent: number };
+  // Interactive drag fast-path ONLY (the fidelity harness never sets this). The
+  // layer_names whose geometry moves with the dragged endpoint: renderDragBackground
+  // bakes everything EXCEPT these once, and renderDragFrame draws only these over
+  // the bake each frame. Absent => normal full render.
+  drag?: { moving: string[] };
 }

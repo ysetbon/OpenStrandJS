@@ -23,7 +23,7 @@ export const SelectMode: Mode = {
       layerName: hit ? hit.layerName : null,
       handle: hit && hit.kind === 'handle' ? hit.handle : null,
     });
-    ctx.requestOverlay();
+    ctx.requestRender();   // selection highlight is drawn in #c (under the body)
   },
 
   onPointerMove(p: PointerInfo, ctx: ModeContext) {

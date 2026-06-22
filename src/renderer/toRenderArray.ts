@@ -10,7 +10,7 @@ import type {
   EditorDocument, RenderMeta, RenderStrand, Settings, ViewState,
 } from '../model/types';
 
-export function toRenderArray(doc: EditorDocument): RenderStrand[] {
+export function toRenderArray(doc: EditorDocument, selectedLayer?: string | null): RenderStrand[] {
   const out: RenderStrand[] = [];
   for (const name of doc.order) {
     const s = doc.strands[name];
@@ -42,6 +42,9 @@ export function toRenderArray(doc: EditorDocument): RenderStrand[] {
       start_circle_stroke_color: (ex.start_circle_stroke_color as RenderStrand['start_circle_stroke_color']) ?? s.circle_stroke_color,
       end_circle_stroke_color: (ex.end_circle_stroke_color as RenderStrand['end_circle_stroke_color']) ?? s.circle_stroke_color,
       is_setting_staring_circle: ex.is_setting_staring_circle as boolean | undefined,
+      // Selected strand draws its unified highlight in the renderer (under the
+      // body), exactly like OSS — so the black stroke stays on top.
+      is_selected: name === selectedLayer,
     };
     if (s.type === 'MaskedStrand') r.deletion_rectangles = s.deletion_rectangles ?? [];
     out.push(r);

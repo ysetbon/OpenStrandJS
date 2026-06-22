@@ -75,6 +75,10 @@ export interface EditorState {
   view: ViewState;
   settings: Settings;
   dragging: boolean;
+  // layer_names that move with the current endpoint drag (the drag fast-path's
+  // "moving set"); empty when not dragging. Read by the renderer scheduler to bake
+  // everything else and redraw only these per frame.
+  dragMoving: string[];
   hover: { layerName: string | null; handle: HandleKind | null };
   pending: PendingStrand | null;     // new-strand / attach rubber-band preview
   maskPending: string[];             // 0..2 strands picked for an over/under mask
@@ -109,6 +113,7 @@ export interface EditorState {
   setMode: (mode: ModeName) => void;
   setSelection: (sel: Selection) => void;
   setDragging: (b: boolean) => void;
+  setDragMoving: (moving: string[]) => void;
   setHover: (hover: { layerName: string | null; handle: HandleKind | null }) => void;
   setPending: (pending: PendingStrand | null) => void;
   setMaskPending: (maskPending: string[]) => void;
@@ -130,6 +135,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   view: { ...DEFAULT_VIEW },
   settings: loadSettings(),
   dragging: false,
+  dragMoving: [],
   hover: { layerName: null, handle: null },
   pending: null,
   maskPending: [],
@@ -269,6 +275,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setMode: (mode) => set({ mode }),
   setSelection: (selection) => set({ selection }),
   setDragging: (dragging) => set({ dragging }),
+  setDragMoving: (dragMoving) => set({ dragMoving }),
   setHover: (hover) => set({ hover }),
   setPending: (pending) => set({ pending }),
   setMaskPending: (maskPending) => set({ maskPending }),

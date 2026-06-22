@@ -5,7 +5,7 @@
 
 import { useEditorStore } from '../store/editorStore';
 import { addNewStrand, attachChild, snapAngle45 } from '../store/actions';
-import type { EditorDocument, Point } from '../model/types';
+import type { EditorDocument, HandleKind, Point } from '../model/types';
 import type { Mode, ModeContext, PointerInfo } from './Mode';
 
 const ATTACH_R = 60;   // world px (120px-diameter circle around free endpoints)
@@ -51,11 +51,22 @@ export const AttachMode: Mode = {
   },
 
   onPointerMove(p: PointerInfo, ctx: ModeContext) {
-    if (!drag) return;
     const st = useEditorStore.getState();
-    const end = drag.kind === 'new' ? snapAngle45(drag.start, p.world) : p.world;
-    st.setPending({ kind: drag.kind, start: drag.start, end, parent: drag.parent, side: drag.side });
-    ctx.requestOverlay();
+    if (drag) {
+      const end = drag.kind === 'new' ? snapAngle45(drag.start, p.world) : p.world;
+      st.setPending({ kind: drag.kind, start: drag.start, end, parent: drag.parent, side: drag.side });
+      ctx.requestOverlay();
+      return;
+    }
+    // Idle hover: light up the nearest free endpoint's attach circle (yellow).
+    const free = nearestFreeEndpoint(st.doc, p.world);
+    const next = free
+      ? { layerName: free.layer, handle: (free.side === 0 ? 'start' : 'end') as HandleKind }
+      : { layerName: null, handle: null };
+    if (st.hover.layerName !== next.layerName || st.hover.handle !== next.handle) {
+      st.setHover(next);
+      ctx.requestOverlay();
+    }
   },
 
   onPointerUp(p: PointerInfo, ctx: ModeContext) {
