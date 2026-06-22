@@ -132,17 +132,267 @@ function strokedBodyAtWidth(s, P, enableThird, widthPx) {
   return outline;
 }
 
-function bodyOutline(s, P, enableThird, ss) {
-  return strokedBodyAtWidth(s, P, enableThird, (s.width || 0) * ss);
+// Resolve self-intersections of a stroked outline into a clean boundary.
+function cleanOutline(outline) {
+  if (!outline) return null;
+  const cleaned = outline.resolveCrossings();
+  if (cleaned !== outline) outline.remove();
+  return cleaned;
 }
 
-function drawStrand(s, P, enableThird, ss) {
-  const outline = bodyOutline(s, P, enableThird, ss);
-  if (!outline) return;
-  outline.fillColor = toColor(s.color);
-  outline.strokeColor = toColor(s.stroke_color);
-  outline.strokeWidth = (s.stroke_width || 0) * ss;
-  outline.strokeJoin = 'round';
+// ---- end-cap & side-line geometry (PIXEL space) -------------------------------
+// Faithful port of the cap drawing in strand.py::draw and attached_strand.py::draw.
+// Qt draws the body as TWO filled layers (stroke path at width+2*stroke in stroke
+// color, fill path at width in color on top) and ADDS end caps to each layer:
+//   outer = half of a circle/ellipse  -> stroke (combined_stroke_path)
+//   inner = full circle/ellipse       -> fill   (combined_fill_path)
+//   side rectangle                    -> fill   (combined_fill_path)
+// With elliptical_end_caps off (the whole current corpus) _partner_cap_dims is
+// (None, None), so every cap is a plain CIRCLE: outer R=(w+2sw)/2, inner R=w/2.
+
+const PT_EPS = 0.5; // world-space coincidence tolerance (Qt compares points exactly)
+function approxPt(a, b) {
+  return !!a && !!b && Math.abs(a.x - b.x) < PT_EPS && Math.abs(a.y - b.y) < PT_EPS;
+}
+// circle_stroke colors default to a visible (alpha 255) stroke when absent.
+function circleStrokeAlpha(c) { return c && c.a != null ? c.a : 255; }
+
+// True when some OTHER AttachedStrand starts at world point `pt` (i.e. a child
+// attaches there). Mirrors Qt's `any(child.start == self.<end> for child in
+// self.attached_strands)`, reconstructed geometrically from the flat strand list.
+function hasAttachedChildAt(pt, strands, self) {
+  for (const c of strands) {
+    if (c === self || c.type !== 'AttachedStrand') continue;
+    if (approxPt(c.start, pt)) return true;
+  }
+  return false;
+}
+
+// Recompute has_circles the way OpenStrand Studio does on load
+// (save_load_manager.py "Fourth pass", ~940-994): the stored value is replaced
+// by whether a child actually attaches at each end, with manual_circle_visibility
+// overrides. An AttachedStrand always keeps its start circle (the attachment
+// point). This is the RENDER-TIME truth -- e.g. a lone strand whose JSON says
+// has_circles=[false,true] becomes [false,false], so BOTH ends get a flat side
+// line instead of a phantom end circle.
+function computeHasCircles(s, strands) {
+  const mcv = Array.isArray(s.manual_circle_visibility) ? s.manual_circle_visibility : [null, null];
+  if (s.type === 'AttachedStrand') {
+    const endAtt = hasAttachedChildAt(s.end, strands, s);
+    return [true, mcv[1] != null ? mcv[1] : endAtt];
+  }
+  const startAtt = hasAttachedChildAt(s.start, strands, s);
+  const endAtt = hasAttachedChildAt(s.end, strands, s);
+  return [mcv[0] != null ? mcv[0] : startAtt, mcv[1] != null ? mcv[1] : endAtt];
+}
+
+// Pixel-space tangent ANGLE (radians) at a path offset. Direction follows
+// increasing arc length: at off=0 it points INTO the body, at off=len it points
+// OUT of the end — matching Qt's calculate_cubic_tangent(0.0001 / 0.9999).
+function tangentAngle(centerline, off) {
+  const len = centerline.length;
+  let o = Math.max(0, Math.min(off, len));
+  let t = centerline.getTangentAt(o);
+  if (!t && len > 0) t = centerline.getTangentAt(Math.max(0, Math.min(o, len - 1e-3)));
+  if (!t) {
+    const d = vsub(centerline.lastSegment.point, centerline.firstSegment.point);
+    return Math.atan2(d.y, d.x);
+  }
+  return Math.atan2(t.y, t.x);
+}
+
+// A rect defined in a local frame (top-left x,y; size w,h), rotated about the
+// local origin by `angle` rad, then translated to `center`. Mirrors Qt
+// QTransform().translate(center).rotate(deg).map(rect) (point rotated, then moved).
+function localRect(center, x, y, w, h, angle) {
+  const r = new paper.Path.Rectangle(new paper.Point(x, y), new paper.Size(w, h));
+  r.rotate((angle * 180) / Math.PI, new paper.Point(0, 0));
+  r.translate(center);
+  return r;
+}
+
+// Outer cap half at a START end: keeps the half pointing away from the body.
+// `angle` is the tangent at the start (points into the body); `td` = total diameter.
+function capOuterStart(center, angle, td) {
+  const circle = new paper.Path.Circle(center, td / 2);
+  const mask = localRect(center, 0, -td, 2 * td, 2 * td, angle);
+  const half = circle.subtract(mask);
+  circle.remove();
+  mask.remove();
+  return half;
+}
+// Outer cap half at an END end: keeps the half pointing out of the end.
+function capOuterEnd(center, angle, td) {
+  const circle = new paper.Path.Circle(center, td / 2);
+  const mask = localRect(center, -2 * td, -td, 2 * td, 2 * td, angle);
+  const half = circle.subtract(mask);
+  circle.remove();
+  mask.remove();
+  return half;
+}
+function capInner(center, wpx) {
+  return new paper.Path.Circle(center, wpx / 2);
+}
+// Side cover rect: Qt addRect(-sw, -w/2, sw, w) rotated to the tangent.
+function capSideRect(center, angle, swpx, wpx) {
+  return localRect(center, -swpx, -wpx / 2, swpx, wpx, angle);
+}
+// Attached-strand end fill quad (attached_strand.py end_side_line_path):
+// across = w/2 each way, along the tangent = sw/2 each way.
+function capEndQuad(center, angle, swpx, wpx) {
+  const perp = angle + Math.PI / 2;
+  const dx = (wpx / 2) * Math.cos(perp), dy = (wpx / 2) * Math.sin(perp);
+  const dtx = (swpx / 2) * Math.cos(angle), dty = (swpx / 2) * Math.sin(angle);
+  return new paper.Path({
+    segments: [
+      new paper.Point(center.x - dx - dtx, center.y - dy - dty),
+      new paper.Point(center.x + dx - dtx, center.y + dy - dty),
+      new paper.Point(center.x + dx + dtx, center.y + dy + dty),
+      new paper.Point(center.x - dx + dtx, center.y - dy + dty),
+    ],
+    closed: true,
+  });
+}
+
+// Collect end-cap pieces (pixel-space paper paths) for one strand, split into the
+// stroke-color layer and the fill-color layer.
+function collectCaps(s, strands, centerline, P, S) {
+  const stroke = [], fill = [];
+  const w = s.width || 0, sw = s.stroke_width || 0;
+  const td = (w + 2 * sw) * S, wpx = w * S, swpx = sw * S;
+  const hc = s.has_circles || [false, false];
+  const cc = s.closed_connections || [false, false];
+  const startA = circleStrokeAlpha(s.start_circle_stroke_color);
+  const endA = circleStrokeAlpha(s.end_circle_stroke_color);
+  const len = centerline.length;
+  const cStart = P(s.start), cEnd = P(s.end);
+  const aStart = tangentAngle(centerline, 0);
+  const aEnd = tangentAngle(centerline, len);
+  const childStart = hasAttachedChildAt(s.start, strands, s);
+  const childEnd = hasAttachedChildAt(s.end, strands, s);
+
+  if (s.type === 'AttachedStrand') {
+    // start (its own attachment point)
+    if (hc[0] && startA > 0) {
+      stroke.push(capOuterStart(cStart, aStart, td));
+      fill.push(capInner(cStart, wpx));
+      fill.push(capSideRect(cStart, aStart, swpx, wpx));
+    } else if (startA === 0 && s.is_setting_staring_circle && hc[0]) {
+      fill.push(capInner(cStart, wpx));
+    }
+    // end — half-circle only when a child attaches there (no alpha gate, per Qt)
+    if (hc[1] && childEnd) {
+      stroke.push(capOuterEnd(cEnd, aEnd, td));
+      fill.push(capInner(cEnd, wpx));
+      if (endA > 0) fill.push(capSideRect(cEnd, aEnd, swpx, wpx));
+    }
+    // end fill is added whenever has_circles[1] (rounds the end)
+    if (hc[1]) {
+      fill.push(capInner(cEnd, wpx));
+      fill.push(capEndQuad(cEnd, aEnd, swpx, wpx));
+    }
+    // closed-knot end cap
+    if (hc[1] && cc[1]) {
+      if (endA > 0) stroke.push(capOuterEnd(cEnd, aEnd, td));
+      fill.push(capInner(cEnd, wpx));
+      if (endA > 0) fill.push(capSideRect(cEnd, aEnd, swpx, wpx));
+    }
+  } else {
+    // plain Strand: cap an end only where a child attaches or the end is closed
+    if ((hc[0] && startA > 0 && childStart) || (cc[0] && startA > 0)) {
+      stroke.push(capOuterStart(cStart, aStart, td));
+      fill.push(capInner(cStart, wpx));
+      fill.push(capSideRect(cStart, aStart, swpx, wpx));
+    }
+    if ((hc[1] && endA > 0 && childEnd) || (cc[1] && endA > 0)) {
+      stroke.push(capOuterEnd(cEnd, aEnd, td));
+      fill.push(capInner(cEnd, wpx));
+      fill.push(capSideRect(cEnd, aEnd, swpx, wpx));
+    }
+  }
+  return { stroke, fill };
+}
+
+// Side LINES (strand.py ~2657): a flat stroke-colored bar across an end, drawn
+// only when that end has no circle. Returns ready-to-paint paper paths.
+function collectSideLines(s, centerline, P, S) {
+  const out = [];
+  const hc = s.has_circles || [false, false];
+  const w = s.width || 0, sw = s.stroke_width || 0;
+  const half = ((w + 2 * sw) / 2) * S, shift = (sw / 2) * S, swpx = sw * S;
+  const len = centerline.length;
+  const bar = (c, a) => {
+    const perp = a + Math.PI / 2;
+    const dx = half * Math.cos(perp), dy = half * Math.sin(perp);
+    const line = new paper.Path.Line(
+      new paper.Point(c.x - dx, c.y - dy),
+      new paper.Point(c.x + dx, c.y + dy),
+    );
+    line.strokeColor = toColor(s.stroke_color);
+    line.strokeWidth = swpx;
+    line.strokeCap = 'butt';
+    return line;
+  };
+  if (s.start_line_visible && !hc[0]) {
+    const a = tangentAngle(centerline, 0), c = P(s.start);
+    // start shift is opposite the tangent (angle + pi)
+    out.push(bar({ x: c.x + shift * Math.cos(a + Math.PI), y: c.y + shift * Math.sin(a + Math.PI) }, a));
+  }
+  if (s.end_line_visible && !hc[1]) {
+    const a = tangentAngle(centerline, len), c = P(s.end);
+    // end shift is along the tangent
+    out.push(bar({ x: c.x + shift * Math.cos(a), y: c.y + shift * Math.sin(a) }, a));
+  }
+  return out;
+}
+
+// Build the two filled body layers for a strand at scale S (no caps): the outer
+// (stroke-color) layer at width+2*stroke and the inner (fill-color) layer at
+// width. Returns {stroke, fill} paper paths (uncolored) or null.
+function bodyLayers(s, P, enableThird, S, centerline) {
+  const cl = centerline || buildCenterline(s, P, enableThird);
+  const w = s.width || 0, sw = s.stroke_width || 0;
+  const stroke = cleanOutline(strokedOutline(cl, (w + 2 * sw) * S));
+  const fill = cleanOutline(strokedOutline(cl, w * S));
+  if (!centerline) cl.remove();
+  if (!stroke || !fill) {
+    stroke && stroke.remove();
+    fill && fill.remove();
+    return null;
+  }
+  return { stroke, fill };
+}
+
+function drawStrand(s, strands, P, enableThird, S) {
+  const centerline = buildCenterline(s, P, enableThird);
+  const layers = bodyLayers(s, P, enableThird, S, centerline);
+  if (!layers) { centerline.remove(); return; }
+  let strokePath = layers.stroke, fillPath = layers.fill;
+
+  const caps = collectCaps(s, strands, centerline, P, S);
+  const sideLines = collectSideLines(s, centerline, P, S);
+  centerline.remove();
+
+  for (const shp of caps.stroke) {
+    const u = strokePath.unite(shp);
+    strokePath.remove();
+    shp.remove();
+    strokePath = u;
+  }
+  for (const shp of caps.fill) {
+    const u = fillPath.unite(shp);
+    fillPath.remove();
+    shp.remove();
+    fillPath = u;
+  }
+
+  strokePath.fillColor = toColor(s.stroke_color);
+  strokePath.strokeColor = null;
+  fillPath.fillColor = toColor(s.color);
+  fillPath.strokeColor = null;
+
+  // Paint stroke layer, then fill layer, then side bars (top), in order.
+  new paper.Group([strokePath, fillPath, ...sideLines]);
 }
 
 // A deletion rectangle (over-under gap) in pixel space. Corner-based
@@ -162,47 +412,66 @@ function deletionPath(rect, P, ss) {
   return null;
 }
 
-// Port of masked_strand.py: the masked region is
-//   first.stroked(width)  ∩  second.stroked(width + 2*stroke + 4)
-// minus the deletion rectangles. The first (top) strand is drawn clipped to
-// that region so it appears OVER the second.
-function drawMasked(ms, byLayer, P, enableThird, ss) {
+// A mask-component region for `s` at world width `widthW`: the centerline
+// stroked at that width, unioned with the strand's visible attached start circle
+// (radius widthW/2). Mirrors masked_strand.py get_*_path_for_strand for the
+// circular case (elliptical caps are not exercised by the corpus).
+function maskComponentPath(s, P, enableThird, S, widthW) {
+  const cl = buildCenterline(s, P, enableThird);
+  let path = cleanOutline(strokedOutline(cl, widthW * S));
+  cl.remove();
+  if (!path) return null;
+  if (
+    s.type === 'AttachedStrand' &&
+    (s.has_circles || [])[0] &&
+    circleStrokeAlpha(s.start_circle_stroke_color) > 0
+  ) {
+    const circle = new paper.Path.Circle(P(s.start), (widthW * S) / 2);
+    const u = path.unite(circle);
+    path.remove();
+    circle.remove();
+    path = u;
+  }
+  return path;
+}
+
+function subtractDeletions(region, ms, P, S) {
+  if (!region) return region;
+  for (const rect of ms.deletion_rectangles || []) {
+    const rp = deletionPath(rect, P, S);
+    if (rp) {
+      const r2 = region.subtract(rp);
+      rp.remove();
+      region.remove();
+      region = r2;
+    }
+  }
+  return region;
+}
+
+// Faithful port of masked_strand.py. The crossing of the top strand (`first`)
+// over the bottom (`second`) is painted as TWO regions filled directly:
+//   stroke-color layer = stroked(first, w+2sw) ∩ stroked(second, w+2sw)
+//   fill-color  layer  = stroked(first, w)     ∩ stroked(second, w+2sw+4)
+// each unioned with the components' visible start circles, minus deletions.
+function drawMasked(ms, byLayer, P, enableThird, S) {
   const parts = (ms.layer_name || '').split('_');
   if (parts.length < 4) return;
   const first = byLayer[parts[0] + '_' + parts[1]];
   const second = byLayer[parts[2] + '_' + parts[3]];
   if (!first || !second) return;
+  const fw = first.width || 0, fsw = first.stroke_width || 0;
+  const sw = second.width || 0, ssw = second.stroke_width || 0;
 
-  const firstInner = strokedBodyAtWidth(first, P, enableThird, (first.width || 0) * ss);
-  const secondExt = strokedBodyAtWidth(
-    second, P, enableThird,
-    ((second.width || 0) + 2 * (second.stroke_width || 0) + 4) * ss,
-  );
-  if (!firstInner || !secondExt) { firstInner && firstInner.remove(); secondExt && secondExt.remove(); return; }
-
-  let mask = firstInner.intersect(secondExt);
-  firstInner.remove();
-  secondExt.remove();
-  if (!mask) return;
-
-  for (const rect of ms.deletion_rectangles || []) {
-    const rp = deletionPath(rect, P, ss);
-    if (rp) { const m2 = mask.subtract(rp); rp.remove(); mask.remove(); mask = m2; }
-  }
-
-  // Mask crossing shadow (draw_mask_strand_shadow): the over strand, expanded
-  // by blur, intersected with the under strand's body, minus deletions. Drawn
-  // dark UNDER the over-strand redraw so only the fringe on the under strand
-  // shows.
+  // Crossing shadow (only when shadows are on): over strand expanded by blur ∩
+  // under strand body, drawn first so the over-strand redraw covers all but the
+  // fringe on the under strand.
   if (SHADOW_ENABLED) {
-    const firstExp = strokedBodyAtWidth(first, P, enableThird, ((first.width || 0) + 2 * (first.stroke_width || 0) + MAX_BLUR) * ss);
-    const secondBody = strokedBodyAtWidth(second, P, enableThird, ((second.width || 0) + 2 * (second.stroke_width || 0)) * ss);
+    const firstExp = strokedBodyAtWidth(first, P, enableThird, (fw + 2 * fsw + MAX_BLUR) * S);
+    const secondBody = strokedBodyAtWidth(second, P, enableThird, (sw + 2 * ssw) * S);
     if (firstExp && secondBody) {
       let sh = firstExp.intersect(secondBody);
-      for (const rect of ms.deletion_rectangles || []) {
-        const rp = deletionPath(rect, P, ss);
-        if (rp && sh) { const s2 = sh.subtract(rp); rp.remove(); sh.remove(); sh = s2; }
-      }
+      sh = subtractDeletions(sh, ms, P, S);
       if (sh && sh.area && Math.abs(sh.area) > 0.5) { sh.fillColor = SHADOW_PAINT; sh.strokeColor = null; }
       else if (sh) sh.remove();
     }
@@ -210,15 +479,27 @@ function drawMasked(ms, byLayer, P, enableThird, ss) {
     secondBody && secondBody.remove();
   }
 
-  const firstOutline = bodyOutline(first, P, enableThird, ss);
-  if (!firstOutline) { mask.remove(); return; }
-  firstOutline.fillColor = toColor(first.color);
-  firstOutline.strokeColor = toColor(first.stroke_color);
-  firstOutline.strokeWidth = (first.stroke_width || 0) * ss;
-  firstOutline.strokeJoin = 'round';
+  // stroke-color region: first@(w+2sw) ∩ second@(w+2sw)
+  const fStroke = maskComponentPath(first, P, enableThird, S, fw + 2 * fsw);
+  const sStroke = maskComponentPath(second, P, enableThird, S, sw + 2 * ssw);
+  let strokeRegion = fStroke && sStroke ? fStroke.intersect(sStroke) : null;
+  fStroke && fStroke.remove();
+  sStroke && sStroke.remove();
+  strokeRegion = subtractDeletions(strokeRegion, ms, P, S);
 
-  // Clip the first strand's full body to the mask region.
-  new paper.Group({ children: [mask, firstOutline], clipped: true });
+  // fill-color region: first@w ∩ second@(w+2sw+4)
+  const fFill = maskComponentPath(first, P, enableThird, S, fw);
+  const sExt = maskComponentPath(second, P, enableThird, S, sw + 2 * ssw + 4);
+  let fillRegion = fFill && sExt ? fFill.intersect(sExt) : null;
+  fFill && fFill.remove();
+  sExt && sExt.remove();
+  fillRegion = subtractDeletions(fillRegion, ms, P, S);
+
+  if (strokeRegion) { strokeRegion.fillColor = toColor(first.stroke_color); strokeRegion.strokeColor = null; }
+  if (fillRegion) { fillRegion.fillColor = toColor(first.color); fillRegion.strokeColor = null; }
+  // Paint order: stroke layer under fill layer.
+  const layers = [strokeRegion, fillRegion].filter(Boolean);
+  if (layers.length) new paper.Group(layers);
 }
 
 // Render `strands` (flat array) using `meta` into the canvas #c.
@@ -261,6 +542,14 @@ window.renderFixture = function (strands, meta) {
 
   const byLayer = {};
   for (const s of strands) byLayer[s.layer_name] = s;
+
+  // Replace each strand's stored has_circles with the render-time value OSS
+  // computes on load (from actual attachments + manual overrides). Drives both
+  // the end caps and the flat-end side lines.
+  for (const s of strands) {
+    if (s.type === 'MaskedStrand') continue;
+    s.has_circles = computeHasCircles(s, strands);
+  }
 
   const shadowEnabled = !!meta.shadow_enabled;
   SHADOW_ENABLED = shadowEnabled;
@@ -317,7 +606,7 @@ window.renderFixture = function (strands, meta) {
         }
       }
     }
-    drawStrand(s, P, enableThird, S);
+    drawStrand(s, strands, P, enableThird, S);
   }
 
   // Remove the invisible helper bodies.
@@ -332,9 +621,40 @@ window.renderFixture = function (strands, meta) {
   vis.style.width = W + 'px';
   vis.style.height = H + 'px';
   const ctx = vis.getContext('2d');
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(hi, 0, 0, W * ss, H * ss, 0, 0, W, H);
+  if (ss === 1) {
+    ctx.drawImage(hi, 0, 0);
+  } else {
+    // Match the Qt reference, which downsamples the ss× image with
+    // QImage.scaled(..., Qt.SmoothTransformation). For an exact integer ss
+    // downscale that is an ss×ss box average in sRGB space. Reproduce it exactly
+    // here instead of relying on the browser's imageSmoothing filter (a wider,
+    // engine-specific kernel that leaves a ~1px seam on high-contrast curved
+    // edges versus Qt's average). The composited image is fully opaque (white
+    // background), so a straight per-channel average needs no alpha handling.
+    const src = hi.getContext('2d').getImageData(0, 0, W * ss, H * ss).data;
+    const out = ctx.createImageData(W, H);
+    const od = out.data;
+    const rowSpan = W * ss;
+    const inv = 1 / (ss * ss);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        let r = 0, g = 0, b = 0, a = 0;
+        for (let dy = 0; dy < ss; dy++) {
+          let si = ((y * ss + dy) * rowSpan + x * ss) * 4;
+          for (let dx = 0; dx < ss; dx++) {
+            r += src[si]; g += src[si + 1]; b += src[si + 2]; a += src[si + 3];
+            si += 4;
+          }
+        }
+        const oi = (y * W + x) * 4;
+        od[oi] = r * inv;
+        od[oi + 1] = g * inv;
+        od[oi + 2] = b * inv;
+        od[oi + 3] = a * inv;
+      }
+    }
+    ctx.putImageData(out, 0, 0);
+  }
 
   return { drawn: strands.length, width: W, height: H, supersample: ss };
 };

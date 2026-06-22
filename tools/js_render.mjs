@@ -58,8 +58,14 @@ try {
   await canvas.screenshot({ path: outPng });
   console.log('js render ->', outPng, JSON.stringify(result));
 } finally {
-  await browser.close().catch(() => {});
+  // On Windows, browser.close() can hang indefinitely and never resolve, which
+  // prevents the process from reaching process.exit(0) -> `timeout` kills it with
+  // a non-zero code even though js.png was already written. Race the close
+  // against a short timer so we always exit cleanly within ~1.5s.
+  await Promise.race([
+    browser.close().catch(() => {}),
+    new Promise((r) => setTimeout(r, 1500)),
+  ]);
 }
-// Playwright can keep the event loop alive after close, hanging the process
-// (which stalled chained diffs and background tasks). Force a clean exit.
+// Force a clean exit even if Playwright kept the event loop alive.
 process.exit(0);

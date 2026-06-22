@@ -22,8 +22,12 @@ const TYPES = {
 const server = http.createServer(async (req, res) => {
   try {
     const urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
-    let rel = urlPath === '/' ? '/web/viewer.html' : urlPath;
-    const filePath = path.normalize(path.join(root, rel));
+    // Redirect the root to the viewer's real path so its relative resource URLs
+    // (strand-renderer.js, ../node_modules, ../fixtures, ../artifacts) resolve.
+    // Serving the HTML *at* "/" left the document base at "/", which 404'd
+    // strand-renderer.js and left renderFixture/extractStrands undefined.
+    if (urlPath === '/') { res.writeHead(302, { Location: '/web/viewer.html' }); res.end(); return; }
+    const filePath = path.normalize(path.join(root, urlPath));
     if (!filePath.startsWith(root)) { res.writeHead(403).end('forbidden'); return; }
     const data = await readFile(filePath);
     res.writeHead(200, { 'Content-Type': TYPES[path.extname(filePath)] || 'application/octet-stream' });
