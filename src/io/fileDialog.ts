@@ -17,3 +17,12 @@ export function downloadJSON(filename: string, data: unknown): void {
 export async function readJSONFile(file: File): Promise<unknown> {
   return JSON.parse(await file.text());
 }
+
+export function downloadDataURL(filename: string, dataUrl: string): void {
+  const a = document.createElement('a');
+  a.href = dataUrl;
+  a.download = filename.endsWith('.png') ? filename : `${filename}.png`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}

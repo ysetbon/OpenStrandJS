@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import { loadProject, serializeProject } from '../io/saveLoad';
 import { downloadJSON } from '../io/fileDialog';
+import { exportPng } from '../io/exportPng';
 import { resetMask } from '../store/actions';
 import { fitPan } from '../interaction/viewTransform';
 import type { ModeName } from '../model/types';
@@ -103,6 +104,7 @@ export function Toolbar() {
 
       <button onClick={() => fileRef.current?.click()}>Load…</button>
       <button onClick={onSave}>Save</button>
+      <button onClick={() => exportPng()}>Export PNG</button>
       <input
         ref={fileRef}
         type="file"
