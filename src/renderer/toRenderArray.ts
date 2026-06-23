@@ -45,6 +45,9 @@ export function toRenderArray(doc: EditorDocument, selectedLayer?: string | null
       // Selected strand draws its unified highlight in the renderer (under the
       // body), exactly like OSS — so the black stroke stays on top.
       is_selected: name === selectedLayer,
+      // OSS shadow_only: keep the strand in the array (so it still casts/receives
+      // shadow) but flag the renderer to suppress its body paint.
+      shadow_only: s.shadow_only,
     };
     if (s.type === 'MaskedStrand') r.deletion_rectangles = s.deletion_rectangles ?? [];
     out.push(r);
@@ -61,6 +64,7 @@ export function buildMeta(doc: EditorDocument, view: ViewState, settings: Settin
     supersample: view.supersample,
     zoom: view.zoom,
     shadow_enabled: doc.shadow_enabled,
+    shadow_overrides: doc.shadow_overrides,
     curve_params: settings.curve_params,
   };
 }

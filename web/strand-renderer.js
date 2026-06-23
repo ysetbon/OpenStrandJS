@@ -645,6 +645,22 @@ window.renderFixture = function (strands, meta) {
   SHADOW_ENABLED = shadowEnabled;
   SHADOW_PAINT = toColor(SHADOW_COLOR);
 
+  // OSS per-pair shadow visibility (shadow_overrides[casting][receiving].visibility).
+  // Default true (absent override / absent key => the pair casts normally), so a
+  // fixture with no shadow_overrides renders exactly as before. Only `false`
+  // explicitly suppresses a (casting->receiving) shadow pair — mirrors
+  // shader_utils.py get_shadow_visibility (allow_full_shadow / subtracted_layers
+  // are carried in the data but not yet consumed here).
+  const shadowOverrides = (meta && meta.shadow_overrides) || null;
+  const isShadowPairVisible = (casting, receiving) => {
+    if (!shadowOverrides) return true;
+    const byRecv = shadowOverrides[casting];
+    if (!byRecv) return true;
+    const ov = byRecv[receiving];
+    if (!ov || ov.visibility === undefined) return true;
+    return ov.visibility !== false;
+  };
+
   // Pairs that are the two components of a mask don't shadow each other (the
   // mask owns that crossing).
   const maskPairs = new Set();
@@ -686,6 +702,8 @@ window.renderFixture = function (strands, meta) {
         const o = strands[j];
         if (o.type === 'MaskedStrand' || !fullBody[o.layer_name]) continue;
         if (maskPairs.has(s.layer_name + '|' + o.layer_name)) continue;
+        // s casts (above) onto o (below): s.layer_name -> o.layer_name.
+        if (!isShadowPairVisible(s.layer_name, o.layer_name)) continue;
         // Inflated-bbox quick reject (mirrors shader_utils.py:688-702): the caster
         // body here is already blur-expanded (expBody), so if its bounds don't
         // overlap the receiver body's bounds the intersection is provably empty.
@@ -702,6 +720,9 @@ window.renderFixture = function (strands, meta) {
         }
       }
     }
+    // OSS shadow_only: the strand has already cast its shadow above; suppress its
+    // own body/extension paint. Absent/false => normal full body (oracle-safe).
+    if (s.shadow_only) continue;
     drawStrand(s, strands, P, enableThird, S);
   }
 

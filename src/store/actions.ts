@@ -3,7 +3,7 @@
 // store.mutateDoc(draft => ...). No object cross-references, so drafts stay
 // JSON-serializable for future snapshot history.
 
-import type { EditorDocument, GroupRecord, HandleKind, Point, RGBA, Settings, StrandRecord } from '../model/types';
+import type { EditorDocument, GroupRecord, HandleKind, Point, RGBA, Settings, ShadowOverride, StrandRecord } from '../model/types';
 import { weldedEndpoints } from '../interaction/connections';
 import { makeAttachedStrand, makeStrand } from '../model/factory';
 import { formatLayerName, maskComponents, nextFreeSet, nextIndexInSet, parseLayerName } from '../model/layerName';
@@ -508,6 +508,97 @@ export function setGroupShadowOnly(draft: EditorDocument, name: string, value: b
   }
 }
 
+// ---- per-pair shadow overrides (OSS layer_state_manager.shadow_overrides) ----
+// Nested dict casting_layer -> receiving_layer -> {visibility, allow_full_shadow,
+// subtracted_layers}. Mirrors the OSS getter/setter/default logic. Defaults:
+// visibility = true, allow_full_shadow = false, subtracted_layers = []. The
+// renderer today only consumes `visibility`; the other two are stored for
+// forward-compat (see strand-renderer.js / RenderMeta.shadow_overrides).
+
+export function getShadowOverride(
+  draft: EditorDocument,
+  casting: string,
+  receiving: string,
+): ShadowOverride | undefined {
+  return draft.shadow_overrides[casting]?.[receiving];
+}
+
+// Whole-inner-dict replace (OSS set_shadow_override). Empty dicts are pruned so an
+// all-default override doesn't bloat the doc / undo comparison.
+export function setShadowOverride(
+  draft: EditorDocument,
+  casting: string,
+  receiving: string,
+  override: ShadowOverride,
+): void {
+  const isEmpty =
+    (override.visibility === undefined || override.visibility === true) &&
+    (override.allow_full_shadow === undefined || override.allow_full_shadow === false) &&
+    (override.subtracted_layers === undefined || override.subtracted_layers.length === 0);
+  if (isEmpty) {
+    removeShadowOverride(draft, casting, receiving);
+    return;
+  }
+  const byRecv = draft.shadow_overrides[casting] ?? (draft.shadow_overrides[casting] = {});
+  byRecv[receiving] = { ...override };
+}
+
+export function removeShadowOverride(draft: EditorDocument, casting: string, receiving: string): void {
+  const byRecv = draft.shadow_overrides[casting];
+  if (!byRecv) return;
+  delete byRecv[receiving];
+  if (Object.keys(byRecv).length === 0) delete draft.shadow_overrides[casting];
+}
+
+// Effective visibility: override.visibility if present, else default true.
+export function getShadowVisibility(draft: EditorDocument, casting: string, receiving: string): boolean {
+  const ov = getShadowOverride(draft, casting, receiving);
+  return ov?.visibility ?? true;
+}
+
+export function setShadowVisibility(
+  draft: EditorDocument,
+  casting: string,
+  receiving: string,
+  visible: boolean,
+): void {
+  const cur = getShadowOverride(draft, casting, receiving) ?? {};
+  setShadowOverride(draft, casting, receiving, { ...cur, visibility: visible });
+}
+
+export function setAllowFullShadow(
+  draft: EditorDocument,
+  casting: string,
+  receiving: string,
+  allow: boolean,
+): void {
+  const cur = getShadowOverride(draft, casting, receiving) ?? {};
+  setShadowOverride(draft, casting, receiving, {
+    visibility: cur.visibility ?? true,
+    ...cur,
+    allow_full_shadow: allow,
+  });
+}
+
+export function getSubtractedLayers(draft: EditorDocument, casting: string, receiving: string): string[] {
+  return getShadowOverride(draft, casting, receiving)?.subtracted_layers ?? [];
+}
+
+export function setSubtractedLayers(
+  draft: EditorDocument,
+  casting: string,
+  receiving: string,
+  layers: string[],
+): void {
+  const cur = getShadowOverride(draft, casting, receiving) ?? {};
+  setShadowOverride(draft, casting, receiving, {
+    visibility: cur.visibility ?? true,
+    allow_full_shadow: cur.allow_full_shadow ?? false,
+    ...cur,
+    subtracted_layers: layers,
+  });
+}
+
 // Best-effort mask grid: for each unordered pair of distinct members that don't
 // already have a mask (in either over/under direction), create an over/under
 // MaskedStrand via createMask (first member = OVER). Returns the names created.
@@ -541,6 +632,9 @@ if (import.meta.env?.DEV) {
     toggleLockMode, clearAllLocks, renameLayer,
     createGroupFromSet, createGroup, renameGroup, duplicateGroup,
     deleteGroup, translateGroup, rotateGroup, setGroupShadowOnly, createMaskGrid,
+    getShadowOverride, setShadowOverride, removeShadowOverride,
+    getShadowVisibility, setShadowVisibility, setAllowFullShadow,
+    getSubtractedLayers, setSubtractedLayers,
   };
 }
 

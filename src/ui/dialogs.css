@@ -114,3 +114,60 @@
   width: 100%;
   box-sizing: border-box;
 }
+
+/* ---- Group shadow editor (per-casting sections + receiver override rows) ---- */
+.gd-shadow-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--hairline, #c8c8c8);
+}
+.gd-shadow-section:last-child {
+  border-bottom: none;
+}
+.gd-shadow-section-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 8px;
+  font-weight: 600;
+}
+.gd-shadow-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 8px 2px 20px;
+}
+.gd-shadow-row-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.gd-shadow-row .gd-member-name {
+  flex: 1 1 auto;
+}
+.gd-shadow-empty {
+  opacity: 0.6;
+  font-style: italic;
+}
+.gd-shadow-expander {
+  flex: 0 0 auto;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--hairline, #c8c8c8);
+  border-radius: 4px;
+  padding: 2px 8px;
+}
+.gd-shadow-subtract {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding: 4px 8px 6px 28px;
+}
+.gd-shadow-help {
+  margin-top: 8px;
+  font-size: 12px;
+  opacity: 0.75;
+  line-height: 1.4;
+}
