@@ -64,6 +64,22 @@ function saveSettings(s: Settings): void {
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch { /* ignore */ }
 }
 
+// Floating tab-edge overlay position, persisted across sessions.
+const TAB_EDGE_KEY = 'openstrandjs.tabEdgePosition';
+const DEFAULT_TAB_EDGE: { anchor: string; dx: number; dy: number } = { anchor: 'bottom_center', dx: 0, dy: 0 };
+
+function loadTabEdgePosition(): { anchor: string; dx: number; dy: number } {
+  try {
+    const raw = typeof localStorage !== 'undefined' && localStorage.getItem(TAB_EDGE_KEY);
+    if (raw) return { ...DEFAULT_TAB_EDGE, ...JSON.parse(raw) };
+  } catch { /* ignore */ }
+  return { ...DEFAULT_TAB_EDGE };
+}
+
+function saveTabEdgePosition(p: { anchor: string; dx: number; dy: number }): void {
+  try { localStorage.setItem(TAB_EDGE_KEY, JSON.stringify(p)); } catch { /* ignore */ }
+}
+
 const DEFAULT_VIEW: ViewState = {
   zoom: 1, panX: 0, panY: 0, width: 1000, height: 700, supersample: 2,
 };
@@ -92,13 +108,26 @@ export interface EditorState {
   gestureBase: EditorDocument | null;
 
   // multi-tab (Phase 6e). The active tab's doc IS the live `doc`; inactive tabs
-  // hold their saved doc/view.
-  tabs: { id: number; name: string; doc?: EditorDocument; view?: ViewState }[];
+  // hold their saved doc/view. Phase 5 adds session metadata: dirty (unsaved
+  // edits since last save/load), filePath (last saved/loaded path), untitledIndex
+  // (the "Untitled N" number for unsaved tabs).
+  tabs: {
+    id: number; name: string; doc?: EditorDocument; view?: ViewState;
+    dirty?: boolean; filePath?: string; untitledIndex?: number;
+  }[];
   activeTabId: number;
   nextTabId: number;
   newTab: () => void;
   switchTab: (id: number) => void;
   closeTab: (id: number) => void;
+  // Phase 5 tab/session.
+  duplicateTab: (id: number) => void;
+  markActiveDirty: () => void;
+  markTabSaved: (id: number, path: string) => void;
+  setTabEdgeVisible: (b: boolean) => void;
+  // Floating tab-edge overlay anchor/offset, persisted to localStorage.
+  tabEdgePosition: { anchor: string; dx: number; dy: number };
+  setTabEdgePosition: (pos: { anchor: string; dx?: number; dy?: number }) => void;
 
   loadDocument: (doc: EditorDocument) => void;
   setDoc: (doc: EditorDocument) => void;
@@ -118,6 +147,19 @@ export interface EditorState {
   setPending: (pending: PendingStrand | null) => void;
   setMaskPending: (maskPending: string[]) => void;
   setEraser: (eraser: EditorState['eraser']) => void;
+
+  // chrome UI flags (OSS main window). Not part of the document / undo history.
+  panMode: boolean;            // hand tool: left-drag pans the canvas
+  multiSelectMode: boolean;    // multi-select toggle (selection logic: Phase 4)
+  showTabs: boolean;           // tab strip visibility (Tabs toolbar toggle)
+  drawNames: boolean;          // draw layer names on the canvas (renderer task: later)
+  setPanMode: (b: boolean) => void;
+  togglePanMode: () => void;
+  toggleMultiSelect: () => void;
+  toggleTabs: () => void;
+  toggleDrawNames: () => void;
+  // Clear selection AND doc.selected_strand_name in one call (no history step).
+  deselectAll: () => void;
 }
 
 const HISTORY_CAP = 100;
@@ -144,9 +186,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   past: [],
   future: [],
   gestureBase: null,
-  tabs: [{ id: 1, name: 'Untitled 1' }],
+  tabs: [{ id: 1, name: 'Untitled 1', untitledIndex: 1 }],
   activeTabId: 1,
   nextTabId: 2,
+  tabEdgePosition: loadTabEdgePosition(),
 
   newTab: () => set((s) => {
     const tabs = s.tabs.map((t) => (t.id === s.activeTabId ? { ...t, doc: s.doc, view: s.view } : t));
@@ -196,6 +239,48 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     };
   }),
 
+  // Clone the active doc into a brand-new tab named "<name> copy". The new tab
+  // becomes active and starts clean (no dirty flag, fresh history).
+  duplicateTab: (id) => set((s) => {
+    // Persist the active doc/view into its tab first so the source is current.
+    const persisted = s.tabs.map((t) => (t.id === s.activeTabId ? { ...t, doc: s.doc, view: s.view } : t));
+    const src = persisted.find((t) => t.id === id);
+    if (!src) return {};
+    const srcDoc = src.doc ?? (id === s.activeTabId ? s.doc : emptyDocument());
+    const nid = s.nextTabId;
+    const copyDoc = cloneDoc(srcDoc);
+    const tabs = [...persisted, { id: nid, name: `${src.name} copy`, doc: copyDoc, view: src.view }];
+    return {
+      tabs, activeTabId: nid, nextTabId: nid + 1,
+      doc: copyDoc, view: src.view ? { ...src.view } : { ...DEFAULT_VIEW, width: s.view.width, height: s.view.height },
+      past: [], future: [], gestureBase: null,
+      selection: { layerName: copyDoc.selected_strand_name ?? null, handle: null },
+      docRevision: s.docRevision + 1,
+    };
+  }),
+
+  // Flag the active tab dirty (unsaved edits). Wired into commit(); also callable
+  // directly by non-history mutators that should still mark the tab unsaved.
+  markActiveDirty: () => set((s) => {
+    if (s.tabs.find((t) => t.id === s.activeTabId)?.dirty) return {};
+    return { tabs: s.tabs.map((t) => (t.id === s.activeTabId ? { ...t, dirty: true } : t)) };
+  }),
+
+  // Record that a tab was saved to `path`: clears dirty, sets filePath and name.
+  markTabSaved: (id, path) => set((s) => {
+    const name = path.split(/[\\/]/).pop() || path;
+    return { tabs: s.tabs.map((t) => (t.id === id ? { ...t, dirty: false, filePath: path, name } : t)) };
+  }),
+
+  // Tab-edge overlay visibility reuses the showTabs flag.
+  setTabEdgeVisible: (b) => set({ showTabs: b }),
+
+  setTabEdgePosition: (pos) => set((s) => {
+    const next = { anchor: pos.anchor, dx: pos.dx ?? s.tabEdgePosition.dx, dy: pos.dy ?? s.tabEdgePosition.dy };
+    saveTabEdgePosition(next);
+    return { tabEdgePosition: next };
+  }),
+
   loadDocument: (doc) => set((s) => ({
     doc,
     selection: { layerName: doc.selected_strand_name, handle: null },
@@ -216,12 +301,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   beginGesture: () => set((s) => (s.gestureBase ? {} : { gestureBase: cloneDoc(s.doc) })),
 
   // End a gesture: push the baseline to `past` iff the document changed visibly.
+  // A real edit also flags the active tab dirty (Phase 5 session tracking).
   commit: () => set((s) => {
     if (!s.gestureBase) return {};
     if (areVisuallyEqual(s.gestureBase, s.doc)) return { gestureBase: null };
     const past = [...s.past, s.gestureBase];
     if (past.length > HISTORY_CAP) past.shift();
-    return { past, future: [], gestureBase: null };
+    const tabs = s.tabs.map((t) => (t.id === s.activeTabId && !t.dirty ? { ...t, dirty: true } : t));
+    return { past, future: [], gestureBase: null, tabs };
   }),
 
   // Discrete edit = one undo step (begin + mutate + commit).
@@ -280,6 +367,24 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setPending: (pending) => set({ pending }),
   setMaskPending: (maskPending) => set({ maskPending }),
   setEraser: (eraser) => set({ eraser }),
+
+  panMode: false,
+  multiSelectMode: false,
+  showTabs: true,
+  drawNames: false,
+  setPanMode: (panMode) => set({ panMode }),
+  togglePanMode: () => set((s) => ({ panMode: !s.panMode })),
+  toggleMultiSelect: () => set((s) => ({ multiSelectMode: !s.multiSelectMode })),
+  toggleTabs: () => set((s) => ({ showTabs: !s.showTabs })),
+  toggleDrawNames: () => set((s) => ({ drawNames: !s.drawNames })),
+
+  deselectAll: () => set((s) => {
+    const doc = cloneDoc(s.doc);
+    doc.selected_strand_name = null;
+    return {
+      doc, selection: { layerName: null, handle: null }, docRevision: s.docRevision + 1,
+    };
+  }),
 }));
 
 // Convenience accessor for imperative (non-React) code.

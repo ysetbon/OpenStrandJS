@@ -1,0 +1,111 @@
+/* OSS theme token layer. Three themes (default / light / dark) as CSS custom
+ * properties, applied via a class on <html> (set in App.tsx). Every theme-driven
+ * chrome color reads a var(--…); theme-INDEPENDENT OSS colors (the colored
+ * toolbar mode buttons, the round control-column buttons, the 6 layer-control
+ * buttons) stay literal in their own component CSS and are NOT tokenized.
+ *
+ * Exact values transcribed from OpenStrandStudio (main_window.py / settings_dialog.py
+ * stylesheets). See UI_PORT_PLAN.md §2.6 / §2.7. */
+
+.theme-default {
+  --window-bg: #ECECEC;
+  --text: #000000;
+  --canvas-bg: #FFFFFF;
+  --button-bg: #E8E8E8;
+  --button-hover: #DADADA;
+  --button-pressed: #C8C8C8;
+  --dialog-btn-bg: #E8E8E8;
+  --dialog-btn-border: #B0B0B0;
+  --scrollbar-track: #DADADA;
+  --scrollbar-handle: #BFBFBF;
+  --scrollbar-handle-hover: #A0A0A0;
+  --scrollbar-handle-pressed: #808080;
+  --panel-bg: #ECECEC;
+  --panel-border: #C9C9C9;
+  --hairline: #D6D6D6;
+  --group-bg: #B9B4AE;
+  --group-hover-bg: #A29E99;
+  --menu-bg: #ECECEC;
+  --menu-border: #B0B0B0;
+  --menu-selected-bg: #96938F;
+  --menu-selected-text: #FFFFFF;
+  --create-group-bg: #96938F;
+  --create-group-text: #FFFFFF;
+  --create-group-border: transparent;
+  --create-group-radius: 0px;
+  /* tab edge (Phase 5) */
+  --tab-panel-bg: rgba(25,25,25,0.529);
+  --tab-border: rgba(210,210,210,0.471);
+  --tab-active-bg: #E8E8E8;
+  --tab-inactive-bg: rgba(45,45,45,0.667);
+  --tab-active-text: #111111;
+  --tab-inactive-text: #F0F0F0;
+}
+
+.theme-light {
+  --window-bg: #FFFFFF;
+  --text: #000000;
+  --canvas-bg: #FFFFFF;
+  --button-bg: #F0F0F0;
+  --button-hover: #E0E0E0;
+  --button-pressed: #D0D0D0;
+  --dialog-btn-bg: #F0F0F0;
+  --dialog-btn-border: #CCCCCC;
+  --scrollbar-track: #F5F5F5;
+  --scrollbar-handle: #D4D4D4;
+  --scrollbar-handle-hover: #B0B0B0;
+  --scrollbar-handle-pressed: #909090;
+  --panel-bg: #FFFFFF;
+  --panel-border: #E2E2E2;
+  --hairline: #ECECEC;
+  --group-bg: #D5CEC6;
+  --group-hover-bg: #C4BDB5;
+  --menu-bg: #F0F0F0;
+  --menu-border: #B8B8B8;
+  --menu-selected-bg: #333333;
+  --menu-selected-text: #FFFFFF;
+  --create-group-bg: #A6A19A;
+  --create-group-text: #000000;
+  --create-group-border: transparent;
+  --create-group-radius: 0px;
+  --tab-panel-bg: rgba(255,255,255,0.745);
+  --tab-border: rgba(80,80,80,0.392);
+  --tab-active-bg: #FFFFFF;
+  --tab-inactive-bg: rgba(225,225,225,0.706);
+  --tab-active-text: #111111;
+  --tab-inactive-text: #333333;
+}
+
+.theme-dark {
+  --window-bg: #2C2C2C;
+  --text: #FFFFFF;
+  --canvas-bg: #2C2C2C;
+  --button-bg: #2C2C2C;
+  --button-hover: #3D3D3D;
+  --button-pressed: #2D2D2D;
+  --dialog-btn-bg: #252525;
+  --dialog-btn-border: #000000;
+  --scrollbar-track: #1A1A1A;
+  --scrollbar-handle: #2D2D2D;
+  --scrollbar-handle-hover: #4A4A4A;
+  --scrollbar-handle-pressed: #606060;
+  --panel-bg: #2C2C2C;
+  --panel-border: #3A3A40;
+  --hairline: #3A3A40;
+  --group-bg: #4D4D4D;
+  --group-hover-bg: #666666;
+  --menu-bg: #333333;
+  --menu-border: #1A1A1A;
+  --menu-selected-bg: #F0F0F0;
+  --menu-selected-text: #000000;
+  --create-group-bg: #2A2A2A;
+  --create-group-text: #FFFFFF;
+  --create-group-border: #000000;
+  --create-group-radius: 4px;
+  --tab-panel-bg: rgba(15,15,15,0.647);
+  --tab-border: rgba(230,230,230,0.333);
+  --tab-active-bg: #4A4A4A;
+  --tab-inactive-bg: rgba(35,35,35,0.706);
+  --tab-active-text: #FFFFFF;
+  --tab-inactive-text: #DADADA;
+}

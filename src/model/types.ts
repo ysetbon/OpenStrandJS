@@ -74,11 +74,17 @@ export interface StrandRecord {
   extra: Record<string, unknown>;
 }
 
+// A group record: arbitrary membership of (non-masked) layer_names that move /
+// rotate / shadow-toggle together. Serialization-safe (plain string[]); stored
+// under doc.groups[name] but the field type stays Record<string,unknown> so the
+// save/load round-trip is permissive — actions cast to GroupRecord internally.
+export interface GroupRecord { main_strands: string[]; }
+
 // One document == one tab == one undo snapshot.
 export interface EditorDocument {
   order: LayerName[];                        // draw order == z-order (last = topmost)
   strands: Record<LayerName, StrandRecord>;  // keyed by layer_name
-  groups: Record<string, unknown>;           // passthrough in Phase 1
+  groups: Record<string, unknown>;           // GroupRecord values (cast in actions)
   selected_strand_name: LayerName | null;
   locked_layers: LayerName[];
   lock_mode: boolean;
@@ -87,7 +93,10 @@ export interface EditorDocument {
   shadow_overrides: Record<string, unknown>;
 }
 
-export type ModeName = 'select' | 'move' | 'attach' | 'mask';
+// Interaction modes. select/move/attach/mask are fully implemented; view is a
+// read-only inspect mode; rotate/angle are registered stubs (toolbar parity with
+// OSS, wired to passive modes until their gestures land).
+export type ModeName = 'select' | 'move' | 'attach' | 'mask' | 'view' | 'rotate' | 'angle';
 
 export type HandleKind =
   | 'start' | 'end'
@@ -108,7 +117,7 @@ export interface ViewState {
 }
 
 export type Theme = 'default' | 'light' | 'dark';
-export type Language = 'en' | 'fr' | 'it' | 'es' | 'pt' | 'he';
+export type Language = 'en' | 'fr' | 'de' | 'it' | 'es' | 'pt' | 'he';
 
 export interface Settings {
   curve_params: { base_fraction: number; dist_multiplier: number; exponent: number };

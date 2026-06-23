@@ -1,0 +1,38 @@
+/* OSS bottom control stack (LayerPanel §2.4). Six full-width buttons,
+   2px gap. Per-button colors come in as inline --bg/--bgh/--bgp vars. */
+
+.layer-control-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lc-btn {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 10px;
+  font-size: 18px;
+  font-weight: bold;
+  color: #000;
+  text-align: center;
+  border: 1px solid #888;
+  border-radius: 4px;
+  cursor: pointer;
+  background: var(--bg);
+}
+
+.lc-btn:hover:not(:disabled) {
+  background: var(--bgh);
+}
+
+.lc-btn:active:not(:disabled),
+.lc-btn.checked {
+  background: var(--bgp);
+}
+
+.lc-btn:disabled {
+  background: #D3D3D3;
+  color: #666;
+  cursor: default;
+}

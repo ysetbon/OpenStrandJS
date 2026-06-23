@@ -1,0 +1,146 @@
+/* GroupPanel — OSS Groups UI (UI_PORT_PLAN §2.5).
+ * Create Group button is theme-driven via the --create-group-* tokens.
+ * Tree rows use --group-bg / --group-hover-bg. QTreeWidget: indentation 16,
+ * no native triangles, item padding 2px 4px 2px 14px (LTR). */
+
+.gp-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  margin: 0 5px;
+  gap: 4px;
+}
+
+/* Create Group button: fixed 140x50. */
+.gp-create-btn {
+  width: 140px;
+  height: 50px;
+  align-self: flex-start;
+  margin: 4px 0;
+  font-size: 20px;
+  cursor: pointer;
+  background: var(--create-group-bg);
+  color: var(--create-group-text);
+  border: 2px solid var(--create-group-border);
+  border-radius: var(--create-group-radius);
+}
+
+.gp-tree {
+  display: flex;
+  flex-direction: column;
+}
+
+.gp-group {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Bold top-level group row: arrow + name. */
+.gp-group-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 14px;
+  font-weight: bold;
+  cursor: pointer;
+  user-select: none;
+  background: var(--group-bg);
+  color: var(--text);
+}
+
+.gp-group-row:hover {
+  background: var(--group-hover-bg);
+}
+
+.gp-arrow {
+  display: inline-block;
+  width: 12px;
+  text-align: center;
+  flex: 0 0 auto;
+  font-size: 10px;
+}
+
+.gp-group-name {
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Child = one member main-strand id; indentation 16. */
+.gp-child-row {
+  padding: 2px 4px 2px 30px; /* 14 base + 16 indentation */
+  background: var(--group-bg);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: none;
+}
+
+.gp-child-row:hover {
+  background: var(--group-hover-bg);
+}
+
+/* RTL: mirror the QTreeWidget indentation. */
+.rtl .gp-group-row {
+  padding: 2px 14px 2px 4px;
+}
+.rtl .gp-child-row {
+  padding: 2px 30px 2px 4px;
+}
+.rtl .gp-create-btn {
+  align-self: flex-end;
+}
+
+/* --- Built-in fallback dialog bodies (until C4 supplies the real ones) --- */
+
+.gp-rename-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  font-size: 14px;
+}
+
+.gp-select-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.gp-select-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.gp-select-row input {
+  width: 20px;
+  height: 20px;
+}
+
+.gp-placeholder {
+  min-width: 240px;
+  min-height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.6;
+}
+
+.gp-dlg-btn {
+  min-width: 72px;
+  padding: 6px 14px;
+  cursor: pointer;
+  background: var(--button-bg);
+  color: var(--text);
+  border: 1px solid var(--menu-border);
+  border-radius: 4px;
+}
+
+.gp-dlg-btn:hover {
+  background: var(--button-hover);
+}

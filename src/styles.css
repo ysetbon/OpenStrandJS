@@ -1,113 +1,127 @@
+@import './ui/theme.css';
+@import './ui/toolbar.css';
+@import './ui/controlColumn.css';
+@import './ui/layerButton.css';
+@import './ui/layerControls.css';
+@import './ui/groupPanel.css';
+@import './ui/contextMenu.css';
+@import './ui/dialogs.css';
+@import './ui/tabEdge.css';
+
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
-body { font: 14px/1.4 system-ui, -apple-system, sans-serif; color: #1a1a1a; }
-
-.app { display: flex; flex-direction: column; height: 100%; }
-
-.toolbar {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 12px; background: #f5f5f5; border-bottom: 1px solid #ddd;
-  flex-wrap: wrap;
-}
-.toolbar .group { display: flex; gap: 4px; align-items: center; }
-.toolbar .spacer { flex: 1; }
-.toolbar button {
-  font: 13px system-ui; padding: 5px 10px;
-  border: 1px solid #ccc; background: #fff; border-radius: 6px; cursor: pointer;
-}
-.toolbar button:hover { background: #f0f0f0; }
-.toolbar button.active { background: #0a7d22; color: #fff; border-color: #0a7d22; }
-
-.tabbar { display: flex; align-items: stretch; gap: 2px; padding: 4px 8px 0; background: #ededed; border-bottom: 1px solid #ddd; }
-.tab { display: flex; align-items: center; gap: 6px; padding: 4px 10px; background: #dcdce0; border: 1px solid #ccc; border-bottom: none; border-radius: 6px 6px 0 0; cursor: pointer; font-size: 12px; }
-.tab.active { background: #fff; font-weight: 600; }
-.tab-close { border: none; background: transparent; cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px; color: #888; }
-.tab-close:hover { color: #c00; }
-.tab-new { border: 1px solid #ccc; background: #fff; border-radius: 6px; cursor: pointer; padding: 2px 8px; margin-left: 2px; }
-.theme-dark .tabbar { background: #222226; border-color: #3a3a40; }
-.theme-dark .tab { background: #33333a; border-color: #44444c; color: #ddd; }
-.theme-dark .tab.active { background: #1e1e22; }
-
-.workarea { display: flex; flex: 1; min-height: 0; }
-
-.stage {
-  position: relative; flex: 1; overflow: hidden;
-  background: repeating-conic-gradient(#fafafa 0% 25%, #fff 0% 50%) 50% / 24px 24px;
+body {
+  font: 14px/1.4 system-ui, -apple-system, sans-serif;
+  color: var(--text);
+  background: var(--window-bg);
 }
 
+/* ---- main-window shell (splitter: left_widget | layer panel) ---- */
+.app { height: 100%; }
+.shell { display: flex; height: 100%; min-height: 0; background: var(--window-bg); }
+
+.left-widget {
+  display: flex; flex-direction: column;
+  flex: 1 1 auto; min-width: 300px; min-height: 0;
+}
+.canvas-wrap { position: relative; flex: 1 1 auto; min-height: 0; display: flex; }
+
+.splitter-handle {
+  flex: 0 0 1px; width: 1px;
+  background: var(--panel-border); cursor: col-resize; position: relative;
+}
+.splitter-handle::after { content: ''; position: absolute; top: 0; bottom: 0; left: -3px; right: -3px; }
+
+.stage { position: relative; flex: 1; overflow: hidden; background: var(--canvas-bg); }
+#c, #overlay { position: absolute; top: 0; left: 0; }
+#c { background: var(--canvas-bg); touch-action: none; }
+#overlay { pointer-events: none; }
+
+/* ---- layer panel (OSS QHBoxLayout: left_panel | 270px right group_panel) ---- */
 .layer-panel {
-  width: 230px; flex: 0 0 230px; border-left: 1px solid #ddd;
-  background: #fafafa; display: flex; flex-direction: column; overflow: hidden;
+  width: var(--panel-w, 490px); flex: 0 0 var(--panel-w, 490px);
+  min-width: 460px;
+  border-inline-start: 1px solid var(--panel-border);
+  background: var(--panel-bg); color: var(--text);
+  display: flex; flex-direction: row; overflow: hidden;
 }
+/* Left sub-column: control column + layer list + 6-button stack. */
+.lp-left {
+  flex: 1 1 auto; min-width: 0;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+/* Right sub-column: fixed 270px group panel. */
+.lp-right {
+  flex: 0 0 270px; min-width: 270px;
+  display: flex; flex-direction: column; overflow: hidden;
+  border-inline-start: 1px solid var(--panel-border);
+}
+.lp-right .gp-panel { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.lp-right .gp-tree { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .lp-head {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 8px 10px; border-bottom: 1px solid #e2e2e2; font-weight: 600;
+  padding: 8px 10px; border-bottom: 1px solid var(--hairline); font-weight: 600;
 }
-.lp-actions { display: flex; gap: 2px; }
-.lp-actions button, .lp-row-actions button {
-  border: 1px solid transparent; background: transparent; cursor: pointer;
-  border-radius: 5px; padding: 2px 6px; font-size: 13px; line-height: 1;
+/* Scrollable layer list of NumberedLayerButtons (top = z-top). */
+.lp-list {
+  overflow-y: auto; flex: 1 1 auto; min-height: 80px;
+  padding: 4px 6px; display: flex; flex-direction: column; align-items: stretch; gap: 3px;
 }
-.lp-actions button:hover, .lp-row-actions button:hover { background: rgba(0,0,0,.08); }
-.lp-list { overflow-y: auto; flex: 1; padding: 4px; }
 .lp-empty { color: #999; font-size: 12px; padding: 10px; }
-.lp-row {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 5px 8px; margin: 3px 2px; border-radius: 6px; cursor: pointer;
-  box-shadow: 0 1px 2px rgba(0,0,0,.12); user-select: none; font-size: 12px;
+/* Each list item wraps the button so the drop line can sit above it. */
+.lp-item { position: relative; display: flex; flex-direction: column; }
+/* Blue insertion line at the drop target — QColor(0,120,215), 2px. */
+.lp-drop-line {
+  height: 2px; margin: 0 2px 1px; border-radius: 1px;
+  background: rgb(0, 120, 215);
 }
-.lp-row.sel { outline: 2px solid #0a7d22; outline-offset: 1px; }
-.lp-row.hidden { opacity: .5; }
-.lp-row.locked { filter: grayscale(.4); }
-.lp-name { font-weight: 600; }
-.lp-row-actions { display: flex; gap: 1px; }
 
-.props { border-top: 1px solid #e2e2e2; padding: 8px 10px; font-size: 12px; display: flex; flex-direction: column; gap: 6px; }
+.props { border-top: 1px solid var(--hairline); padding: 8px 10px; font-size: 12px; display: flex; flex-direction: column; gap: 6px; }
 .props.empty { color: #999; }
 .props-title { font-weight: 600; }
 .props-hint { color: #888; }
 .cf { display: flex; align-items: center; gap: 6px; }
-.cf-label { width: 42px; color: #555; }
-.cf input[type=color] { width: 30px; height: 22px; padding: 0; border: 1px solid #ccc; border-radius: 4px; background: none; }
+.cf-label { width: 42px; color: var(--text); opacity: .75; }
+.cf input[type=color] { width: 30px; height: 22px; padding: 0; border: 1px solid var(--panel-border); border-radius: 4px; background: none; }
 .cf input[type=range] { flex: 1; }
-.cf-a { width: 26px; text-align: right; color: #666; }
+.cf-a { width: 26px; text-align: right; opacity: .7; }
 .props-row { display: flex; align-items: center; gap: 6px; }
-.props-row span { width: 42px; color: #555; }
+.props-row span { width: 42px; color: var(--text); opacity: .75; }
 .props-row input[type=range] { flex: 1; }
 .props-row b { width: 26px; text-align: right; }
-.props-check { display: flex; align-items: center; gap: 6px; color: #555; }
+.props-check { display: flex; align-items: center; gap: 6px; color: var(--text); opacity: .85; }
 
-.groups { border-top: 1px solid #e2e2e2; padding: 8px 10px; font-size: 12px; }
-.groups-head { display: flex; align-items: center; justify-content: space-between; font-weight: 600; margin-bottom: 4px; }
-.groups-head button, .group-nudge button { border: 1px solid #ccc; background: #fff; border-radius: 5px; cursor: pointer; padding: 2px 6px; font-size: 12px; }
-.groups-head button:disabled { opacity: .4; cursor: default; }
-.group-row { display: flex; align-items: center; justify-content: space-between; padding: 3px 0; }
-.group-nudge { display: flex; gap: 1px; }
-.theme-dark .groups { border-color: #3a3a40; }
-.theme-dark .groups-head button, .theme-dark .group-nudge button { background: #33333a; color: #ddd; border-color: #44444c; }
+/* ---- layer-state dialog (Toolbar "State") ---- */
+.layer-state-log {
+  max-height: 60vh; min-width: 360px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 2px; font-size: 12px;
+}
+.layer-state-empty { color: #999; padding: 8px; }
+.layer-state-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 3px 4px; border-bottom: 1px solid var(--hairline);
+}
+.layer-state-row .ls-idx { width: 22px; text-align: right; opacity: .6; font-variant-numeric: tabular-nums; }
+.layer-state-row .ls-swatch { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--panel-border); flex: 0 0 auto; }
+.layer-state-row .ls-name { font-weight: 600; }
+.layer-state-row .ls-type { opacity: .7; }
+.layer-state-row .ls-set { opacity: .7; }
+.layer-state-row .ls-color { margin-inline-start: auto; font-family: monospace; opacity: .8; }
+.layer-state-row .ls-flags { color: #c0392b; }
+.layer-state-row .ls-missing { color: #c0392b; font-style: italic; }
 
-/* settings modal */
-.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
-.modal { background: #fff; border-radius: 10px; padding: 18px 20px; min-width: 320px; box-shadow: 0 10px 40px rgba(0,0,0,.3); display: flex; flex-direction: column; gap: 8px; }
+/* ---- settings modal ---- */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, .4); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.modal {
+  background: var(--panel-bg); color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 10px; padding: 18px 20px; min-width: 320px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, .3); display: flex; flex-direction: column; gap: 8px;
+}
 .modal h2 { margin: 0 0 6px; font-size: 16px; }
 .modal .mrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.modal .mrow span { color: #555; }
+.modal .mrow span { opacity: .8; }
 .modal input[type=number] { width: 80px; }
-.mcurve { border: 1px solid #ddd; border-radius: 6px; padding: 6px 10px; display: flex; flex-direction: column; gap: 6px; }
-.mcurve legend { color: #555; padding: 0 4px; }
+.mcurve { border: 1px solid var(--panel-border); border-radius: 6px; padding: 6px 10px; display: flex; flex-direction: column; gap: 6px; }
+.mcurve legend { opacity: .8; padding: 0 4px; }
 .modal > button { margin-top: 8px; align-self: flex-end; padding: 5px 14px; }
-
-/* dark theme (class on <html>) */
-.theme-dark body { background: #1e1e22; color: #e6e6e6; }
-.theme-dark .toolbar { background: #26262b; border-color: #3a3a40; }
-.theme-dark .toolbar button { background: #33333a; color: #e6e6e6; border-color: #44444c; }
-.theme-dark .toolbar button.active { background: #0a7d22; border-color: #0a7d22; }
-.theme-dark .layer-panel { background: #26262b; border-color: #3a3a40; }
-.theme-dark .lp-head, .theme-dark .props { border-color: #3a3a40; }
-.theme-dark .props-title, .theme-dark .cf-label, .theme-dark .props-row span, .theme-dark .props-check { color: #cfcfcf; }
-.theme-dark .modal { background: #2a2a30; color: #e6e6e6; }
-.theme-dark .mcurve { border-color: #44444c; }
-.theme-dark .mcurve legend, .theme-dark .modal .mrow span { color: #cfcfcf; }
-#c, #overlay { position: absolute; top: 0; left: 0; }
-#c { background: #fff; touch-action: none; }
-#overlay { pointer-events: none; }

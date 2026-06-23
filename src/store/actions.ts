@@ -3,7 +3,7 @@
 // store.mutateDoc(draft => ...). No object cross-references, so drafts stay
 // JSON-serializable for future snapshot history.
 
-import type { EditorDocument, HandleKind, Point, RGBA, Settings, StrandRecord } from '../model/types';
+import type { EditorDocument, GroupRecord, HandleKind, Point, RGBA, Settings, StrandRecord } from '../model/types';
 import { weldedEndpoints } from '../interaction/connections';
 import { makeAttachedStrand, makeStrand } from '../model/factory';
 import { maskComponents, nextFreeSet, nextIndexInSet } from '../model/layerName';
@@ -260,11 +260,11 @@ export function setShadowOnly(draft: EditorDocument, name: string, value: boolea
   if (s) s.shadow_only = value;
 }
 
-// ---- groups (Phase 6f, minimal) ----
-// A group is stored as { main_strands: layer_names } under doc.groups[name].
-// Membership here is "every non-masked strand sharing a set_number" (the
-// branch-prefix "<set>_*" family).
-interface GroupRecord { main_strands: string[] }
+// ---- groups (Phase 6f) ----
+// A group is stored as { main_strands: layer_names } under doc.groups[name]
+// (GroupRecord, imported from types). createGroupFromSet's membership is "every
+// non-masked strand sharing a set_number" (the branch-prefix "<set>_*" family);
+// createGroup takes arbitrary membership.
 
 export function createGroupFromSet(draft: EditorDocument, setNumber: number): string | null {
   const members = Object.keys(draft.strands).filter(
@@ -306,13 +306,136 @@ export function translateGroup(draft: EditorDocument, name: string, dx: number, 
   }
 }
 
+// Create a group from an ARBITRARY set of members (not a whole set). Keeps only
+// existing, non-masked layer_names. No-op (returns null) on empty membership or
+// a name collision.
+export function createGroup(draft: EditorDocument, name: string, mainStrands: string[]): string | null {
+  const members = mainStrands.filter(
+    (n) => draft.strands[n] && draft.strands[n].type !== 'MaskedStrand',
+  );
+  if (!members.length) return null;
+  if ((draft.groups as Record<string, unknown>)[name]) return null;
+  (draft.groups as Record<string, GroupRecord>)[name] = { main_strands: members };
+  return name;
+}
+
+// Rename a group key (preserving membership). No-op on missing source or
+// destination collision.
+export function renameGroup(draft: EditorDocument, oldName: string, newName: string): void {
+  if (oldName === newName) return;
+  const groups = draft.groups as Record<string, GroupRecord>;
+  if (!groups[oldName] || groups[newName]) return;
+  groups[newName] = groups[oldName];
+  delete groups[oldName];
+}
+
+// Duplicate a group under a fresh unique name ("<name> copy", then " copy 2"…),
+// sharing the same membership. Returns the new name, or null if missing.
+export function duplicateGroup(draft: EditorDocument, name: string): string | null {
+  const groups = draft.groups as Record<string, GroupRecord>;
+  const g = groups[name];
+  if (!g) return null;
+  let candidate = `${name} copy`;
+  let n = 2;
+  while (groups[candidate]) candidate = `${name} copy ${n++}`;
+  groups[candidate] = { main_strands: [...(g.main_strands || [])] };
+  return candidate;
+}
+
+// Rotate every member strand (start/end/control_points/control_point_center) and
+// the deletion-rectangle corners of masks wholly inside the group, by angleDeg
+// about the group centroid. The centroid is the mean of member start+end points.
+export function rotateGroup(draft: EditorDocument, name: string, angleDeg: number): void {
+  const g = (draft.groups as Record<string, GroupRecord>)[name];
+  if (!g) return;
+  const members = new Set(g.main_strands || []);
+
+  // Centroid from member endpoints.
+  let sx = 0, sy = 0, n = 0;
+  for (const layer of members) {
+    const s = draft.strands[layer];
+    if (!s) continue;
+    sx += s.start.x + s.end.x; sy += s.start.y + s.end.y; n += 2;
+  }
+  if (n === 0) return;
+  const cx = sx / n, cy = sy / n;
+
+  const rad = (angleDeg * Math.PI) / 180;
+  const cos = Math.cos(rad), sin = Math.sin(rad);
+  const rotXY = (x: number, y: number): [number, number] => {
+    const dx = x - cx, dy = y - cy;
+    return [cx + dx * cos - dy * sin, cy + dx * sin + dy * cos];
+  };
+  const rotP = (p: Point | null | undefined) => {
+    if (!p) return;
+    const [x, y] = rotXY(p.x, p.y); p.x = x; p.y = y;
+  };
+
+  for (const layer of members) {
+    const s = draft.strands[layer];
+    if (!s) continue;
+    rotP(s.start); rotP(s.end);
+    rotP(s.control_points[0]); rotP(s.control_points[1]); rotP(s.control_point_center);
+  }
+  for (const k of Object.keys(draft.strands)) {
+    const m = draft.strands[k];
+    if (m.type !== 'MaskedStrand') continue;
+    const comp = maskComponents(k);
+    if (!comp || !members.has(comp.first) || !members.has(comp.second)) continue;
+    for (const r of m.deletion_rectangles || []) {
+      for (const c of [r.top_left, r.top_right, r.bottom_left, r.bottom_right]) {
+        if (c) { const [x, y] = rotXY(c[0], c[1]); c[0] = x; c[1] = y; }
+      }
+      // {x,y,width,height} rects: rotate the top-left corner (best-effort; corner
+      // arrays are the faithful form and are handled above).
+      if (r.x != null && r.y != null) { const [x, y] = rotXY(r.x, r.y); r.x = x; r.y = y; }
+    }
+  }
+}
+
+// Best-effort group shadow toggle: set shadow_only on every member strand.
+export function setGroupShadowOnly(draft: EditorDocument, name: string, value: boolean): void {
+  const g = (draft.groups as Record<string, GroupRecord>)[name];
+  if (!g) return;
+  for (const layer of g.main_strands || []) {
+    const s = draft.strands[layer];
+    if (s) s.shadow_only = value;
+  }
+}
+
+// Best-effort mask grid: for each unordered pair of distinct members that don't
+// already have a mask (in either over/under direction), create an over/under
+// MaskedStrand via createMask (first member = OVER). Returns the names created.
+// TODO: faithful OSS grid logic resolves true crossings and over/under ordering
+// from geometry; this is the reasonable pairwise version.
+export function createMaskGrid(draft: EditorDocument, name: string): string[] {
+  const g = (draft.groups as Record<string, GroupRecord>)[name];
+  if (!g) return [];
+  const members = (g.main_strands || []).filter(
+    (n) => draft.strands[n] && draft.strands[n].type !== 'MaskedStrand',
+  );
+  const created: string[] = [];
+  for (let i = 0; i < members.length; i++) {
+    for (let j = i + 1; j < members.length; j++) {
+      const a = members[i], b = members[j];
+      // Skip if a mask already exists in either direction.
+      if (draft.strands[`${a}_${b}`] || draft.strands[`${b}_${a}`]) continue;
+      const made = createMask(draft, a, b);
+      if (made) created.push(made);
+    }
+  }
+  return created;
+}
+
 // Dev-only debug handle for testing actions directly.
 if (import.meta.env?.DEV) {
   (globalThis as Record<string, unknown>).__actions = {
     moveHandle, addNewStrand, attachChild, createMask, addDeletionRect, resetMask,
     deleteStrand, deleteAllStrands, reorderLayer, toggleHidden, toggleLock,
     setColor, setWidth, setShadowOnly,
-    createGroupFromSet, deleteGroup, translateGroup,
+    toggleLockMode, clearAllLocks, renameLayer,
+    createGroupFromSet, createGroup, renameGroup, duplicateGroup,
+    deleteGroup, translateGroup, rotateGroup, setGroupShadowOnly, createMaskGrid,
   };
 }
 
@@ -320,6 +443,77 @@ export function toggleLock(draft: EditorDocument, name: string): void {
   const i = draft.locked_layers.indexOf(name);
   if (i >= 0) draft.locked_layers.splice(i, 1);
   else draft.locked_layers.push(name);
+}
+
+// ---- Phase 4: layer panel (lock-mode, clear locks, rename) ----
+
+// Flip the document-wide lock mode (when on, the panel locks/unlocks per-layer).
+export function toggleLockMode(draft: EditorDocument): void {
+  draft.lock_mode = !draft.lock_mode;
+}
+
+// Clear every per-layer lock (exit-lock-mode "clear all" affordance).
+export function clearAllLocks(draft: EditorDocument): void {
+  draft.locked_layers = [];
+}
+
+// Rename a layer EVERYWHERE so save/load round-trips: order[], the strands key,
+// the record's own layer_name, locked_layers, selected_strand_name, any
+// AttachedStrand.attached_to pointing at it, and every MaskedStrand whose name
+// concatenates it as a component (the mask layer_name is first+second, so we
+// rebuild the mask key when a component is renamed). No-op if the target is
+// missing or the new name collides.
+export function renameLayer(draft: EditorDocument, oldName: string, newName: string): void {
+  if (oldName === newName) return;
+  if (!draft.strands[oldName]) return;
+  if (draft.strands[newName]) return; // collision — refuse
+
+  // 1) Move the record under the new key and update its own layer_name.
+  const rec = draft.strands[oldName];
+  rec.layer_name = newName;
+  draft.strands[newName] = rec;
+  delete draft.strands[oldName];
+
+  // 2) z-order.
+  draft.order = draft.order.map((n) => (n === oldName ? newName : n));
+
+  // 3) locks.
+  draft.locked_layers = draft.locked_layers.map((n) => (n === oldName ? newName : n));
+
+  // 4) selection.
+  if (draft.selected_strand_name === oldName) draft.selected_strand_name = newName;
+
+  // 5) attached_to references.
+  for (const k of Object.keys(draft.strands)) {
+    const s = draft.strands[k];
+    if (s.type === 'AttachedStrand' && s.attached_to === oldName) s.attached_to = newName;
+  }
+
+  // 6) masks whose name references the renamed component — rebuild the key.
+  for (const k of Object.keys(draft.strands)) {
+    const m = draft.strands[k];
+    if (m.type !== 'MaskedStrand') continue;
+    const comp = maskComponents(k);
+    if (!comp) continue;
+    if (comp.first !== oldName && comp.second !== oldName) continue;
+    const first = comp.first === oldName ? newName : comp.first;
+    const second = comp.second === oldName ? newName : comp.second;
+    const maskNew = `${first}_${second}`;
+    if (maskNew === k || draft.strands[maskNew]) continue; // unchanged or collision
+    m.layer_name = maskNew;
+    draft.strands[maskNew] = m;
+    delete draft.strands[k];
+    draft.order = draft.order.map((n) => (n === k ? maskNew : n));
+    draft.locked_layers = draft.locked_layers.map((n) => (n === k ? maskNew : n));
+    if (draft.selected_strand_name === k) draft.selected_strand_name = maskNew;
+  }
+
+  // 7) group membership references.
+  for (const gk of Object.keys(draft.groups)) {
+    const g = draft.groups[gk] as GroupRecord | undefined;
+    if (!g || !Array.isArray(g.main_strands)) continue;
+    g.main_strands = g.main_strands.map((n) => (n === oldName ? newName : n));
+  }
 }
 
 // Create an over/under MaskedStrand from two existing strands. `first` is OVER,

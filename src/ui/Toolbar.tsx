@@ -1,33 +1,65 @@
 import { useRef, useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import { SettingsDialog } from './SettingsDialog';
+import { LayerStateDialog } from './LayerStateDialog';
 import { t } from './i18n';
 import { loadProject, serializeProject } from '../io/saveLoad';
 import { downloadJSON } from '../io/fileDialog';
 import { exportPng } from '../io/exportPng';
-import { resetMask } from '../store/actions';
 import { fitPan } from '../interaction/viewTransform';
 import type { ModeName } from '../model/types';
 
+// JS-only dev affordance (no OSS equivalent) — hidden in production builds.
 const FIXTURES = ['single_strand', 'three_strand_braid', 'overhand_knot', 'closed_knot'];
-const MODES: ModeName[] = ['select', 'move', 'attach', 'mask'];
+
+// The OSS toolbar (main_window.py). A horizontal row of colored mode/toggle/action
+// buttons, then a flex spacer, then the State + Settings buttons. Colors, order and
+// checkable-ness are an exact transcription of UI_PORT_PLAN.md §2.2.
+type ToggleId = 'grid' | 'points' | 'shadow' | 'tabs';
+type ActionId = 'save' | 'load' | 'image';
+interface Btn {
+  key: string;
+  label?: string;                 // override when no translation key exists
+  c: [string, string, string];    // [normal, hover, pressed]
+  mode?: ModeName;                 // exclusive mode button (checked == active mode)
+  toggle?: ToggleId;              // checkable toggle bound to a flag
+  action?: ActionId;             // one-shot, non-checkable
+}
+
+const BTNS: Btn[] = [
+  { key: 'view_mode',   c: ['#ccbaba', '#E2C4C4', '#B88A8A'], mode: 'view' },
+  { key: 'mask_mode',   c: ['#199693', '#4CCBC8', '#0F625F'], mode: 'mask' },
+  { key: 'select_mode', c: ['#F1C40F', '#F9E287', '#BB9A0C'], mode: 'select' },
+  { key: 'attach_mode', c: ['#9B59B6', '#D5A6E6', '#703D80'], mode: 'attach' },
+  { key: 'move_mode',   c: ['#D35400', '#FFA366', '#A84300'], mode: 'move' },
+  { key: 'rotate_mode', c: ['#3498DB', '#92C9F0', '#216B97'], mode: 'rotate' },
+  { key: 'toggle_grid', c: ['#E93E3E', '#FF7070', '#ab2e2e'], toggle: 'grid' },
+  { key: 'angle_adjust_mode', c: ['#B89EE6', '#D4C2F2', '#9B84C9'], mode: 'angle' },
+  { key: 'save',        c: ['#E75480', '#FF9FBB', '#B64064'], action: 'save' },
+  { key: 'load',        c: ['#8D6E63', '#BEA499', '#8D6E63'], action: 'load' },
+  { key: 'save_image',  c: ['#7D344D', '#B36E89', '#7D344D'], action: 'image' },
+  { key: 'toggle_control_points', c: ['#4CAF50', '#81C784', '#388E3C'], toggle: 'points' },
+  { key: 'toggle_shadow', c: ['rgba(176,190,197,.7)', 'rgba(196,207,212,.7)', 'rgba(156,173,182,.7)'], toggle: 'shadow' },
+  { key: 'tabs', label: 'Tabs', c: ['#a34d92', '#b85baa', '#833a75'], toggle: 'tabs' },
+];
+
+const btnVars = (c: [string, string, string]): React.CSSProperties =>
+  ({ ['--bg' as string]: c[0], ['--bgh' as string]: c[1], ['--bgp' as string]: c[2] });
 
 export function Toolbar() {
   const fileRef = useRef<HTMLInputElement>(null);
   const mode = useEditorStore((s) => s.mode);
   const setMode = useEditorStore((s) => s.setMode);
+  const showGrid = useEditorStore((s) => s.settings.show_grid);
+  const showCP = useEditorStore((s) => s.doc.show_control_points);
   const shadowEnabled = useEditorStore((s) => s.doc.shadow_enabled);
+  const showTabs = useEditorStore((s) => s.showTabs);
+  const toggleTabs = useEditorStore((s) => s.toggleTabs);
+  const setSettings = useEditorStore((s) => s.setSettings);
   const mutateDoc = useEditorStore((s) => s.mutateDoc);
-  const selectedMask = useEditorStore((s) => {
-    const n = s.selection.layerName;
-    return n && s.doc.strands[n]?.type === 'MaskedStrand' ? n : null;
-  });
-  const canUndo = useEditorStore((s) => s.past.length > 0);
-  const canRedo = useEditorStore((s) => s.future.length > 0);
-  const undo = useEditorStore((s) => s.undo);
-  const redo = useEditorStore((s) => s.redo);
   const lang = useEditorStore((s) => s.settings.language);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [stateOpen, setStateOpen] = useState(false);
 
   function applyDoc(json: unknown) {
     const doc = loadProject(json);
@@ -40,84 +72,70 @@ export function Toolbar() {
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    try {
-      applyDoc(JSON.parse(await file.text()));
-    } catch (err) {
-      console.error('Failed to load file:', err);
-      alert('Could not load that file — see console.');
-    }
+    try { applyDoc(JSON.parse(await file.text())); }
+    catch (err) { console.error('Failed to load file:', err); alert('Could not load that file — see console.'); }
     e.target.value = '';
   }
 
   async function loadFixture(name: string) {
-    try {
-      const res = await fetch(`/fixtures/${name}.json`);
-      applyDoc(await res.json());
-    } catch (err) {
-      console.error('Failed to load fixture:', err);
-    }
+    try { applyDoc(await (await fetch(`/fixtures/${name}.json`)).json()); }
+    catch (err) { console.error('Failed to load fixture:', err); }
   }
 
   function onSave() {
-    const doc = useEditorStore.getState().doc;
-    downloadJSON('openstrand_project.json', serializeProject(doc));
+    downloadJSON('openstrand_project.json', serializeProject(useEditorStore.getState().doc));
   }
+
+  const checked = (b: Btn): boolean => {
+    if (b.mode) return mode === b.mode;
+    if (b.toggle === 'grid') return showGrid;
+    if (b.toggle === 'points') return showCP;
+    if (b.toggle === 'shadow') return shadowEnabled;
+    if (b.toggle === 'tabs') return showTabs;
+    return false;
+  };
+
+  const onClick = (b: Btn) => {
+    if (b.mode) { setMode(b.mode); return; }
+    if (b.toggle === 'grid') { setSettings({ show_grid: !showGrid }); return; }
+    if (b.toggle === 'points') { mutateDoc((d) => { d.show_control_points = !d.show_control_points; }); return; }
+    if (b.toggle === 'shadow') { mutateDoc((d) => { d.shadow_enabled = !d.shadow_enabled; }); return; }
+    if (b.toggle === 'tabs') { toggleTabs(); return; }
+    if (b.action === 'save') { onSave(); return; }
+    if (b.action === 'load') { fileRef.current?.click(); return; }
+    if (b.action === 'image') { exportPng(); return; }
+  };
 
   return (
     <div className="toolbar">
-      <strong>OpenStrandJS</strong>
+      {BTNS.map((b) => (
+        <button
+          key={b.key}
+          className={`tb-btn${checked(b) ? ' checked' : ''}`}
+          style={btnVars(b.c)}
+          onClick={() => onClick(b)}
+          title={b.label ?? t(b.key, lang)}
+        >
+          {b.label ?? t(b.key, lang)}
+        </button>
+      ))}
 
-      <div className="group">
-        {MODES.map((m) => (
-          <button
-            key={m}
-            className={mode === m ? 'active' : ''}
-            onClick={() => setMode(m)}
-          >
-            {m}
-          </button>
-        ))}
-      </div>
-
-      {selectedMask && (
-        <button onClick={() => mutateDoc((d) => resetMask(d, selectedMask))}>Reset mask</button>
+      {import.meta.env?.DEV && (
+        <span className="tb-dev" title="dev: sample fixtures">
+          {FIXTURES.map((name) => (
+            <button key={name} className="tb-devbtn" onClick={() => loadFixture(name)}>{name}</button>
+          ))}
+        </span>
       )}
 
-      <div className="group">
-        <button disabled={!canUndo} onClick={undo} title="Undo (Z / Ctrl+Z)">↶ Undo</button>
-        <button disabled={!canRedo} onClick={redo} title="Redo (X / Ctrl+Shift+Z)">↷ Redo</button>
-      </div>
+      <span className="tb-spacer" />
 
-      <span className="spacer" />
+      <button className="tb-state" onClick={() => setStateOpen(true)} title={t('layer_state', lang)}>{t('layer_state', lang)}</button>
+      <button className="tb-gear" onClick={() => setSettingsOpen(true)} title={t('settings', lang)}>⚙</button>
 
-      <label className="group">
-        <input
-          type="checkbox"
-          checked={shadowEnabled}
-          onChange={(e) => mutateDoc((d) => { d.shadow_enabled = e.target.checked; })}
-        />
-        shadows
-      </label>
-
-      <div className="group">
-        <span style={{ color: '#888' }}>samples:</span>
-        {FIXTURES.map((name) => (
-          <button key={name} onClick={() => loadFixture(name)}>{name}</button>
-        ))}
-      </div>
-
-      <button onClick={() => fileRef.current?.click()}>Load…</button>
-      <button onClick={onSave}>{t('save', lang)}</button>
-      <button onClick={() => exportPng()}>Export PNG</button>
-      <button onClick={() => setSettingsOpen(true)} title={t('settings', lang)}>⚙</button>
+      {stateOpen && <LayerStateDialog onClose={() => setStateOpen(false)} />}
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
-      <input
-        ref={fileRef}
-        type="file"
-        accept=".json,application/json"
-        style={{ display: 'none' }}
-        onChange={onFile}
-      />
+      <input ref={fileRef} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={onFile} />
     </div>
   );
 }

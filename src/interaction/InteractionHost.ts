@@ -69,7 +69,8 @@ export class InteractionHost {
 
   private onPointerDown = (e: PointerEvent) => {
     try { this.el.setPointerCapture(e.pointerId); } catch { /* synthetic/no-op */ }
-    const isPan = e.button === 1 || e.button === 2 || (e.button === 0 && this.spaceHeld);
+    const panTool = useEditorStore.getState().panMode;   // hand tool active
+    const isPan = e.button === 1 || e.button === 2 || (e.button === 0 && (this.spaceHeld || panTool));
     if (isPan) {
       const view = useEditorStore.getState().view;
       this.panning = true;

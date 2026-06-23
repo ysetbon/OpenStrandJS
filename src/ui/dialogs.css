@@ -1,0 +1,116 @@
+/* Minimal extras for the shared <Modal> shell. The core .modal-backdrop / .modal
+ * styling lives in src/styles.css and is reused as-is; we only add the body +
+ * right-aligned footer row here. */
+
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* ---- Group dialogs (Task C4) ---- */
+
+/* A labelled slider row: label, range, numeric input on one line. */
+.gd-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gd-row > .gd-label {
+  flex: 0 0 auto;
+  min-width: 92px;
+}
+.gd-row > input[type='range'] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.gd-row > input[type='number'] {
+  flex: 0 0 auto;
+  width: 72px;
+}
+
+.gd-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gd-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 100px;
+}
+.gd-sub > .gd-label {
+  flex: 0 0 auto;
+}
+
+/* Shadow-editor member list (min 750x450 host set inline on the body). */
+.gd-member-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: auto;
+  max-height: 360px;
+  border: 1px solid var(--hairline, #c8c8c8);
+  border-radius: 4px;
+  padding: 4px;
+}
+.gd-member-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+.gd-member-row:hover {
+  background: var(--button-hover, #dadada);
+}
+.gd-member-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Main-strand selection checkbox list (20x20 indicators). */
+.gd-select-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: auto;
+  max-height: 320px;
+  border: 1px solid var(--hairline, #c8c8c8);
+  border-radius: 4px;
+  padding: 4px;
+}
+.gd-select-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 6px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.gd-select-row:hover {
+  background: var(--button-hover, #dadada);
+}
+.gd-select-row > input[type='checkbox'] {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.gd-name-input {
+  width: 100%;
+  box-sizing: border-box;
+}

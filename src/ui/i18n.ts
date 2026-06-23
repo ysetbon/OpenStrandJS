@@ -1,27 +1,22 @@
-// Minimal i18n. A small string table covering the chrome labels in the six
-// languages the desktop app ships, plus an RTL flag for Hebrew. Strings not in
-// the table fall back to English then the key itself.
+// Public i18n API for the chrome. The string table lives in `translations.ts`
+// (auto-extracted from OpenStrand Studio's translations.py — 7 languages incl.
+// Hebrew RTL). This module is the stable import site: components import { t, tt,
+// isRTL } from './i18n'. Strings missing for a language fall back to English,
+// then to the key itself.
 import type { Language } from '../model/types';
+import { STRINGS, t as rawT } from './translations';
 
-type Entry = Partial<Record<Language, string>> & { en: string };
-
-const STRINGS: Record<string, Entry> = {
-  layers:   { en: 'Layers', he: 'שכבות', fr: 'Calques', es: 'Capas', it: 'Livelli', pt: 'Camadas' },
-  settings: { en: 'Settings', he: 'הגדרות', fr: 'Paramètres', es: 'Ajustes', it: 'Impostazioni', pt: 'Definições' },
-  save:     { en: 'Save', he: 'שמירה', fr: 'Enregistrer', es: 'Guardar', it: 'Salva', pt: 'Guardar' },
-  load:     { en: 'Load…', he: 'טעינה…', fr: 'Charger…', es: 'Cargar…', it: 'Carica…', pt: 'Carregar…' },
-  theme:    { en: 'Theme', he: 'ערכת נושא', fr: 'Thème', es: 'Tema', it: 'Tema', pt: 'Tema' },
-  language: { en: 'Language', he: 'שפה', fr: 'Langue', es: 'Idioma', it: 'Lingua', pt: 'Idioma' },
-  showGrid: { en: 'Show grid', he: 'הצג רשת', fr: 'Afficher la grille', es: 'Mostrar cuadrícula', it: 'Mostra griglia', pt: 'Mostrar grelha' },
-  gridSize: { en: 'Grid size', he: 'גודל רשת', fr: 'Taille de grille', es: 'Tamaño de cuadrícula', it: 'Dimensione griglia', pt: 'Tamanho da grelha' },
-  snap:     { en: 'Snap to grid', he: 'הצמדה לרשת', fr: 'Aligner sur la grille', es: 'Ajustar a cuadrícula', it: 'Aggancia alla griglia', pt: 'Ajustar à grelha' },
-  curve:    { en: 'Curve params', he: 'פרמטרי עקומה', fr: 'Paramètres de courbe', es: 'Parámetros de curva', it: 'Parametri curva', pt: 'Parâmetros de curva' },
-  close:    { en: 'Close', he: 'סגירה', fr: 'Fermer', es: 'Cerrar', it: 'Chiudi', pt: 'Fechar' },
-};
+export { STRINGS };
 
 export function t(key: string, lang: Language): string {
-  const e = STRINGS[key];
-  return (e && (e[lang] ?? e.en)) ?? key;
+  return rawT(key, lang);
+}
+
+// Tooltip variant: prefers a `<key>_tooltip` entry if present, else falls back to
+// the plain label. (Some OSS tooltips are multiline — callers render with
+// white-space: pre-line.)
+export function tt(key: string, lang: Language): string {
+  return STRINGS[`${key}_tooltip`] ? rawT(`${key}_tooltip`, lang) : rawT(key, lang);
 }
 
 export const isRTL = (lang: Language): boolean => lang === 'he';

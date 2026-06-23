@@ -1,30 +1,77 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
+import { createGroup, reorderLayer } from '../store/actions';
+import { ControlColumn } from './ControlColumn';
+import { NumberedLayerButton } from './NumberedLayerButton';
+import { LayerControlStack } from './LayerControlStack';
 import {
-  addNewStrand, createGroupFromSet, deleteAllStrands, deleteGroup, deleteStrand,
-  reorderLayer, toggleHidden, toggleLock, translateGroup,
-} from '../store/actions';
-import { maskComponents } from '../model/layerName';
-import { screenToWorld } from '../interaction/viewTransform';
-import { StrandProperties } from './StrandProperties';
+  GroupPanel,
+  type GroupDialogs,
+  type RenameDialogProps,
+  type MainStrandSelectDialogProps,
+} from './GroupPanel';
+import { GroupMoveDialog } from './dialogs/GroupMoveDialog';
+import { GroupRotateDialog } from './dialogs/GroupRotateDialog';
+import { GroupShadowEditorDialog } from './dialogs/GroupShadowEditorDialog';
+import { RenameDialog } from './dialogs/RenameDialog';
+import { MainStrandSelectDialog } from './dialogs/MainStrandSelectDialog';
 import { t } from './i18n';
-import type { RGBA } from '../model/types';
 
-const rgba = (c: RGBA) => `rgba(${c.r},${c.g},${c.b},${(c.a ?? 255) / 255})`;
-const textOn = (c: RGBA) => (0.299 * c.r + 0.587 * c.g + 0.114 * c.b > 150 ? '#111' : '#fff');
+// Adapters: the C4 dialogs expose onSubmit; GroupPanel's contract expects
+// onAccept. GroupMove/Rotate/Shadow already match ({groupName,onClose}) so they
+// are passed straight through.
+function RenameDialogAdapter(props: RenameDialogProps): JSX.Element {
+  return (
+    <RenameDialog
+      title={props.title}
+      initial={props.initial}
+      onClose={props.onClose}
+      onSubmit={(name) => props.onAccept(name)}
+    />
+  );
+}
 
-// One row per strand, rendered top = z-top ([...order].reverse()). Talks to the
-// store only through actions, so this whole subsystem is decoupled.
+// The OSS-faithful member picker owns its own group-name field (and candidate
+// list), so the adapter commits createGroup with that name directly instead of
+// routing through GroupPanel's auto-naming onAccept.
+function MainStrandSelectDialogAdapter(props: MainStrandSelectDialogProps): JSX.Element {
+  const commitEdit = useEditorStore((s) => s.commitEdit);
+  return (
+    <MainStrandSelectDialog
+      onClose={props.onClose}
+      onSubmit={(name, members) => commitEdit((d) => createGroup(d, name, members))}
+    />
+  );
+}
+
+const GROUP_DIALOGS: GroupDialogs = {
+  GroupMoveDialog,
+  GroupRotateDialog,
+  GroupShadowEditorDialog,
+  RenameDialog: RenameDialogAdapter,
+  MainStrandSelectDialog: MainStrandSelectDialogAdapter,
+};
+
+// OSS layer panel. Top-to-bottom: the vertical ControlColumn, a title header,
+// the scrollable layer list (newest/topmost first = [...order].reverse()) of
+// NumberedLayerButtons with drag-reorder + a blue insertion line, then the
+// six-button LayerControlStack and the GroupPanel tree. (No inline strand-
+// properties editor — OSS edits via the layer right-click menu instead.)
+//
+// All mutation goes through the store actions, so the panel stays decoupled.
 export function LayerPanel() {
   const order = useEditorStore((s) => s.doc.order);
   const strands = useEditorStore((s) => s.doc.strands);
   const locked = useEditorStore((s) => s.doc.locked_layers);
-  const selected = useEditorStore((s) => s.selection.layerName);
   const lang = useEditorStore((s) => s.settings.language);
   const commitEdit = useEditorStore((s) => s.commitEdit);
   const setSelection = useEditorStore((s) => s.setSelection);
-  const dragIdx = useRef<number | null>(null);
 
+  // Drag-reorder state: source order index + the order index we'd drop ON.
+  const dragIdx = useRef<number | null>(null);
+  const [dropIdx, setDropIdx] = useState<number | null>(null);
+
+  // Visual list: top (z-top) first.
   const visual = [...order].map((name, i) => ({ name, orderIdx: i })).reverse();
 
   function select(name: string) {
@@ -32,111 +79,70 @@ export function LayerPanel() {
     setSelection({ layerName: name, handle: null });
   }
 
-  function remove(name: string) {
-    commitEdit((d) => deleteStrand(d, name));
-    if (selected === name) setSelection({ layerName: null, handle: null });
+  function onDragStart(orderIdx: number) {
+    dragIdx.current = orderIdx;
   }
 
-  function addStrand() {
-    const { view } = useEditorStore.getState();
-    const c = screenToWorld({ x: view.width / 2, y: view.height / 2 }, view);
-    let newName: string | null = null;
-    commitEdit((d) => { newName = addNewStrand(d, { x: c.x - 80, y: c.y }, { x: c.x + 80, y: c.y }); });
-    if (newName) setSelection({ layerName: newName, handle: null });
+  function onDragOver(orderIdx: number) {
+    if (dragIdx.current == null) return;
+    if (dropIdx !== orderIdx) setDropIdx(orderIdx);
   }
 
   function onDrop(targetOrderIdx: number) {
     const from = dragIdx.current;
     dragIdx.current = null;
-    if (from == null) return;
+    setDropIdx(null);
+    if (from == null || from === targetOrderIdx) return;
     commitEdit((d) => reorderLayer(d, from, targetOrderIdx));
+  }
+
+  function onDragEnd() {
+    dragIdx.current = null;
+    setDropIdx(null);
   }
 
   return (
     <div className="layer-panel">
-      <div className="lp-head">
-        <span>{t('layers', lang)}</span>
-        <div className="lp-actions">
-          <button title="Add strand" onClick={addStrand}>＋</button>
-          <button title="Deselect" onClick={() => setSelection({ layerName: null, handle: null })}>▢</button>
-          <button title="Delete all" onClick={() => { commitEdit(deleteAllStrands); setSelection({ layerName: null, handle: null }); }}>🗑</button>
+      {/* Left sub-column: control column, layer list, 6-button stack (OSS left_panel). */}
+      <div className="lp-left">
+        <ControlColumn />
+
+        <div className="lp-head">
+          <span>{t('layer_panel_title', lang)}</span>
         </div>
-      </div>
 
-      <div className="lp-list">
-        {visual.length === 0 && <div className="lp-empty">No strands. Load a file or ＋.</div>}
-        {visual.map(({ name, orderIdx }) => {
-          const s = strands[name];
-          if (!s) return null;
-          const isMask = s.type === 'MaskedStrand';
-          const comp = isMask ? maskComponents(name) : null;
-          const under = comp ? strands[comp.second] : null;
-          const bg = isMask ? '#efeff2' : rgba(s.color);
-          const fg = isMask ? '#222' : textOn(s.color);
-          const isLocked = locked.includes(name);
-          return (
-            <div
-              key={name}
-              className={`lp-row${selected === name ? ' sel' : ''}${s.is_hidden ? ' hidden' : ''}${isLocked ? ' locked' : ''}`}
-              style={{
-                background: bg,
-                color: fg,
-                borderLeft: isMask && under ? `6px solid ${rgba(under.color)}` : '6px solid transparent',
-              }}
-              draggable
-              onDragStart={() => { dragIdx.current = orderIdx; }}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={() => onDrop(orderIdx)}
-              onClick={() => select(name)}
-            >
-              <span className="lp-name">{name}{isMask ? '  (mask)' : ''}</span>
-              <span className="lp-row-actions" onClick={(e) => e.stopPropagation()}>
-                <button title={s.is_hidden ? 'Show' : 'Hide'} onClick={() => commitEdit((d) => toggleHidden(d, name))}>{s.is_hidden ? '🚫' : '👁'}</button>
-                <button title={isLocked ? 'Unlock' : 'Lock'} onClick={() => commitEdit((d) => toggleLock(d, name))}>{isLocked ? '🔒' : '🔓'}</button>
-                <button title="Delete" onClick={() => remove(name)}>✕</button>
-              </span>
-            </div>
-          );
-        })}
-      </div>
-
-      <GroupsSection />
-      <StrandProperties />
-    </div>
-  );
-}
-
-// Minimal groups: create a group from the selected strand's set (the "<set>_*"
-// family), then nudge the whole group by the grid step (one undo step each).
-function GroupsSection() {
-  const groups = useEditorStore((s) => s.doc.groups) as Record<string, { main_strands: string[] }>;
-  const selName = useEditorStore((s) => s.selection.layerName);
-  const strands = useEditorStore((s) => s.doc.strands);
-  const grid = useEditorStore((s) => s.settings.grid_size);
-  const commitEdit = useEditorStore((s) => s.commitEdit);
-  const selSet = selName && strands[selName] ? strands[selName].set_number : null;
-  const names = Object.keys(groups || {});
-
-  return (
-    <div className="groups">
-      <div className="groups-head">
-        <span>Groups</span>
-        <button disabled={selSet == null} onClick={() => selSet != null && commitEdit((d) => createGroupFromSet(d, selSet))}>
-          Group set
-        </button>
-      </div>
-      {names.map((n) => (
-        <div key={n} className="group-row">
-          <span className="group-name">{n}</span>
-          <span className="group-nudge">
-            <button title="left" onClick={() => commitEdit((d) => translateGroup(d, n, -grid, 0))}>←</button>
-            <button title="right" onClick={() => commitEdit((d) => translateGroup(d, n, grid, 0))}>→</button>
-            <button title="up" onClick={() => commitEdit((d) => translateGroup(d, n, 0, -grid))}>↑</button>
-            <button title="down" onClick={() => commitEdit((d) => translateGroup(d, n, 0, grid))}>↓</button>
-            <button title="delete group" onClick={() => commitEdit((d) => deleteGroup(d, n))}>✕</button>
-          </span>
+        <div className="lp-list">
+          {visual.length === 0 && <div className="lp-empty">No strands. Load a file or ＋.</div>}
+          {visual.map(({ name, orderIdx }) => {
+            if (!strands[name]) return null;
+            // The blue insertion line (QColor(0,120,215), 2px) shows above the row
+            // currently under the drag.
+            const showLine = dropIdx === orderIdx && dragIdx.current !== orderIdx;
+            return (
+              <div key={name} className="lp-item">
+                {showLine && <div className="lp-drop-line" />}
+                <NumberedLayerButton
+                  name={name}
+                  orderIdx={orderIdx}
+                  onSelect={select}
+                  draggable
+                  onDragStart={(idx) => onDragStart(idx)}
+                  onDragOver={(idx) => onDragOver(idx)}
+                  onDrop={(idx) => onDrop(idx)}
+                  onDragEnd={onDragEnd}
+                />
+              </div>
+            );
+          })}
         </div>
-      ))}
+
+        <LayerControlStack />
+      </div>
+
+      {/* Right sub-column: the fixed 270px group panel (OSS right_panel). */}
+      <div className="lp-right">
+        <GroupPanel dialogs={GROUP_DIALOGS} />
+      </div>
     </div>
   );
 }

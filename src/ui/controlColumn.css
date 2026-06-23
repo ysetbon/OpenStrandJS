@@ -1,0 +1,49 @@
+/* OSS left control column. Rows of 40×40 circular buttons, horizontally centered.
+ * Per-button colors arrive via --bg/--bgh/--bgp/--bd/--gc/--gs CSS vars. */
+
+.control-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 5px 8px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.cc-row {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+
+.cc-btn {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  border-radius: 20px;
+  border: 1px solid var(--bd);
+  background: var(--bg);
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.cc-btn:hover { background: var(--bgh); }
+.cc-btn:active { background: var(--bgp); }
+.cc-btn.checked { background: var(--bgp); }
+
+.cc-glyph {
+  font-size: var(--gs);
+  color: var(--gc);
+  line-height: 1;
+  pointer-events: none;
+}
+
+.cc-btn:disabled {
+  background: #D3D3D3;
+  border-color: #A9A9A9;
+  cursor: default;
+}
+.cc-btn:disabled .cc-glyph { color: #808080; }

@@ -1,0 +1,138 @@
+/* OSS NumberedLayerButton (UI_PORT_PLAN.md §2.4).
+ * 146×40px, radius 4, border 1px #888, fill = strand color (rgba), checkable.
+ * Layer name: bold 12px WHITE with a BLACK outline, centered.
+ * All colors here are theme-INDEPENDENT OSS literals. */
+
+.nlb {
+  position: relative;
+  box-sizing: border-box;
+  width: 146px;
+  height: 40px;
+  flex: 0 0 auto;
+  border-radius: 4px;
+  border: 1px solid #888;
+  background: var(--nlb-fill, rgba(200, 170, 230, 1));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  overflow: hidden;
+}
+
+.nlb:hover { background: #E0E0E0; }
+.nlb:active { background: #C0C0C0; }
+
+/* Checked (== selected) keeps the strand fill (don't override with hover). */
+.nlb.nlb-checked { background: var(--nlb-fill, rgba(200, 170, 230, 1)); }
+
+/* Centered bold-12 layer name: WHITE fill + BLACK outline.
+ * -webkit-text-stroke gives the outline; the data-text pseudo dual-draw is a
+ * fallback for engines without text-stroke so the white glyph stays legible. */
+.nlb-label {
+  position: relative;
+  font-weight: 700;
+  font-size: 12px;
+  line-height: 1;
+  color: #FFFFFF;
+  -webkit-text-stroke: 1px #000000;
+  paint-order: stroke fill;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.nlb-label::before {
+  content: attr(data-text);
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: #FFFFFF;
+  -webkit-text-stroke: 0;
+  z-index: 1;
+}
+
+/* ---- hidden: gray fill + diagonal dashed hatch (QColor(160,160,160), ~10px) ---- */
+.nlb.nlb-hidden {
+  background:
+    repeating-linear-gradient(
+      45deg,
+      rgba(160, 160, 160, 0) 0,
+      rgba(160, 160, 160, 0) 8px,
+      rgba(160, 160, 160, 1) 8px,
+      rgba(160, 160, 160, 1) 10px
+    ),
+    #B0B0B0;
+}
+.nlb.nlb-hidden.nlb-checked { border: 2px solid #0066CC; }
+
+/* ---- shadow_only: dashed gray border ---- */
+.nlb.nlb-shadow-only { border: 2px dashed rgba(128, 128, 128, 0.8); }
+
+/* ---- locked: orange overlay + lock glyph ---- */
+.nlb.nlb-locked::after {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  background: rgba(255, 165, 0, 0.78);
+  border-radius: 3px;
+  pointer-events: none;
+}
+.nlb-lock {
+  position: relative;
+  z-index: 2;
+  font-size: 16px;
+  pointer-events: none;
+}
+
+/* ---- attachable: right-edge green strip with black outline ---- */
+.nlb.nlb-attachable::before {
+  content: '';
+  position: absolute;
+  top: 1px;
+  right: 0;
+  width: 7px;
+  height: calc(100% - 2px);
+  background: #3BA424;
+  outline: 2px solid #000000;
+  outline-offset: -2px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* ---- selectable: 2px solid blue border ---- */
+.nlb.nlb-selectable { border: 2px solid blue; }
+
+/* ---- masked: fill = first strand color (inline), border 5px = second color ---- */
+.nlb.nlb-masked {
+  border: 5px solid var(--nlb-mask-border, #000);
+  background: var(--nlb-fill, rgba(200, 170, 230, 1));
+}
+
+/* ---- multi-selected: 3px gold; if also checked, 3px blue ---- */
+.nlb.nlb-multi { border: 3px solid #FFD700; }
+.nlb.nlb-multi.nlb-checked { border: 3px solid #0066FF; }
+
+/* inline rename input */
+.nlb-rename {
+  width: calc(100% - 12px);
+  height: 24px;
+  box-sizing: border-box;
+  font-weight: 700;
+  font-size: 12px;
+  text-align: center;
+  border: 1px solid #0066CC;
+  border-radius: 3px;
+  background: #fff;
+  color: #000;
+  outline: none;
+}
+
+/* offscreen native color input (driven programmatically by the menu) */
+.nlb-color-input {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+  border: 0;
+  padding: 0;
+}

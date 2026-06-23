@@ -16,18 +16,19 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h2>{t('settings', lang)}</h2>
 
-        <label className="mrow"><span>{t('theme', lang)}</span>
+        <label className="mrow"><span>{t('select_theme', lang)}</span>
           <select value={settings.theme} onChange={(e) => setSettings({ theme: e.target.value as Theme })}>
-            <option value="default">Default</option>
-            <option value="light">Light</option>
-            <option value="dark">Dark</option>
+            <option value="default">{t('default', lang)}</option>
+            <option value="light">{t('light', lang)}</option>
+            <option value="dark">{t('dark', lang)}</option>
           </select>
         </label>
 
-        <label className="mrow"><span>{t('language', lang)}</span>
+        <label className="mrow"><span>{t('select_language', lang)}</span>
           <select value={lang} onChange={(e) => setSettings({ language: e.target.value as Language })}>
             <option value="en">English</option>
             <option value="fr">Français</option>
+            <option value="de">Deutsch</option>
             <option value="it">Italiano</option>
             <option value="es">Español</option>
             <option value="pt">Português</option>
