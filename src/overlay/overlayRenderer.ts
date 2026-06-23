@@ -178,16 +178,23 @@ function drawMoveOverlays(ctx: CanvasRenderingContext2D, st: OverlayState): void
     const fill = moving || hovered ? FILL_HOT : isEnd ? FILL_ENDPOINT_IDLE : FILL_CP_IDLE;
     overlaySquare(ctx, p, isEnd ? ENDPOINT_HALF : CP_HALF, view.zoom, fill);
   };
+  // During a move drag OSS suppresses every OTHER strand's handle squares (the
+  // per-strand `continue` in strand_drawing_canvas.py), showing only the affected
+  // strand's squares (its grabbed handle pale-yellow, its other handles idle). At
+  // rest/hover we still show every strand's squares.
+  const affected = dragging ? selection.layerName : null;
   // Endpoint (120px) squares first, then control-point (50px) squares on top, so
   // a cp1 square sitting on a fresh strand's start isn't hidden by the big square.
   for (const name of doc.order) {
     const s = doc.strands[name];
     if (!interactable(s, doc)) continue;
+    if (affected && name !== affected) continue;
     for (const h of strandHandles(s)) if (isEndpoint(h.handle)) draw(name, h);
   }
   for (const name of doc.order) {
     const s = doc.strands[name];
     if (!interactable(s, doc)) continue;
+    if (affected && name !== affected) continue;
     for (const h of strandHandles(s)) if (!isEndpoint(h.handle)) draw(name, h);
   }
 }
@@ -205,6 +212,12 @@ function overlayCircle(ctx: CanvasRenderingContext2D, c: Point, rWorld: number, 
 
 function drawAttachOverlays(ctx: CanvasRenderingContext2D, st: OverlayState): void {
   const { doc, view, hover, pending } = st;
+  // During an active drag the original draws ONLY the real growing strand (its
+  // optimized_paint_event: background + active_strand.draw + control points) — NO
+  // attach-target circles. Those translucent circles are idle hover hints shown
+  // BEFORE the press, so suppress them while dragging and let drawPending be the
+  // sole preview.
+  if (st.dragging) return;
   const ends: [keyof Pick<StrandRecord, 'start' | 'end'>, 0 | 1, HandleKind][] = [
     ['start', 0, 'start'], ['end', 1, 'end'],
   ];
@@ -222,13 +235,15 @@ function drawAttachOverlays(ctx: CanvasRenderingContext2D, st: OverlayState): vo
   }
 }
 
-// New-strand / attach rubber-band preview: a translucent body band that
-// resembles the strand being created (parent dims for attach, defaults for new).
+// New-strand / attach preview: draws the REAL two-layer strand body (outer
+// stroke band + inner body band, both solid) growing under the cursor, mirroring
+// the renderer's drawStrand. Parent dims/colors for attach, DEFAULT_* for new.
+// For attach we also draw the renderer's start half-circle cap at the parent
+// endpoint (outer stroke half + inner body fill, radius from the parent width),
+// matching attached_strand.py::draw's start circle so it looks identical on commit.
 function drawPending(ctx: CanvasRenderingContext2D, st: OverlayState): void {
   const { view, pending, doc } = st;
   if (!pending) return;
-  const a = worldToScreen(pending.start, view);
-  const b = worldToScreen(pending.end, view);
   const z = view.zoom;
   let width = DEFAULT_STRAND_WIDTH, sw = DEFAULT_STROKE_WIDTH;
   let body = DEFAULT_STRAND_COLOR, stroke = DEFAULT_STROKE_COLOR;
@@ -236,14 +251,59 @@ function drawPending(ctx: CanvasRenderingContext2D, st: OverlayState): void {
     const par = doc.strands[pending.parent];
     if (par) { width = par.width; sw = par.stroke_width; body = par.color; stroke = par.stroke_color; }
   }
+  const bodyCss = `rgba(${body.r},${body.g},${body.b},1)`;
+  const strokeCss = `rgba(${stroke.r},${stroke.g},${stroke.b},1)`;
+  const a = worldToScreen(pending.start, view);
+  const b = worldToScreen(pending.end, view);
   ctx.save();
-  ctx.lineCap = 'round';
+  // FLAT (butt) caps: the real body runs exactly start->end with no bulge past the
+  // endpoints (round caps made the preview balloon past both ends). The rounded
+  // join at the attachment point comes ONLY from the start cap below, like the
+  // renderer.
+  ctx.lineCap = 'butt'; ctx.lineJoin = 'round';
+  const angle = Math.atan2(b.y - a.y, b.x - a.x);   // start->end tangent (into body)
   const line = (lw: number, color: string) => {
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
     ctx.lineWidth = lw; ctx.strokeStyle = color; ctx.stroke();
   };
-  line((width + sw * 2) * z, `rgba(${stroke.r},${stroke.g},${stroke.b},0.40)`);
-  line(width * z, `rgba(${body.r},${body.g},${body.b},0.55)`);
+  // Mirror the renderer's two fill layers (strand-renderer.js drawStrand): the
+  // black stroke layer entirely UNDER the body fill layer. Attach also gets the
+  // start cap (collectCaps: capOuterStart = black half-circle R=(w+2sw)/2 pointing
+  // AWAY from the body; capInner = body-color FULL circle R=w/2) so the join is
+  // identical to the committed strand.
+  const startCap = pending.kind === 'attach';
+  // Layer 1 — stroke (black): outer band, then the outer cap half-circle.
+  line((width + sw * 2) * z, strokeCss);
+  if (startCap) {
+    ctx.beginPath();
+    ctx.arc(a.x, a.y, (width + sw * 2) * 0.5 * z, angle + Math.PI / 2, angle + (3 * Math.PI) / 2);
+    ctx.closePath();
+    ctx.fillStyle = strokeCss; ctx.fill();
+  }
+  // Layer 2 — fill (body): inner band, then the inner full circle, on top of black.
+  line(width * z, bodyCss);
+  if (startCap) {
+    ctx.beginPath();
+    ctx.arc(a.x, a.y, width * 0.5 * z, 0, Math.PI * 2);
+    ctx.fillStyle = bodyCss; ctx.fill();
+  }
+  // Side lines (collectSideLines), drawn LAST (on top): a flat stroke-color bar
+  // across each circle-less visible end — the black flat-end edge. Length (w+2sw),
+  // thickness sw, shifted sw/2 along the tangent. The free cursor end always gets
+  // one; a 'new' strand's free start does too. The attach start has the cap, not a
+  // side line (mirrors `*_line_visible && !has_circles[side]`).
+  const sideBar = (center: Point, alongSign: number) => {
+    const perp = angle + Math.PI / 2;
+    const halfLen = (width + sw * 2) * 0.5 * z;
+    const sh = sw * 0.5 * z * alongSign;
+    const cx = center.x + sh * Math.cos(angle), cy = center.y + sh * Math.sin(angle);
+    ctx.beginPath();
+    ctx.moveTo(cx - halfLen * Math.cos(perp), cy - halfLen * Math.sin(perp));
+    ctx.lineTo(cx + halfLen * Math.cos(perp), cy + halfLen * Math.sin(perp));
+    ctx.lineWidth = sw * z; ctx.strokeStyle = strokeCss; ctx.stroke();
+  };
+  if (!startCap) sideBar(a, -1);   // 'new': free start end
+  sideBar(b, 1);                   // free cursor end (both 'new' and 'attach')
   ctx.restore();
 }
 
@@ -311,11 +371,16 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, st: OverlayState): vo
   // The selection highlight is drawn in the renderer (#c), under the body — see
   // strand-renderer.js::drawHighlight — so it is NOT drawn here.
 
-  // Persistent control-point glyph layer (all visible strands).
+  // Persistent control-point glyph layer (all visible strands). During a move
+  // drag OSS draws control-point glyphs ONLY for the affected strand
+  // (draw_control_points should_skip = not is_affected), so suppress every other
+  // strand's green triangle/circle/square + dashed connectors for the gesture.
   if (doc.show_control_points) {
+    const affected = st.dragging && mode === 'move' && selection.handle ? selection.layerName : null;
     for (const name of doc.order) {
       const s = doc.strands[name];
       if (!interactable(s, doc)) continue;
+      if (affected && name !== affected) continue;
       drawConnectors(ctx, st, s);
       drawGlyphs(ctx, st, s);
     }

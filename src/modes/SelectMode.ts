@@ -23,6 +23,13 @@ export const SelectMode: Mode = {
       layerName: hit ? hit.layerName : null,
       handle: hit && hit.kind === 'handle' ? hit.handle : null,
     });
+    // OSS promotes Select -> Attach after a real canvas pick
+    // (handle_canvas_strand_selection -> update_mode('attach'), main_window.py:2465-2469;
+    // canvas.select_strand sets attach_mode, strand_drawing_canvas.py:4001-4003), so you
+    // can immediately drag a child out of the just-selected strand. Empty-space clicks
+    // deselect and stay in Select. setMode preserves the selection (only resets
+    // newStrandArmed).
+    if (hit) st.setMode('attach');
     ctx.requestRender();   // selection highlight is drawn in #c (under the body)
   },
 

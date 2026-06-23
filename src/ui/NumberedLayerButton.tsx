@@ -137,6 +137,15 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [colorPick, setColorPick] = useState<'fill' | 'stroke' | null>(null);
   const colorInputRef = useRef<HTMLInputElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Scroll the selected button into view when selection moves to this layer
+  // (e.g. selecting a strand on the canvas, or undo/redo) — OSS scrolls the
+  // selected layer button into the panel viewport. `nearest` avoids gratuitous
+  // scrolling when the button is already visible.
+  useEffect(() => {
+    if (selected) rootRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [selected]);
 
   const isMasked = maskComponents(name) != null;
   const hidden = !!strand?.is_hidden;
@@ -372,6 +381,7 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
   return (
     <>
       <div
+        ref={rootRef}
         className={classes.join(' ')}
         style={style}
         role="button"

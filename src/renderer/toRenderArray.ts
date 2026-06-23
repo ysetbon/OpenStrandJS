@@ -10,7 +10,15 @@ import type {
   EditorDocument, RenderMeta, RenderStrand, Settings, ViewState,
 } from '../model/types';
 
-export function toRenderArray(doc: EditorDocument, selectedLayer?: string | null): RenderStrand[] {
+// `highlightSet` (optional) marks extra strands as selected for highlight
+// purposes — used during an endpoint drag so welded/attached peers that move
+// rigidly with the grabbed endpoint get the same red halo + C-shapes as the
+// grabbed strand (OSS reddens both sides of a moving junction).
+export function toRenderArray(
+  doc: EditorDocument,
+  selectedLayer?: string | null,
+  highlightSet?: Set<string>,
+): RenderStrand[] {
   const out: RenderStrand[] = [];
   for (const name of doc.order) {
     const s = doc.strands[name];
@@ -43,8 +51,9 @@ export function toRenderArray(doc: EditorDocument, selectedLayer?: string | null
       end_circle_stroke_color: (ex.end_circle_stroke_color as RenderStrand['end_circle_stroke_color']) ?? s.circle_stroke_color,
       is_setting_staring_circle: ex.is_setting_staring_circle as boolean | undefined,
       // Selected strand draws its unified highlight in the renderer (under the
-      // body), exactly like OSS — so the black stroke stays on top.
-      is_selected: name === selectedLayer,
+      // body), exactly like OSS — so the black stroke stays on top. Welded peers
+      // moving with a dragged endpoint are highlighted too (highlightSet).
+      is_selected: name === selectedLayer || (!!highlightSet && highlightSet.has(name)),
     };
     if (s.type === 'MaskedStrand') r.deletion_rectangles = s.deletion_rectangles ?? [];
     out.push(r);

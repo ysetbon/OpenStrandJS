@@ -70,7 +70,12 @@ export function requestRender(): void {
     scheduled = false;
     const { doc, view, settings, dragging, dragMoving, selection } = useEditorStore.getState();
     try {
-      const arr = toRenderArray(doc, selection.layerName);
+      // During an endpoint drag, highlight every strand that moves with the
+      // grabbed handle (weld group + attached/mask peers from movingStrandSet),
+      // so a moving junction reddens on both sides like OSS — not just the
+      // grabbed strand. At rest only the selected strand is highlighted.
+      const highlightSet = dragging && dragMoving.length ? new Set(dragMoving) : undefined;
+      const arr = toRenderArray(doc, selection.layerName, highlightSet);
       if (dragging && dragMoving.length) {
         // DRAG FAST-PATH (mirrors the original's draw-only-affected-strand path).
         // Render at native resolution with shadows off: bake every STATIC strand
