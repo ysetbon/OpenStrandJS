@@ -1182,6 +1182,12 @@ window.renderFixture = function (strands, meta) {
     }
 
     if (casts) castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i);
+    // OSS shadow_only: the strand has already cast its shadow above; suppress its
+    // own body/extension paint. Absent/false => normal full body (oracle-safe).
+    // (Per-pair visibility/full/subtract overrides are handled inside
+    // castStrandShadow via SHADOW_OVERRIDES — supersedes the group branch's
+    // isShadowPairVisible gate.)
+    if (s.shadow_only) continue;
     drawStrand(s, strands, P, enableThird, S);
   }
 

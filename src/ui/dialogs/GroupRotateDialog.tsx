@@ -1,64 +1,78 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Modal } from '../Modal';
 import { useEditorStore, cloneDoc } from '../../store/editorStore';
-import { rotateGroup } from '../../store/actions';
+import { snapshotGroupDrag, applyGroupRotateSnapshot } from '../../model/group';
+import { requestRender } from '../../renderer/renderScheduler';
 import { t } from '../i18n';
 
-// Rotate a group live: an angle slider (-180..180) plus a precise number input.
-// We snapshot the doc on open and live-preview each angle change by applying the
-// DELTA from the last angle via rotateGroup (mutateDoc = no history). OK rolls
-// the snapshot back and re-applies the total angle as ONE undo step; Cancel just
-// restores the snapshot.
-export function GroupRotateDialog(props: {
-  groupName: string;
-  onClose: () => void;
-}): JSX.Element {
+// Rotate a group live, OSS-faithful (group_layers.py GroupRotateDialog /
+// _perform_immediate_group_rotation):
+//   * snapshot every member's ORIGINAL geometry + the group pivot ONCE on open,
+//   * engage the renderer drag fast-path so only the group redraws (shadows off),
+//   * each tick rotate the snapshot ABSOLUTELY about the pivot (no per-tick
+//     re-resolution, no incremental float drift),
+//   * beginGesture + commit collapse the whole drag into ONE undo step.
+// Angle slider (-180..180) + a precise degree input mirror the original's two rows.
+export function GroupRotateDialog(props: { groupName: string; onClose: () => void }): JSX.Element {
   const { groupName, onClose } = props;
   const lang = useEditorStore((s) => s.settings.language);
 
-  // Doc snapshot captured once on mount (the pre-rotation baseline).
-  const baseRef = useRef(cloneDoc(useEditorStore.getState().doc));
-  const lastRef = useRef(0); // last applied angle (deg)
+  const init = useEditorStore.getState();
+  const baseRef = useRef(cloneDoc(init.doc));
+  const snapRef = useRef(snapshotGroupDrag(init.doc, groupName));
   const [angle, setAngle] = useState(0);
 
-  // Apply the incremental rotation (newAngle - lastAngle) as a live preview.
-  const preview = (newAngle: number) => {
-    const delta = newAngle - lastRef.current;
-    if (delta !== 0) {
-      useEditorStore.getState().mutateDoc((d) => rotateGroup(d, groupName, delta));
-      lastRef.current = newAngle;
-    }
-    setAngle(newAngle);
+  // Open the gesture + engage the drag fast-path for the group's members.
+  useEffect(() => {
+    const s = useEditorStore.getState();
+    s.beginGesture();
+    s.setDragging(true);
+    s.setDragMoving([...snapRef.current.members.regular, ...snapRef.current.members.masks]);
+    return () => {
+      // Safety net: if unmounted without OK/Cancel, drop the fast-path.
+      const z = useEditorStore.getState();
+      if (z.dragging) { z.setDragging(false); z.setDragMoving([]); requestRender(); }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const preview = (a: number) => {
+    const clamped = Math.max(-180, Math.min(180, a));
+    useEditorStore.getState().mutateDoc((d) => applyGroupRotateSnapshot(d, snapRef.current, clamped));
+    setAngle(clamped);
+  };
+
+  const endDrag = () => {
+    const s = useEditorStore.getState();
+    s.setDragging(false);
+    s.setDragMoving([]);
   };
 
   const apply = () => {
-    // Roll back to baseline, then commit the total rotation as one undo step.
-    useEditorStore.getState().setDoc(cloneDoc(baseRef.current));
-    const total = lastRef.current;
-    if (total !== 0) {
-      useEditorStore.getState().commitEdit((d) => rotateGroup(d, groupName, total));
-    }
+    endDrag();
+    useEditorStore.getState().commit(); // final state is already live -> one undo step
+    requestRender();                    // full-quality render (shadows back on)
     onClose();
   };
 
   const cancel = () => {
+    endDrag();
     useEditorStore.getState().setDoc(cloneDoc(baseRef.current));
+    useEditorStore.getState().commit(); // base == gestureBase -> clears gesture, no history
+    requestRender();
     onClose();
   };
 
   return (
     <Modal
-      title={t('rotate_group_strands', lang)}
+      title={`${t('rotate_group_strands', lang)} ${groupName}`}
       onClose={cancel}
-      footer={
-        <>
-          <button onClick={cancel}>{t('cancel', lang)}</button>
-          <button onClick={apply}>{t('ok', lang)}</button>
-        </>
-      }
+      lang={lang}
+      onEnter={apply}
+      footer={<button onClick={apply}>{t('ok', lang)}</button>}
     >
       <div className="gd-row">
-        <span className="gd-label">{t('angle_label', lang)}</span>
+        <span className="gd-label">{t('angle', lang)}</span>
         <input
           type="range"
           min={-180}
@@ -67,14 +81,18 @@ export function GroupRotateDialog(props: {
           value={angle}
           onChange={(e) => preview(Number(e.target.value))}
         />
+      </div>
+      <div className="gd-row">
+        <span className="gd-label">{t('precise_angle', lang)}</span>
         <input
           type="number"
           min={-180}
           max={180}
-          step={1}
+          step={0.01}
           value={angle}
           onChange={(e) => preview(Number(e.target.value))}
         />
+        <span className="gd-label">°</span>
       </div>
     </Modal>
   );

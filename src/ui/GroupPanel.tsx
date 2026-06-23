@@ -25,6 +25,7 @@ import {
   createMaskGrid,
   renameGroup,
 } from '../store/actions';
+import { resolveGroupMembers } from '../model/group';
 import { t } from './i18n';
 import { ContextMenu, MenuItem } from './ContextMenu';
 import { Modal } from './Modal';
@@ -46,12 +47,18 @@ export interface GroupShadowEditorDialogProps {
   groupName: string;
   onClose: () => void;
 }
+export interface GroupAngleEditorDialogProps {
+  groupName: string;
+  onClose: () => void;
+}
 export interface RenameDialogProps {
   /** Initial text shown in the line edit. */
   initial: string;
   title: string;
   onClose: () => void;
   onAccept: (next: string) => void;
+  /** Existing sibling names that would collide (excludes the current name). */
+  siblings?: string[];
 }
 export interface MainStrandSelectDialogProps {
   /** Candidate member layer_names (non-masked). */
@@ -60,13 +67,19 @@ export interface MainStrandSelectDialogProps {
   /** Receives the chosen member layer_names. */
   onAccept: (members: string[]) => void;
 }
+export interface MaskGridDialogProps {
+  groupName: string;
+  onClose: () => void;
+}
 
 export interface GroupDialogs {
   GroupMoveDialog?: React.ComponentType<GroupMoveDialogProps>;
   GroupRotateDialog?: React.ComponentType<GroupRotateDialogProps>;
   GroupShadowEditorDialog?: React.ComponentType<GroupShadowEditorDialogProps>;
+  GroupAngleEditorDialog?: React.ComponentType<GroupAngleEditorDialogProps>;
   RenameDialog?: React.ComponentType<RenameDialogProps>;
   MainStrandSelectDialog?: React.ComponentType<MainStrandSelectDialogProps>;
+  MaskGridDialog?: React.ComponentType<MaskGridDialogProps>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -177,6 +190,7 @@ type DialogState =
   | { kind: 'rotate'; group: string }
   | { kind: 'angles'; group: string }
   | { kind: 'shadow'; group: string }
+  | { kind: 'maskgrid'; group: string }
   | { kind: 'rename'; group: string };
 
 interface GroupRecordLike {
@@ -190,6 +204,7 @@ export interface GroupPanelProps {
 
 export function GroupPanel(props: GroupPanelProps): JSX.Element {
   const dialogs = props.dialogs ?? {};
+  const doc = useEditorStore((s) => s.doc);
   const groups = useEditorStore((s) => s.doc.groups) as Record<string, GroupRecordLike>;
   const strands = useEditorStore((s) => s.doc.strands);
   const lang = useEditorStore((s) => s.settings.language);
@@ -209,18 +224,9 @@ export function GroupPanel(props: GroupPanelProps): JSX.Element {
 
   const isExpanded = (name: string) => (name in expanded ? expanded[name] : true);
 
-  // One row per UNIQUE member main-strand id (preserve first-seen order).
-  const uniqueMembers = (name: string): string[] => {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const m of groups[name]?.main_strands || []) {
-      if (!seen.has(m)) {
-        seen.add(m);
-        out.push(m);
-      }
-    }
-    return out;
-  };
+  // One row per resolved member strand (whole branches — matches what move/rotate/
+  // shadow operate on). resolveGroupMembers already returns distinct layer_names.
+  const uniqueMembers = (name: string): string[] => resolveGroupMembers(doc, name).regular;
 
   const openMenu = (e: React.MouseEvent, group: string) => {
     e.preventDefault();
@@ -235,7 +241,7 @@ export function GroupPanel(props: GroupPanelProps): JSX.Element {
     { label: t('edit_shadows', lang), onClick: () => setDialog({ kind: 'shadow', group }) },
     {
       label: t('create_mask_grid', lang),
-      onClick: () => commitEdit((d) => createMaskGrid(d, group)),
+      onClick: () => setDialog({ kind: 'maskgrid', group }),
     },
     {
       label: t('duplicate_group', lang),
@@ -245,7 +251,6 @@ export function GroupPanel(props: GroupPanelProps): JSX.Element {
     { label: '', separator: true },
     {
       label: t('delete_group', lang),
-      danger: true,
       onClick: () => commitEdit((d) => deleteGroup(d, group)),
     },
   ];
@@ -288,15 +293,36 @@ export function GroupPanel(props: GroupPanelProps): JSX.Element {
           <PlaceholderDialog title={t('rotate_group_strands', lang)} onClose={closeDialog} />
         );
       }
-      case 'angles':
-        // Edit Strand Angles has no faithful action yet (OSS-parity TODO).
-        return <PlaceholderDialog title={t('edit_strand_angles', lang)} onClose={closeDialog} />;
+      case 'angles': {
+        const Dlg = dialogs.GroupAngleEditorDialog;
+        return Dlg ? (
+          <Dlg groupName={dialog.group} onClose={closeDialog} />
+        ) : (
+          <PlaceholderDialog title={t('edit_strand_angles', lang)} onClose={closeDialog} />
+        );
+      }
       case 'shadow': {
         const Dlg = dialogs.GroupShadowEditorDialog;
         return Dlg ? (
           <Dlg groupName={dialog.group} onClose={closeDialog} />
         ) : (
           <PlaceholderDialog title={t('edit_shadows', lang)} onClose={closeDialog} />
+        );
+      }
+      case 'maskgrid': {
+        const Dlg = dialogs.MaskGridDialog;
+        if (Dlg) return <Dlg groupName={dialog.group} onClose={closeDialog} />;
+        // Inline fallback (no dialog injected): apply the geometry-aware grid to
+        // the whole group as one undo step, faithful to the menu's old behavior.
+        const group = dialog.group;
+        return (
+          <PlaceholderDialog
+            title={t('create_mask_grid', lang)}
+            onClose={() => {
+              commitEdit((d) => createMaskGrid(d, group));
+              closeDialog();
+            }}
+          />
         );
       }
       case 'rename': {
@@ -306,6 +332,7 @@ export function GroupPanel(props: GroupPanelProps): JSX.Element {
           <Dlg
             initial={group}
             title={t('rename_group', lang)}
+            siblings={groupNames.filter((n) => n !== group)}
             onClose={closeDialog}
             onAccept={(next) => commitEdit((d) => renameGroup(d, group, next))}
           />

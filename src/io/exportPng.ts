@@ -25,6 +25,7 @@ export function exportMeta(exportZoom = 2, margin = 40): { meta: RenderMeta; w: 
     supersample: view.supersample,
     zoom: exportZoom,
     shadow_enabled: doc.shadow_enabled,
+    shadow_overrides: doc.shadow_overrides,
     curve_params: settings.curve_params,
   };
   return { meta, w, h };

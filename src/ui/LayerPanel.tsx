@@ -13,8 +13,10 @@ import {
 import { GroupMoveDialog } from './dialogs/GroupMoveDialog';
 import { GroupRotateDialog } from './dialogs/GroupRotateDialog';
 import { GroupShadowEditorDialog } from './dialogs/GroupShadowEditorDialog';
+import { GroupAngleEditorDialog } from './dialogs/GroupAngleEditorDialog';
 import { RenameDialog } from './dialogs/RenameDialog';
 import { MainStrandSelectDialog } from './dialogs/MainStrandSelectDialog';
+import { MaskGridDialog } from './dialogs/MaskGridDialog';
 
 // Adapters: the C4 dialogs expose onSubmit; GroupPanel's contract expects
 // onAccept. GroupMove/Rotate/Shadow already match ({groupName,onClose}) so they
@@ -24,6 +26,7 @@ function RenameDialogAdapter(props: RenameDialogProps): JSX.Element {
     <RenameDialog
       title={props.title}
       initial={props.initial}
+      siblings={props.siblings}
       onClose={props.onClose}
       onSubmit={(name) => props.onAccept(name)}
     />
@@ -47,8 +50,11 @@ const GROUP_DIALOGS: GroupDialogs = {
   GroupMoveDialog,
   GroupRotateDialog,
   GroupShadowEditorDialog,
+  GroupAngleEditorDialog,
   RenameDialog: RenameDialogAdapter,
   MainStrandSelectDialog: MainStrandSelectDialogAdapter,
+  // Props ({groupName,onClose}) already match the contract — no adapter needed.
+  MaskGridDialog,
 };
 
 // OSS layer panel. Top-to-bottom: the vertical ControlColumn, the scrollable

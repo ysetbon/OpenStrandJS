@@ -3,10 +3,12 @@
 // store.mutateDoc(draft => ...). No object cross-references, so drafts stay
 // JSON-serializable for future snapshot history.
 
-import type { EditorDocument, GroupRecord, HandleKind, KnotConnection, Point, RGBA, Settings, StrandRecord } from '../model/types';
+import type { EditorDocument, GroupRecord, HandleKind, KnotConnection, Point, RGBA, Settings, ShadowOverride, StrandRecord } from '../model/types';
 import { gestureWeldGraph, weldedEndpoints } from '../interaction/connections';
 import { makeAttachedStrand, makeStrand } from '../model/factory';
-import { maskComponents, nextFreeSet, nextIndexInSet } from '../model/layerName';
+import { formatLayerName, maskComponents, nextFreeSet, nextIndexInSet, parseLayerName } from '../model/layerName';
+import { resolveGroupMembers } from '../model/group';
+import { strandsCross } from '../interaction/hitGeometry';
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 
@@ -93,6 +95,25 @@ export function moveHandle(
     if (Math.hypot(cp.x - old.x, cp.y - old.y) < EPS) { cp.x += delta.x; cp.y += delta.y; }
     recenter(t);
   }
+}
+
+// Set strand `layerName`'s absolute angle (degrees, atan2(dy,dx) convention,
+// 0deg = +x, y-down so positive rotates +x toward +y = clockwise on screen) by
+// rotating its END about its START, preserving length. Faithful to OSS
+// StrandAngleEditDialog.update_strand_angle's pivot=start, length-preserving
+// rotation. Reuses moveHandle's endpoint-move weld propagation so any attached
+// children welded at this end (and their coincident control points) follow
+// rigidly -- identical to dragging the endpoint. JSON-serializable throughout.
+export function setStrandAngle(draft: EditorDocument, layerName: string, angleDeg: number): void {
+  const s = draft.strands[layerName];
+  if (!s) return;
+  const len = Math.hypot(s.end.x - s.start.x, s.end.y - s.start.y);
+  const rad = (angleDeg * Math.PI) / 180;
+  const newEnd: Point = {
+    x: s.start.x + Math.cos(rad) * len,
+    y: s.start.y + Math.sin(rad) * len,
+  };
+  moveHandle(draft, layerName, 'end', newEnd);
 }
 
 // Create a free first strand of a brand-new set. Returns the new layer_name.
@@ -434,23 +455,21 @@ export function deleteGroup(draft: EditorDocument, name: string): void {
 }
 
 // Translate every member strand (and the deletion rectangles of masks wholly
-// inside the group) by (dx, dy) — moving the group as a rigid unit.
+// inside the group) by (dx, dy) — moving the group as a rigid unit. Membership is
+// resolved to whole branches (see resolveGroupMembers), so attached children move
+// with their parent.
 export function translateGroup(draft: EditorDocument, name: string, dx: number, dy: number): void {
-  const g = (draft.groups as Record<string, GroupRecord>)[name];
-  if (!g) return;
-  const members = new Set(g.main_strands || []);
+  const { regular, masks } = resolveGroupMembers(draft, name);
+  if (!regular.length) return;
   const move = (p: Point | null | undefined) => { if (p) { p.x += dx; p.y += dy; } };
-  for (const layer of members) {
+  for (const layer of regular) {
     const s = draft.strands[layer];
     if (!s) continue;
     move(s.start); move(s.end);
     move(s.control_points[0]); move(s.control_points[1]); move(s.control_point_center);
   }
-  for (const k of Object.keys(draft.strands)) {
+  for (const k of masks) {
     const m = draft.strands[k];
-    if (m.type !== 'MaskedStrand') continue;
-    const comp = maskComponents(k);
-    if (!comp || !members.has(comp.first) || !members.has(comp.second)) continue;
     for (const r of m.deletion_rectangles || []) {
       for (const c of [r.top_left, r.top_right, r.bottom_left, r.bottom_right]) if (c) { c[0] += dx; c[1] += dy; }
       if (r.x != null) { r.x += dx; }
@@ -482,30 +501,120 @@ export function renameGroup(draft: EditorDocument, oldName: string, newName: str
   delete groups[oldName];
 }
 
-// Duplicate a group under a fresh unique name ("<name> copy", then " copy 2"…),
-// sharing the same membership. Returns the new name, or null if missing.
+// Duplicate a group by CLONING its strands into a brand-new, fully independent
+// group (OSS group_layers.py:duplicate_group). The copy must NOT share strands
+// with the original, so we deep-clone every member record under freshly allocated
+// set numbers — moving the copy then moves only the copy.
+//
+// Membership is resolved to whole branches (resolveGroupMembers): `regular` already
+// includes attached children (they share their parent's set_number), and `masks`
+// are the masks wholly inside. We allocate ONE new set per original set, remap each
+// regular "s_i" -> "<newSet>_<i>" (index preserved, since the whole branch moves to
+// a fresh set there are no collisions), and rebuild each mask name from its cloned
+// components. Everything else in each record copies verbatim. Returns the new group
+// name, or null if the group has no regular members.
 export function duplicateGroup(draft: EditorDocument, name: string): string | null {
+  const { regular, masks } = resolveGroupMembers(draft, name);
+  if (!regular.length) return null;
+
+  // 1) Allocate a NEW unique set number per distinct old set. Track `used`
+  // locally (seeded with every set in the doc) so each fresh pick is reserved
+  // before the next, avoiding the live-doc reuse trap.
+  const used = new Set<number>();
+  for (const k of Object.keys(draft.strands)) {
+    const p = parseLayerName(k);
+    if (p) used.add(p.set);
+  }
+  // Map the group's distinct old sets — SORTED ascending — to the next free set
+  // numbers (lowest-free counting from 1; masks excluded since parseLayerName
+  // returns null for them). This matches OSS group_layers.py:2578-2590, which zips
+  // sorted(unique_set_numbers) with get_next_consecutive_set_numbers.
+  const oldSets = Array.from(new Set(regular.map((l) => draft.strands[l].set_number))).sort((a, b) => a - b);
+  const setMap = new Map<number, number>();
+  for (const oldSet of oldSets) {
+    let next = 1;
+    while (used.has(next)) next++;
+    used.add(next);
+    setMap.set(oldSet, next);
+  }
+
+  // 2) Layer remap for regular "s_i" -> "<newSet>_<i>" (same index, new set).
+  const nameMap = new Map<string, string>();
+  for (const layer of regular) {
+    const p = parseLayerName(layer);
+    if (!p) continue;
+    const newSet = setMap.get(p.set);
+    if (newSet == null) continue;
+    nameMap.set(layer, formatLayerName(newSet, p.index));
+  }
+
+  // 3) Clone each regular strand verbatim, overwriting only the remapped fields.
+  for (const layer of regular) {
+    const newName = nameMap.get(layer);
+    const p = parseLayerName(layer);
+    if (!newName || !p) continue;
+    const c = clone(draft.strands[layer]);
+    c.layer_name = newName;
+    c.set_number = setMap.get(p.set) as number;
+    // Remap to the cloned parent; if the parent is outside the duplicated set
+    // (only possible for malformed cross-set data), drop the link rather than
+    // cross-linking the clone back to the original.
+    if (c.attached_to != null) c.attached_to = nameMap.get(c.attached_to) ?? null;
+    // Remap any knot connections that point at a cloned sibling; leave the rest.
+    for (const key of Object.keys(c.knot_connections || {})) {
+      const conn = c.knot_connections[key];
+      const target = nameMap.get(conn.connected_strand_name);
+      if (target) conn.connected_strand_name = target;
+    }
+    draft.strands[newName] = c;
+    draft.order.push(newName);
+  }
+
+  // 4) Clone each mask: rebuild its name from the cloned OVER/UNDER components and
+  // set its set_number from the new set of the OVER component. deep-copy verbatim
+  // (preserves deletion_rectangles / using_absolute_coords).
+  for (const mask of masks) {
+    const comp = maskComponents(mask);
+    if (!comp) continue;
+    const first = nameMap.get(comp.first);
+    const second = nameMap.get(comp.second);
+    if (!first || !second) continue;
+    const newName = `${first}_${second}`;
+    const c = clone(draft.strands[mask]);
+    c.layer_name = newName;
+    const overSet = parseLayerName(comp.first);
+    if (overSet) c.set_number = setMap.get(overSet.set) as number;
+    draft.strands[newName] = c;
+    draft.order.push(newName);
+  }
+
+  // 5) Fresh unique group name ("<name> copy", then " copy 2"…).
   const groups = draft.groups as Record<string, GroupRecord>;
-  const g = groups[name];
-  if (!g) return null;
-  let candidate = `${name} copy`;
+  let newGroupName = `${name} copy`;
   let n = 2;
-  while (groups[candidate]) candidate = `${name} copy ${n++}`;
-  groups[candidate] = { main_strands: [...(g.main_strands || [])] };
-  return candidate;
+  while (groups[newGroupName]) newGroupName = `${name} copy ${n++}`;
+
+  // 6) main_strands of the new group = each original main_strand remapped, keeping
+  // only those that actually exist as cloned strands.
+  const orig = groups[name];
+  const newMains = (orig?.main_strands || [])
+    .map((m) => nameMap.get(m))
+    .filter((m): m is string => !!m && !!draft.strands[m]);
+  groups[newGroupName] = { main_strands: newMains };
+  return newGroupName;
 }
 
 // Rotate every member strand (start/end/control_points/control_point_center) and
 // the deletion-rectangle corners of masks wholly inside the group, by angleDeg
-// about the group centroid. The centroid is the mean of member start+end points.
+// about the group centroid. Membership is resolved to whole branches; the centroid
+// is the mean of the resolved members' start+end points.
 export function rotateGroup(draft: EditorDocument, name: string, angleDeg: number): void {
-  const g = (draft.groups as Record<string, GroupRecord>)[name];
-  if (!g) return;
-  const members = new Set(g.main_strands || []);
+  const { regular, masks } = resolveGroupMembers(draft, name);
+  if (!regular.length) return;
 
   // Centroid from member endpoints.
   let sx = 0, sy = 0, n = 0;
-  for (const layer of members) {
+  for (const layer of regular) {
     const s = draft.strands[layer];
     if (!s) continue;
     sx += s.start.x + s.end.x; sy += s.start.y + s.end.y; n += 2;
@@ -524,17 +633,14 @@ export function rotateGroup(draft: EditorDocument, name: string, angleDeg: numbe
     const [x, y] = rotXY(p.x, p.y); p.x = x; p.y = y;
   };
 
-  for (const layer of members) {
+  for (const layer of regular) {
     const s = draft.strands[layer];
     if (!s) continue;
     rotP(s.start); rotP(s.end);
     rotP(s.control_points[0]); rotP(s.control_points[1]); rotP(s.control_point_center);
   }
-  for (const k of Object.keys(draft.strands)) {
+  for (const k of masks) {
     const m = draft.strands[k];
-    if (m.type !== 'MaskedStrand') continue;
-    const comp = maskComponents(k);
-    if (!comp || !members.has(comp.first) || !members.has(comp.second)) continue;
     for (const r of m.deletion_rectangles || []) {
       for (const c of [r.top_left, r.top_right, r.bottom_left, r.bottom_right]) {
         if (c) { const [x, y] = rotXY(c[0], c[1]); c[0] = x; c[1] = y; }
@@ -546,34 +652,163 @@ export function rotateGroup(draft: EditorDocument, name: string, angleDeg: numbe
   }
 }
 
-// Best-effort group shadow toggle: set shadow_only on every member strand.
+// Group shadow toggle: set shadow_only on every resolved member strand (whole
+// branches, matching the OSS shadow editor which lists all group strands).
 export function setGroupShadowOnly(draft: EditorDocument, name: string, value: boolean): void {
-  const g = (draft.groups as Record<string, GroupRecord>)[name];
-  if (!g) return;
-  for (const layer of g.main_strands || []) {
+  const { regular } = resolveGroupMembers(draft, name);
+  for (const layer of regular) {
     const s = draft.strands[layer];
     if (s) s.shadow_only = value;
   }
 }
 
-// Best-effort mask grid: for each unordered pair of distinct members that don't
-// already have a mask (in either over/under direction), create an over/under
-// MaskedStrand via createMask (first member = OVER). Returns the names created.
-// TODO: faithful OSS grid logic resolves true crossings and over/under ordering
-// from geometry; this is the reasonable pairwise version.
-export function createMaskGrid(draft: EditorDocument, name: string): string[] {
+// ---- per-pair shadow overrides (OSS layer_state_manager.shadow_overrides) ----
+// Nested dict casting_layer -> receiving_layer -> {visibility, allow_full_shadow,
+// subtracted_layers}. Mirrors the OSS getter/setter/default logic. Defaults:
+// visibility = true, allow_full_shadow = false, subtracted_layers = []. The
+// renderer today only consumes `visibility`; the other two are stored for
+// forward-compat (see strand-renderer.js / RenderMeta.shadow_overrides).
+
+export function getShadowOverride(
+  draft: EditorDocument,
+  casting: string,
+  receiving: string,
+): ShadowOverride | undefined {
+  return draft.shadow_overrides[casting]?.[receiving];
+}
+
+// Whole-inner-dict replace (OSS set_shadow_override). Empty dicts are pruned so an
+// all-default override doesn't bloat the doc / undo comparison.
+export function setShadowOverride(
+  draft: EditorDocument,
+  casting: string,
+  receiving: string,
+  override: ShadowOverride,
+): void {
+  const isEmpty =
+    (override.visibility === undefined || override.visibility === true) &&
+    (override.allow_full_shadow === undefined || override.allow_full_shadow === false) &&
+    (override.subtracted_layers === undefined || override.subtracted_layers.length === 0);
+  if (isEmpty) {
+    removeShadowOverride(draft, casting, receiving);
+    return;
+  }
+  const byRecv = draft.shadow_overrides[casting] ?? (draft.shadow_overrides[casting] = {});
+  byRecv[receiving] = { ...override };
+}
+
+export function removeShadowOverride(draft: EditorDocument, casting: string, receiving: string): void {
+  const byRecv = draft.shadow_overrides[casting];
+  if (!byRecv) return;
+  delete byRecv[receiving];
+  if (Object.keys(byRecv).length === 0) delete draft.shadow_overrides[casting];
+}
+
+// Effective visibility: override.visibility if present, else default true.
+export function getShadowVisibility(draft: EditorDocument, casting: string, receiving: string): boolean {
+  const ov = getShadowOverride(draft, casting, receiving);
+  return ov?.visibility ?? true;
+}
+
+export function setShadowVisibility(
+  draft: EditorDocument,
+  casting: string,
+  receiving: string,
+  visible: boolean,
+): void {
+  const cur = getShadowOverride(draft, casting, receiving) ?? {};
+  setShadowOverride(draft, casting, receiving, { ...cur, visibility: visible });
+}
+
+export function setAllowFullShadow(
+  draft: EditorDocument,
+  casting: string,
+  receiving: string,
+  allow: boolean,
+): void {
+  const cur = getShadowOverride(draft, casting, receiving) ?? {};
+  setShadowOverride(draft, casting, receiving, {
+    visibility: cur.visibility ?? true,
+    ...cur,
+    allow_full_shadow: allow,
+  });
+}
+
+export function getSubtractedLayers(draft: EditorDocument, casting: string, receiving: string): string[] {
+  return getShadowOverride(draft, casting, receiving)?.subtracted_layers ?? [];
+}
+
+export function setSubtractedLayers(
+  draft: EditorDocument,
+  casting: string,
+  receiving: string,
+  layers: string[],
+): void {
+  const cur = getShadowOverride(draft, casting, receiving) ?? {};
+  setShadowOverride(draft, casting, receiving, {
+    visibility: cur.visibility ?? true,
+    allow_full_shadow: cur.allow_full_shadow ?? false,
+    ...cur,
+    subtracted_layers: layers,
+  });
+}
+
+type CurveParams = Settings['curve_params'];
+
+// Renderer/hit-test default; the live UI threads settings.curve_params instead.
+const DEFAULT_CURVE: CurveParams = { base_fraction: 1.0, dist_multiplier: 2.0, exponent: 2.0 };
+
+export interface MaskGridOptions {
+  /** Restrict to this member list (default: whole-branch resolved members). */
+  members?: string[];
+  /** Curve params for the crossing test (default: renderer default). */
+  curve?: CurveParams;
+}
+
+// Geometry-aware mask grid (OSS create_mask_grid parity, group_layers.py:3511 ->
+// strand_drawing_canvas.create_masked_layer). For every UNORDERED pair of the
+// group's regular members, create a single MaskedStrand ONLY where the two
+// strands actually cross (centerline segment intersection — the cheap faithful
+// proxy for OSS's stroked-body area-intersection emptiness gate). Over/under is
+// taken from z-order: the strand LATER in draft.order is topmost, so it becomes
+// the OVER (first) component of the mask. Pairs that already have a mask in
+// EITHER direction are skipped. Returns the layer_names created.
+//
+// Signature stays back-compatible: `createMaskGrid(draft, name)` still works and
+// defaults to whole-branch members + the renderer default curve; pass options to
+// supply the dialog's picked members and live curve_params.
+export function createMaskGrid(
+  draft: EditorDocument,
+  name: string,
+  options?: MaskGridOptions,
+): string[] {
   const g = (draft.groups as Record<string, GroupRecord>)[name];
   if (!g) return [];
-  const members = (g.main_strands || []).filter(
+  const curve = options?.curve ?? DEFAULT_CURVE;
+
+  // Default to the full whole-branch membership (matches OSS _get_group_strands,
+  // which resolves the group then drops MaskedStrands). The dialog passes an
+  // explicit picked subset.
+  const source = options?.members ?? resolveGroupMembers(draft, name).regular;
+  const members = source.filter(
     (n) => draft.strands[n] && draft.strands[n].type !== 'MaskedStrand',
   );
+
   const created: string[] = [];
   for (let i = 0; i < members.length; i++) {
     for (let j = i + 1; j < members.length; j++) {
       const a = members[i], b = members[j];
       // Skip if a mask already exists in either direction.
       if (draft.strands[`${a}_${b}`] || draft.strands[`${b}_${a}`]) continue;
-      const made = createMask(draft, a, b);
+      const sa = draft.strands[a], sb = draft.strands[b];
+      if (!sa || !sb) continue;
+      // Geometry gate: only mask real crossings.
+      if (!strandsCross(sa, sb, curve)) continue;
+      // Over/under from z-order: later in order == topmost == OVER (first).
+      const ia = draft.order.indexOf(a), ib = draft.order.indexOf(b);
+      const over = ia > ib ? a : b;
+      const under = ia > ib ? b : a;
+      const made = createMask(draft, over, under);
       if (made) created.push(made);
     }
   }
@@ -583,13 +818,16 @@ export function createMaskGrid(draft: EditorDocument, name: string): string[] {
 // Dev-only debug handle for testing actions directly.
 if (import.meta.env?.DEV) {
   (globalThis as Record<string, unknown>).__actions = {
-    moveHandle, addNewStrand, attachChild, createMask, addDeletionRect, resetMask,
+    moveHandle, setStrandAngle, addNewStrand, attachChild, createMask, addDeletionRect, resetMask,
     deleteStrand, deleteAllStrands, reorderLayer, toggleHidden, toggleLock,
     setColor, setWidth, setWidthGridUnits, setShadowOnly, isStrandDeletable,
     setCircleStrokeColor, toggleCircleVisible, toggleLineVisible, closeKnot,
     toggleLockMode, clearAllLocks, renameLayer,
     createGroupFromSet, createGroup, renameGroup, duplicateGroup,
     deleteGroup, translateGroup, rotateGroup, setGroupShadowOnly, createMaskGrid,
+    getShadowOverride, setShadowOverride, removeShadowOverride,
+    getShadowVisibility, setShadowVisibility, setAllowFullShadow,
+    getSubtractedLayers, setSubtractedLayers,
   };
 }
 

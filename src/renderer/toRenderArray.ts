@@ -54,6 +54,9 @@ export function toRenderArray(
       // body), exactly like OSS — so the black stroke stays on top. Welded peers
       // moving with a dragged endpoint are highlighted too (highlightSet).
       is_selected: name === selectedLayer || (!!highlightSet && highlightSet.has(name)),
+      // OSS shadow_only: keep the strand in the array (so it still casts/receives
+      // shadow) but flag the renderer to suppress its body paint.
+      shadow_only: s.shadow_only,
     };
     if (s.type === 'MaskedStrand') r.deletion_rectangles = s.deletion_rectangles ?? [];
     out.push(r);
@@ -70,6 +73,7 @@ export function buildMeta(doc: EditorDocument, view: ViewState, settings: Settin
     supersample: view.supersample,
     zoom: view.zoom,
     shadow_enabled: doc.shadow_enabled,
+    shadow_overrides: doc.shadow_overrides,
     curve_params: settings.curve_params,
   };
 }
