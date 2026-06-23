@@ -137,6 +137,11 @@ export class InteractionHost {
     if ((ctrl && k === 'z' && e.shiftKey) || (ctrl && k === 'y') || (!ctrl && k === 'x')) {
       e.preventDefault(); st.redo(); requestRender(); return;
     }
+    // 'N' (no modifiers): arm a new-strand draw, exactly like the "New Strand"
+    // button (OSS main_window.py:2201 — Key_N clicks add_new_strand_button).
+    if (!ctrl && k === 'n') {
+      e.preventDefault(); st.armNewStrand(); return;
+    }
   };
 
   private onKeyUp = (e: KeyboardEvent) => {

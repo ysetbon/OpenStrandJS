@@ -150,6 +150,11 @@ export interface EditorState {
 
   // chrome UI flags (OSS main window). Not part of the document / undo history.
   panMode: boolean;            // hand tool: left-drag pans the canvas
+  // OSS canvas.is_drawing_new_strand: armed by the "New Strand" button / 'N' key.
+  // While set, the next attach-mode press-drag-release draws a NEW main strand
+  // (never an attach) regardless of where it starts; AttachMode clears it on the
+  // press, so the mode reverts to plain attach afterwards — exactly like OSS.
+  newStrandArmed: boolean;
   multiSelectMode: boolean;    // multi-select toggle (selection logic: Phase 4)
   // Layer names currently multi-selected (OSS panel.multi_selected_layers). UI
   // state only; drives the gold/blue multi border + the 2-item multi menu.
@@ -161,6 +166,10 @@ export interface EditorState {
   drawNames: boolean;          // draw layer names on the canvas (renderer task: later)
   setPanMode: (b: boolean) => void;
   togglePanMode: () => void;
+  // Enter attach mode and arm a one-shot new-strand draw (OSS start_new_strand_mode:
+  // sets is_drawing_new_strand + CrossCursor). No-op while lock mode is active.
+  armNewStrand: () => void;
+  setNewStrandArmed: (b: boolean) => void;
   toggleMultiSelect: () => void;
   toggleMultiSelectLayer: (name: string) => void;
   clearMultiSelectedLayers: () => void;
@@ -371,8 +380,25 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     saveSettings(settings);
     return { settings, docRevision: s.docRevision + 1 };
   }),
-  setMode: (mode) => set({ mode }),
-  setSelection: (selection) => set({ selection }),
+  // Any explicit mode switch disarms a pending new-strand draw (matching OSS, where
+  // choosing another tool exits new-strand mode). armNewStrand() sets the flag
+  // separately so it survives the attach-mode switch it performs.
+  setMode: (mode) => set({ mode, newStrandArmed: false }),
+  // Selection is ONE thing in OSS (canvas.selected_strand): the canvas highlight
+  // and the layer-panel button must agree. We mirror that by keeping
+  // doc.selected_strand_name in lockstep with the live selection here — the canvas
+  // + StrandProperties + LayerControlStack read store.selection.layerName, while
+  // NumberedLayerButton + the panel's lock logic + save/load read
+  // doc.selected_strand_name. Without this sync, selecting on the canvas highlighted
+  // the strand but never its layer button (and vice-versa). The doc reference is
+  // cloned shallowly but docRevision is NOT bumped (selection isn't a geometry edit;
+  // CanvasStage re-renders off docRevision and the modes already requestRender), so
+  // this adds no undo step and no extra canvas render.
+  setSelection: (selection) => set((s) => (
+    s.doc.selected_strand_name === selection.layerName
+      ? { selection }
+      : { selection, doc: { ...s.doc, selected_strand_name: selection.layerName } }
+  )),
   setDragging: (dragging) => set({ dragging }),
   setDragMoving: (dragMoving) => set({ dragMoving }),
   setHover: (hover) => set({ hover }),
@@ -381,6 +407,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setEraser: (eraser) => set({ eraser }),
 
   panMode: false,
+  newStrandArmed: false,
   multiSelectMode: false,
   multiSelectedLayers: [],
   previouslyLockedLayers: [],
@@ -388,6 +415,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   drawNames: false,
   setPanMode: (panMode) => set({ panMode }),
   togglePanMode: () => set((s) => ({ panMode: !s.panMode })),
+  // Switch to attach mode and arm the next draw as a new main strand. Bypassed
+  // during lock mode (the "New Strand" button is disabled there in OSS).
+  armNewStrand: () => set((s) => (s.doc.lock_mode ? {} : { mode: 'attach', newStrandArmed: true })),
+  setNewStrandArmed: (newStrandArmed) => set({ newStrandArmed }),
   // Toggling multi-select mode (on or off) always clears the multi-selection set,
   // matching OSS which resets multi_selected_layers on both enter and exit.
   toggleMultiSelect: () => set((s) => ({ multiSelectMode: !s.multiSelectMode, multiSelectedLayers: [] })),

@@ -5,11 +5,54 @@
 
 import { useEditorStore } from '../store/editorStore';
 import { addNewStrand, attachChild, snapAngle45 } from '../store/actions';
-import type { EditorDocument, HandleKind, Point } from '../model/types';
+import { screenToWorld } from '../interaction/viewTransform';
+import type { EditorDocument, HandleKind, Point, ViewState } from '../model/types';
 import type { Mode, ModeContext, PointerInfo } from './Mode';
 
-const ATTACH_R = 60;   // world px (120px-diameter circle around free endpoints)
-const MIN_LEN = 8;     // world px; shorter drags are cancelled
+const ATTACH_R = 60;        // world px (120px-diameter circle around free endpoints)
+const MIN_LEN = 8;          // world px; shorter drags are cancelled
+const MIN_ATTACH_LEN = 40;  // world px; attached child clamped to >= this (OSS attached_strand.py min_length)
+
+// Push `end` out to `min` px along the cursor direction when the drag is shorter
+// than the minimum (but non-zero) — mirrors AttachedStrand.update (min_length).
+function clampMinLen(start: Point, end: Point, min: number): Point {
+  const dx = end.x - start.x, dy = end.y - start.y;
+  const len = Math.hypot(dx, dy);
+  if (len <= 0 || len >= min) return end;
+  const a = Math.atan2(dy, dx);
+  return { x: start.x + min * Math.cos(a), y: start.y + min * Math.sin(a) };
+}
+
+// Constrain a world point to ~50px inside the visible canvas edges, matching OSS
+// attach_mode.py constrain_coordinates_to_visible_viewport (~874): zoom<1 allows
+// +/-0.5x the visible extent; while panned, +/-2x; otherwise clamp to the
+// visible rect shrunk by 50/zoom.
+function constrainToViewport(world: Point, view: ViewState): Point {
+  const zoom = view.zoom || 1;
+  const tl = screenToWorld({ x: 0, y: 0 }, view);
+  const br = screenToWorld({ x: view.width, y: view.height }, view);
+  const vw = br.x - tl.x, vh = br.y - tl.y;
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, hi));
+  if (zoom < 1) {
+    const f = 0.5; // allow some extension beyond the visible area
+    return {
+      x: clamp(world.x, tl.x - vw * f, br.x + vw * f),
+      y: clamp(world.y, tl.y - vh * f, br.y + vh * f),
+    };
+  }
+  if (view.panX !== 0 || view.panY !== 0) {
+    const e = 2.0; // panned: allow drawing up to 2x the visible area outside the view
+    return {
+      x: clamp(world.x, tl.x - vw * e, br.x + vw * e),
+      y: clamp(world.y, tl.y - vh * e, br.y + vh * e),
+    };
+  }
+  const margin = 50 / zoom; // not panning: tighter constraint
+  return {
+    x: clamp(world.x, tl.x + margin, br.x - margin),
+    y: clamp(world.y, tl.y + margin, br.y - margin),
+  };
+}
 
 interface FreeEnd { layer: string; side: 0 | 1; pos: Point; }
 
@@ -37,7 +80,13 @@ export const AttachMode: Mode = {
 
   onPointerDown(p: PointerInfo, ctx: ModeContext) {
     const st = useEditorStore.getState();
-    const free = nearestFreeEndpoint(st.doc, p.world);
+    // OSS is_drawing_new_strand: when the "New Strand" button/'N' armed this gesture,
+    // it always draws a NEW main strand — endpoint-attach detection is skipped — and
+    // the flag clears on the press (attach_mode.py:668) so the mode reverts to plain
+    // attach for the next gesture.
+    const forceNew = st.newStrandArmed;
+    if (forceNew) st.setNewStrandArmed(false);
+    const free = forceNew ? null : nearestFreeEndpoint(st.doc, p.world);
     if (free) {
       drag = { kind: 'attach', start: free.pos, parent: free.layer, side: free.side };
       st.setPending({ kind: 'attach', start: free.pos, end: free.pos, parent: free.layer, side: free.side });
@@ -47,19 +96,37 @@ export const AttachMode: Mode = {
     }
     st.beginGesture();
     st.setDragging(true);
-    ctx.requestOverlay();
+    // OSS start_attachment clears the previously-selected strand's highlight the
+    // instant an attach/new gesture begins (attach_mode.py:1088-1108) — so a strand
+    // you attach onto stops showing its red-halo + C-shape highlight during the
+    // drag (its new circle draws as a plain cap, not a highlighted C-ring). The
+    // highlight lives in #c under the body, so an overlay-only redraw can't clear
+    // it: drop the selection and re-render #c. On release the new child becomes the
+    // selection (mirroring OSS's add_layer_button selection), so the end-state C-
+    // shape belongs to the child, exactly like the original.
+    if (st.selection.layerName !== null) {
+      st.setSelection({ layerName: null, handle: null });
+      ctx.requestRender();
+    } else {
+      ctx.requestOverlay();
+    }
   },
 
   onPointerMove(p: PointerInfo, ctx: ModeContext) {
     const st = useEditorStore.getState();
     if (drag) {
-      const end = drag.kind === 'new' ? snapAngle45(drag.start, p.world) : p.world;
+      const world = constrainToViewport(p.world, st.view);
+      const end = drag.kind === 'new'
+        ? snapAngle45(drag.start, world)
+        : clampMinLen(drag.start, world, MIN_ATTACH_LEN);
       st.setPending({ kind: drag.kind, start: drag.start, end, parent: drag.parent, side: drag.side });
       ctx.requestOverlay();
       return;
     }
-    // Idle hover: light up the nearest free endpoint's attach circle (yellow).
-    const free = nearestFreeEndpoint(st.doc, p.world);
+    // Idle hover: light up the nearest free endpoint's attach circle (yellow) — but
+    // not while a new-strand draw is armed: that gesture is forced-new, so OSS shows
+    // a clean crosshair with no attach target.
+    const free = st.newStrandArmed ? null : nearestFreeEndpoint(st.doc, p.world);
     const next = free
       ? { layerName: free.layer, handle: (free.side === 0 ? 'start' : 'end') as HandleKind }
       : { layerName: null, handle: null };
@@ -73,12 +140,18 @@ export const AttachMode: Mode = {
     if (!drag) return;
     const st = useEditorStore.getState();
     const d = drag;
-    const end = d.kind === 'new' ? snapAngle45(d.start, p.world) : p.world;
+    const world = constrainToViewport(p.world, st.view);
+    // Cancel test runs on the RAW (pre-clamp) distance so a near-zero drag still
+    // cancels even though clampMinLen would otherwise stretch it to 40px.
+    const raw = d.kind === 'new' ? snapAngle45(d.start, p.world) : p.world;
+    const end = d.kind === 'new'
+      ? snapAngle45(d.start, world)
+      : clampMinLen(d.start, world, MIN_ATTACH_LEN);
     drag = null;
     st.setPending(null);
     st.setDragging(false);
 
-    if (Math.hypot(end.x - d.start.x, end.y - d.start.y) < MIN_LEN) {
+    if (Math.hypot(raw.x - d.start.x, raw.y - d.start.y) < MIN_LEN) {
       st.commit();               // nothing created -> commit() discards the no-op gesture
       ctx.requestOverlay();
       return;

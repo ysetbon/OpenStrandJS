@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import {
-  addNewStrand, clearAllLocks, deleteAllStrands, deleteStrand, isStrandDeletable,
+  clearAllLocks, deleteAllStrands, deleteStrand, isStrandDeletable,
 } from '../store/actions';
-import { screenToWorld } from '../interaction/viewTransform';
 import { Modal } from './Modal';
 import { t } from './i18n';
 import './layerControls.css';
@@ -66,12 +65,13 @@ export function LayerControlStack() {
     multiSelectedLayers.every((n) => strands[n] && isStrandDeletable(strands[n]));
   const deleteDisabled = lockMode ? true : (multiSelectMode ? !multiDeletable : !hasDeletable);
 
+  // OSS "New Strand" button (layer_panel.py request_new_strand): does NOT create a
+  // strand immediately. It enters attach mode and arms a one-shot new-strand draw
+  // (crosshair cursor), then the user presses-drags-releases on the canvas to draw
+  // it. The strand is committed on pointer-up (AttachMode), so a zero-length click
+  // cancels cleanly — identical to the original.
   function addStrand() {
-    const { view } = useEditorStore.getState();
-    const c = screenToWorld({ x: view.width / 2, y: view.height / 2 }, view);
-    let newName: string | null = null;
-    commitEdit((d) => { newName = addNewStrand(d, { x: c.x - 80, y: c.y }, { x: c.x + 80, y: c.y }); });
-    if (newName) setSelection({ layerName: newName, handle: null });
+    useEditorStore.getState().armNewStrand();
   }
 
   function removeSelected() {
