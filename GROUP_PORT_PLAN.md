@@ -148,7 +148,15 @@ Legend: ✅ faithful · 🟡 present but simplified / needs fidelity work · ❌
   round-trips; only `1_2` editable). Deferred OSS extras: End X/Y cols, x / x+180 checkboxes,
   press-and-hold accel. Divergence: editing a parent angle drags welded children (moveHandle)
   vs OSS rotate-about-own-start — flag for later if exact match needed.
-- Next per the order below: **#8 edit-shadows → #9 mask-grid** (loop continuing).
+- **Edit Shadows (#8) — DONE** (commit `a62091e`, via `group-edit-shadows` workflow). Real
+  `shadow_overrides` model (`casting→receiving→{visibility, allow_full_shadow, subtracted_layers}`)
+  + new LayerState-style actions. WIRED to renderer (changes pixels): "Shadow Only" (suppress body)
+  + "Visible" (per-pair skip), via `buildMeta`/`toRenderArray` → `web/strand-renderer.js` (absent-safe
+  gates). STORED-ONLY (need net-new geometry, labeled in-UI): "Full Shadow", "Subtract Layers".
+  Rewrote the dialog (per-casting sections + per-pair rows). **Fidelity verified byte-identical**
+  (stash A/B: braid 1895 / knot 20498 mismatch px with AND without #8). i18n + CSS added.
+  Low nits left: stale preview comment; subtract-section can't collapse once populated (stored-only).
+- Next per the order below: **#9 mask-grid** (final loop op).
 
 ## Suggested order
 
