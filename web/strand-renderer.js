@@ -30,14 +30,23 @@ let CURVE = { base_fraction: 1.0, dist_multiplier: 2.0, exponent: 2.0 };
 let SAMPLE_STEP = 1;
 const DRAG_SAMPLE_STEP = 3;
 
-// Shadow parameters (canvas defaults): default_shadow_color (0,0,0,150) and
-// max_blur_radius 30. A strand casts a shadow onto every lower-ordered strand
-// as (over-body expanded by blur) ∩ (under-body), drawn just under the over
-// strand's body so only the fringe beyond it shows.
+// Shadow parameters — faithful port of shader_utils.py::draw_strand_shadow. The
+// canvas loads NumSteps=2 / MaxBlurRadius=30.0 / ShadowColor=0,0,0,150 from
+// user_settings.txt, so the function-signature default of 3 is moot; the LOADED
+// value 2 wins. A strand casts onto every lower-ordered strand in two passes:
+//   PASS A — SOLID CORE (unclipped, full alpha 150): the union of all surviving
+//     (caster body+circles) ∩ (receiver rendered geometry) regions, filled solid.
+//   PASS B — FADED BLUR (clipped to the union of receiver bodies): NUM_STEPS=2
+//     boundary-stroke passes over (core ∪ caster-circles) with the per-step
+//     width/alpha table computed from the formulas below (15px@150, 30px@75),
+//     FlatCap / RoundJoin. The blur is what produces the soft fringe beyond the
+//     caster body; the caster's own body (drawn after) covers the inner shadow.
 const SHADOW_COLOR = { r: 0, g: 0, b: 0, a: 150 };
 const MAX_BLUR = 30;
+const NUM_STEPS = 2; // loaded reference setting (user_settings.txt NumSteps:2)
 let SHADOW_ENABLED = false; // set per-fixture from meta.shadow_enabled
-let SHADOW_PAINT = null;    // paper.Color for shadows
+let SHADOW_PAINT = null;    // paper.Color for shadows (solid-core paint)
+let SHADOW_OVERRIDES = {};  // meta.shadow_overrides, keyed [caster][receiver] (consumed in the Port phase)
 
 // Faithful port of strand.py::_build_curve_profile. Returns {mode, segments}
 // in world coordinates; each segment is a cubic {p0, cp1, cp2, p3}.
@@ -372,6 +381,270 @@ function bodyLayers(s, P, enableThird, S, centerline) {
   return { stroke, fill };
 }
 
+// ---- shadow geometry (PIXEL space) -----------------------------------------
+// Faithful port of shader_utils.py's three geometry builders. All world widths
+// and radii are multiplied by S (= ss*zoom) before being handed to Paper. The
+// circle gating mirrors build_rendered_geometry / build_shadow_circle_geometry:
+// a circle contributes only where computeHasCircles is true AND the matching
+// circle-stroke alpha > 0 (a transparent cap is excluded). AttachedStrand caps
+// are HALF-circles (same capOuterStart/capOuterEnd construction the body uses);
+// plain Strand caps are full circles. The angle is the centerline tangent at
+// the relevant end (tangentAngle(cl,0) / (cl,len)).
+
+// build_rendered_geometry(strand): the strand's visible footprint = body stroked
+// at (w+2sw) UNION every visible end-circle (radius (w+2sw)/2, NOT +2). This is
+// the RECEIVER geometry the caster shadow is intersected with, and also the clip
+// region for Pass B. Returns a paper path (caller removes it) or null.
+function buildShadowReceiverGeom(s, strands, P, enableThird, S) {
+  const w = s.width || 0, sw = s.stroke_width || 0;
+  const td = (w + 2 * sw) * S;          // full diameter (px) for the body + cap circles
+  const cl = buildCenterline(s, P, enableThird);
+  let path = cleanOutline(strokedOutline(cl, td));
+  if (!path) { cl.remove(); return null; }
+  const hc = s.has_circles || [false, false];
+  const startA = circleStrokeAlpha(s.start_circle_stroke_color);
+  const endA = circleStrokeAlpha(s.end_circle_stroke_color);
+  const len = cl.length;
+  const isAttached = s.type === 'AttachedStrand';
+  const addCircle = (centre, angle, which) => {
+    let circle;
+    if (isAttached) {
+      circle = which === 0 ? capOuterStart(centre, angle, td) : capOuterEnd(centre, angle, td);
+    } else {
+      circle = new paper.Path.Circle(centre, td / 2);
+    }
+    const u = path.unite(circle);
+    path.remove();
+    circle.remove();
+    path = u;
+  };
+  if (hc[0] && startA > 0) addCircle(P(s.start), tangentAngle(cl, 0), 0);
+  if (hc[1] && endA > 0) addCircle(P(s.end), tangentAngle(cl, len), 1);
+  cl.remove();
+  return path;
+}
+
+// build_shadow_geometry(strand, 0, include_circles=False): the caster CORE =
+// body stroked at (w+2sw) with NO blur inflation, no circles. Returns a paper
+// path (caller removes it) or null.
+function buildShadowCasterCore(s, P, enableThird, S) {
+  const w = s.width || 0, sw = s.stroke_width || 0;
+  return strokedBodyAtWidth(s, P, enableThird, (w + 2 * sw) * S);
+}
+
+// build_shadow_circle_geometry(strand): caster end-circles only, radius
+// ((w+2sw)/2 + 2)*S (the +2 IS scaled). The MAX_BLUR vs MAX_BLUR+2 arg distinction
+// is moot — the builder always uses (w+2sw)/2+2 for the radius. AttachedStrand
+// caps are half-circles (td = ((w+2sw)+4)*S so the half-circle radius is
+// (w+2sw)/2+2); plain Strand caps are full circles. May return null when no
+// visible circle exists.
+function buildShadowCasterCircles(s, strands, P, enableThird, S) {
+  const w = s.width || 0, sw = s.stroke_width || 0;
+  const td = ((w + 2 * sw) + 4) * S;    // doubled radius for the half-circle builder
+  const radius = ((w + 2 * sw) / 2 + 2) * S;
+  const hc = s.has_circles || [false, false];
+  const startA = circleStrokeAlpha(s.start_circle_stroke_color);
+  const endA = circleStrokeAlpha(s.end_circle_stroke_color);
+  const isAttached = s.type === 'AttachedStrand';
+  const cl = buildCenterline(s, P, enableThird);
+  const len = cl.length;
+  let path = null;
+  const addCircle = (centre, angle, which) => {
+    let circle;
+    if (isAttached) {
+      circle = which === 0 ? capOuterStart(centre, angle, td) : capOuterEnd(centre, angle, td);
+    } else {
+      circle = new paper.Path.Circle(centre, radius);
+    }
+    if (!path) { path = circle; return; }
+    const u = path.unite(circle);
+    path.remove();
+    circle.remove();
+    path = u;
+  };
+  if (hc[0] && startA > 0) addCircle(P(s.start), tangentAngle(cl, 0), 0);
+  if (hc[1] && endA > 0) addCircle(P(s.end), tangentAngle(cl, len), 1);
+  cl.remove();
+  return path;
+}
+
+// Build the per-step width/alpha table from the shader_utils formulas so it
+// tracks NUM_STEPS / MAX_BLUR rather than being hard-coded. Each entry:
+//   progress = (NUM_STEPS - i) / NUM_STEPS
+//   alphaByte = trunc(150 * progress * (1/NUM_STEPS) * 2)   [TRUNCATE, clamp 0..255]
+//   width = MAX_BLUR * ((i+1)/NUM_STEPS)   (world px, scaled by S at draw time)
+// For NUM_STEPS=2: [{w:15, a:150}, {w:30, a:75}].
+function shadowBlurSteps() {
+  const base = SHADOW_COLOR.a;
+  const steps = [];
+  for (let i = 0; i < NUM_STEPS; i++) {
+    const progress = (NUM_STEPS - i) / NUM_STEPS;
+    const alpha = Math.max(0, Math.min(255, Math.trunc(base * progress * (1 / NUM_STEPS) * 2)));
+    const width = MAX_BLUR * ((i + 1) / NUM_STEPS);
+    steps.push({ width, alpha });
+  }
+  return steps;
+}
+
+// Cast strand `s` (at list index `i`) onto every already-drawn lower strand
+// (j < i). Faithful port of draw_strand_shadow:
+//   • caster CORE  = build_shadow_geometry(s, 0, include_circles=False)
+//   • caster CIRCLES = build_shadow_circle_geometry(s)  (radius (w+2sw)/2+2)
+//   For each receiver o (gated by §3): region = (core ∪ circles) ∩ rendered(o).
+//     Accumulate non-empty survivors into `combined` (UNION) and the receiver
+//     geometry into `clip` (UNION).
+//   PASS A: fill `combined` SOLID at alpha 150, SourceOver, UNCLIPPED.
+//   PASS B: total = combined ∪ circles; in a Group clipped to `clip`, run
+//     NUM_STEPS boundary-stroke passes over `total` (FlatCap / RoundJoin) with
+//     the computed width/alpha table.
+// Both passes reuse the same `combined`. Drawn BEFORE the caster's own body so
+// the body covers the inner shadow and only the fringe over lower strands shows.
+function castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i) {
+  // Caster footprint. A MaskedStrand caster uses its mask-crossing region as the
+  // core and casts NO circles (Qt get_proper_masked_strand_path excludes circles);
+  // a body strand uses the stroked body core + visible end circles.
+  let core, circles = null;
+  if (s.type === 'MaskedStrand') {
+    core = buildMaskPath(s, byLayer, P, enableThird, S);
+    if (!core) return;
+  } else {
+    core = buildShadowCasterCore(s, P, enableThird, S);
+    if (!core) return;
+    circles = buildShadowCasterCircles(s, strands, P, enableThird, S);
+  }
+
+  // The caster's combined casting footprint (core ∪ circles), used both for the
+  // intersection with each receiver and as the boundary stroked in Pass B.
+  let casterFootprint = core.clone();
+  if (circles) {
+    const u = casterFootprint.unite(circles);
+    casterFootprint.remove();
+    casterFootprint = u;
+  }
+
+  // Inflated-bbox quick reject bound: the caster core's bounds grown by MAX_BLUR*S
+  // (mirrors shader_utils.py:688-702). A receiver whose bounds don't overlap this
+  // can't receive any blur fringe, so the pair is skipped before the boolean ops.
+  const rejectBounds = core.bounds.expand(2 * MAX_BLUR * S);
+
+  let combined = null;          // PASS A/B survivor union (caster ∩ receivers)
+  let clip = null;              // PASS B clip = ⋃ receiver rendered geometry
+  for (let j = 0; j < i; j++) {
+    const o = strands[j];
+    if (o.type === 'MaskedStrand') continue;     // mask receivers handled by drawMasked
+    if (maskPairs.has(s.layer_name + '|' + o.layer_name)) continue; // same-mask component pair
+
+    // Per-pair shadow override (keyed [caster][receiver]). allow_full_shadow gates
+    // mask-blocking + intermediate.
+    const ov = (SHADOW_OVERRIDES[s.layer_name] || {})[o.layer_name] || null;
+    // Effective visibility: an explicit `visibility` key wins; otherwise the Qt
+    // default (get_default_shadow_visibility) — false ONLY for a masked caster onto
+    // its FIRST component (so a mask never casts a regular shadow on its source).
+    if (ov && ov.visibility != null) {
+      if (ov.visibility === false) continue;
+    } else if (defaultShadowVisibilityFalse(s, o)) {
+      continue;
+    }
+    const allowFull = !!(ov && ov.allow_full_shadow);
+
+    const recv = buildShadowReceiverGeom(o, strands, P, enableThird, S);
+    if (!recv) continue;
+    if (!rejectBounds.intersects(recv.bounds)) { recv.remove(); continue; }
+    let region = casterFootprint.intersect(recv);
+    let clipBlocker = null; // this pair's subtracted-layer union (Qt clip_blocker_path)
+    if (region && region.area && Math.abs(region.area) > 0.5) {
+      // Subtractions applied to `region` IN ORDER (Qt: subtracted_layers ->
+      // mask-blocking -> intermediate). Each step may empty the region, in which
+      // case the pair becomes a non-survivor.
+      // (a) subtracted_layers (UNGATED). Default = masked-caster second-component
+      //     branch when no override key is present.
+      const subNames = (ov && ov.subtracted_layers) || defaultSubtracted(s, o, byLayer);
+      const subAcc = { path: null };
+      region = subtractLayers(region, subNames, byLayer, strands, P, enableThird, S, subAcc);
+      clipBlocker = subAcc.path; // fed into the Pass B clip below (shader_utils.py:985-987)
+
+      // (b) mask-blocking (gated !allowFull): subtract every VISIBLE mask whose
+      //     layer rank is strictly ABOVE the caster (k > i) and that is not the
+      //     receiver itself. Same blocker geometry covers the visible-component
+      //     mask-coverage case for our corpus (single mask above both indices).
+      if (!allowFull && region && Math.abs(region.area || 0) > 0.5) {
+        for (let k = i + 1; k < strands.length; k++) {
+          const m = strands[k];
+          if (m.type !== 'MaskedStrand' || m.is_hidden === true) continue;
+          if (m.layer_name === o.layer_name) continue; // self-block guard
+          const blk = buildShadowBlockerPath(m, byLayer, P, enableThird, S);
+          if (blk) {
+            const r = region.subtract(blk);
+            blk.remove();
+            region.remove();
+            region = r;
+          }
+          if (!region || Math.abs(region.area || 0) <= 0.5) break;
+        }
+      }
+
+      // (c) intermediate subtraction (gated !allowFull): subtract every layer
+      //     strictly between receiver rank j and caster rank i.
+      if (!allowFull && region && Math.abs(region.area || 0) > 0.5) {
+        const interNames = [];
+        for (let m = j + 1; m < i; m++) interNames.push(strands[m].layer_name);
+        region = subtractLayers(region, interNames, byLayer, strands, P, enableThird, S);
+      }
+    }
+
+    if (region && region.area && Math.abs(region.area) > 0.5) {
+      // survivor — accumulate into combined (union)
+      if (!combined) { combined = region; }
+      else { const u = combined.unite(region); combined.remove(); region.remove(); combined = u; }
+      // accumulate receiver geometry into the Pass B clip (union)
+      if (!clip) { clip = recv; }
+      else { const u = clip.unite(recv); clip.remove(); recv.remove(); clip = u; }
+      // Qt subtracts this pair's subtracted-layer geometry from the accumulated
+      // clip so the faded Pass B stroke can't bleed into it (shader_utils.py:985-987).
+      if (clipBlocker) { const c = clip.subtract(clipBlocker); clip.remove(); clip = c; }
+    } else {
+      region && region.remove();
+      recv.remove();
+    }
+    if (clipBlocker) clipBlocker.remove();
+  }
+
+  if (combined) {
+    // PASS A — solid core, unclipped, full alpha (SourceOver = paper default).
+    const solid = combined.clone();
+    solid.fillColor = SHADOW_PAINT;
+    solid.strokeColor = null;
+
+    // PASS B — faded blur, clipped to the union of receiver geometries.
+    let total = combined.clone();
+    if (circles) {
+      const u = total.unite(circles);
+      total.remove();
+      total = u;
+    }
+    const strokeItems = [];
+    for (const st of shadowBlurSteps()) {
+      const item = total.clone();
+      item.fillColor = null;
+      item.strokeColor = new paper.Color(SHADOW_COLOR.r / 255, SHADOW_COLOR.g / 255, SHADOW_COLOR.b / 255, st.alpha / 255);
+      item.strokeWidth = st.width * S;
+      item.strokeCap = 'butt';   // Qt FlatCap
+      item.strokeJoin = 'round'; // Qt RoundJoin
+      strokeItems.push(item);
+    }
+    total.remove();
+    // A clipped Group: first child is the clip mask, the rest are clipped to it.
+    new paper.Group({ children: [clip, ...strokeItems], clipped: true });
+    combined.remove();
+  } else if (clip) {
+    clip.remove();
+  }
+
+  casterFootprint.remove();
+  core.remove();
+  circles && circles.remove();
+}
+
 // Selection highlight — faithful port of strand.py::_draw_unified_highlight /
 // attached_strand.py::_draw_unified_highlight. Drawn UNDER the body (drawStrand
 // paints the body fill+stroke over it, exactly as OSS draws the highlight at
@@ -538,12 +811,230 @@ function subtractDeletions(region, ms, P, S) {
   return region;
 }
 
+// ---- shadow-override support helpers (Item-2 port) --------------------------
+
+// Intersection of a mask's two component bodies (stroked at the given widths)
+// minus deletion rects, EXCLUDING end circles. Shared core for Qt's two mask
+// geometries (these match drawMasked's fillRegion / strokeRegion exactly):
+//   'fill'   = get_mask_path()        = first@fw        ∩ second@(sw+2ssw+4)
+//   'stroke' = get_mask_path_stroke() = first@(fw+2fsw) ∩ second@(sw+2ssw)
+function maskRegion(ms, byLayer, P, enableThird, S, mode) {
+  const parts = (ms.layer_name || '').split('_');
+  if (parts.length < 4) return null;
+  const first = byLayer[parts[0] + '_' + parts[1]];
+  const second = byLayer[parts[2] + '_' + parts[3]];
+  if (!first || !second) return null;
+  const fw = first.width || 0, fsw = first.stroke_width || 0;
+  const sw = second.width || 0, ssw = second.stroke_width || 0;
+  const wA = mode === 'fill' ? fw : fw + 2 * fsw;
+  const wB = mode === 'fill' ? sw + 2 * ssw + 4 : sw + 2 * ssw;
+  const a = maskComponentPath(first, P, enableThird, S, wA);
+  const b = maskComponentPath(second, P, enableThird, S, wB);
+  if (!a || !b) { a && a.remove(); b && b.remove(); return null; }
+  let region = a.intersect(b);
+  a.remove();
+  b.remove();
+  region = subtractDeletions(region, ms, P, S);
+  if (region && region.area && Math.abs(region.area) > 0.5) return region;
+  region && region.remove();
+  return null;
+}
+
+// Qt get_proper_masked_strand_path -> get_mask_path() (the FILL region). Used as
+// the mask-as-caster footprint and the mask-as-subtractor so both agree with
+// drawMasked's fillRegion. Returns a paper path (caller removes) or null.
+function buildMaskPath(ms, byLayer, P, enableThird, S) {
+  return maskRegion(ms, byLayer, P, enableThird, S, 'fill');
+}
+
+// Qt get_mask_path_stroke() (the STROKE region) — the wider crossing footprint.
+function buildMaskStrokePath(ms, byLayer, P, enableThird, S) {
+  return maskRegion(ms, byLayer, P, enableThird, S, 'stroke');
+}
+
+// Qt _get_mask_visual_path = get_mask_path() UNION get_mask_path_stroke(). This
+// is the blocker BASE (the full visible mask footprint), not the fill region alone.
+function buildMaskVisualPath(ms, byLayer, P, enableThird, S) {
+  const fill = buildMaskPath(ms, byLayer, P, enableThird, S);
+  const stroke = buildMaskStrokePath(ms, byLayer, P, enableThird, S);
+  if (!fill) return stroke;
+  if (!stroke) return fill;
+  const u = fill.unite(stroke);
+  fill.remove();
+  stroke.remove();
+  return u;
+}
+
+// Stroke a CLOSED region's boundary by the full pen width `widthPx` with the given
+// join/cap, converted to a filled outline. Qt's QPainterPathStroker.setWidth(w)
+// strokes w/2 each side; pass the FULL width here (so for the blocker, MAX_BLUR*S).
+// Reuses the strokedOutline sampling machinery on each sub-path's boundary, offset
+// by +/- half-width, joined into a closed ring. This is a round/round-equivalent
+// approximation on the mask region's boundary (the miter/flat detail is a minor
+// fringe effect on the small blocker region — see ITEM2_SPEC §EDIT 3 note).
+function strokedRegionOutline(region, widthPx) {
+  if (!region || widthPx <= 0) return null;
+  const half = widthPx / 2;
+  // A region from a boolean op may be a CompoundPath (multiple sub-paths). Stroke
+  // each closed boundary and union the resulting bands.
+  const subs = region.children && region.children.length ? region.children : [region];
+  let out = null;
+  for (const sub of subs) {
+    const len = sub.length;
+    if (!len) continue;
+    const N = Math.max(8, Math.ceil(len / SAMPLE_STEP));
+    const left = [], right = [];
+    for (let i = 0; i <= N; i++) {
+      const off = Math.min(len * i / N, len - 1e-4);
+      const pt = sub.getPointAt(off);
+      const nrm = sub.getNormalAt(off);
+      if (!pt || !nrm) continue;
+      left.push(pt.add(nrm.multiply(half)));
+      right.push(pt.subtract(nrm.multiply(half)));
+    }
+    if (left.length < 2) continue;
+    right.reverse();
+    let band = new paper.Path({ segments: left.concat(right), closed: true });
+    const cleaned = band.resolveCrossings();
+    if (cleaned !== band) { band.remove(); band = cleaned; }
+    if (!out) { out = band; }
+    else { const u = out.unite(band); out.remove(); band.remove(); out = u; }
+  }
+  return out;
+}
+
+// Port of get_shadow_blocker_path (shader_utils.py:1876) + _get_mask_visual_path:
+// base = mask VISUAL path (fill ∪ stroke regions); blocker = base UNION
+// stroke(base boundary, width=MAX_BLUR*S). Subtracted from a caster->receiver
+// shadow for a VISIBLE mask layered ABOVE the caster. Returns a path or null.
+function buildShadowBlockerPath(ms, byLayer, P, enableThird, S) {
+  const base = buildMaskVisualPath(ms, byLayer, P, enableThird, S);
+  if (!base) return null;
+  const stroked = strokedRegionOutline(base, MAX_BLUR * S);
+  if (!stroked) return base; // degrade to base-only blocker
+  const u = base.unite(stroked);
+  base.remove();
+  stroked.remove();
+  return u;
+}
+
+// Subtract the rendered geometry of each named layer from `region`, IN ORDER.
+// Masks use their mask path; hidden strands are skipped. Port of Qt
+// _subtract_named_layer_paths. Returns the (possibly empty/null) region; the
+// caller owns it. Breaks early once the region empties.
+function subtractLayers(region, names, byLayer, strands, P, enableThird, S, blockerAcc) {
+  if (!region || !names || !names.length) return region;
+  for (const name of names) {
+    const t = byLayer[name];
+    if (!t || t.is_hidden === true) continue;
+    const geom = t.type === 'MaskedStrand'
+      ? buildMaskPath(t, byLayer, P, enableThird, S)
+      : buildShadowReceiverGeom(t, strands, P, enableThird, S);
+    if (!geom) continue;
+    // Accumulate the union of subtracted geometry for the caller's clip blocker
+    // (Qt _subtract_named_layer_paths returns this alongside the trimmed region).
+    if (blockerAcc) {
+      if (!blockerAcc.path) { blockerAcc.path = geom.clone(); }
+      else { const u = blockerAcc.path.unite(geom); blockerAcc.path.remove(); blockerAcc.path = u; }
+    }
+    const r = region.subtract(geom);
+    geom.remove();
+    region.remove();
+    region = r;
+    if (!region || Math.abs(region.area || 0) <= 0.5) break;
+  }
+  return region;
+}
+
+// Qt get_default_shadow_visibility: a masked caster does NOT cast a regular
+// shadow onto its own FIRST component by default (returns true otherwise). The
+// SECOND component still receives (with the first component subtracted — see
+// defaultSubtracted). Only consulted when no explicit `visibility` override.
+function defaultShadowVisibilityFalse(s, o) {
+  if (s.type !== 'MaskedStrand') return false;
+  const parts = (s.layer_name || '').split('_');
+  if (parts.length < 4) return false;
+  const firstName = parts[0] + '_' + parts[1];
+  return o.layer_name === firstName;
+}
+
+// Qt get_default_subtracted_layers: a masked caster's SECOND-component receiver
+// defaults to subtracting the FIRST component's geometry. Returns [] otherwise.
+function defaultSubtracted(s, o, byLayer) {
+  if (s.type !== 'MaskedStrand') return [];
+  const parts = (s.layer_name || '').split('_');
+  if (parts.length < 4) return [];
+  const firstName = parts[0] + '_' + parts[1];
+  const secondName = parts[2] + '_' + parts[3];
+  return o.layer_name === secondName ? [firstName] : [];
+}
+
+// Faithful port of draw_mask_strand_shadow (shader_utils.py:179). PORT-FOR-
+// COMPLETENESS / UNMEASURED — no mask fixture in the corpus exercises this at the
+// pixel level (the two masks in overhand_knot are themselves casters/receivers in
+// the regular shadow loop, gated out by maskPairs). first = top, second = bottom.
+// The call site passes canvas.max_blur_radius = 30 (NOT the 29.99 signature
+// default), so widths are 15/30 and alphas 150/75 — the same table as the regular
+// faded loop. No separate unclipped solid-core pass for masks (unlike strands);
+// only the clipped faded strokes plus a clipped inner-core fill.
+function drawMaskShadow(ms, first, second, fw, fsw, sw, ssw, P, enableThird, S) {
+  const firstPath = strokedBodyAtWidth(first, P, enableThird, (fw + 2 * fsw) * S);
+  const secondPath = strokedBodyAtWidth(second, P, enableThird, (sw + 2 * ssw) * S);
+  if (!firstPath || !secondPath) {
+    firstPath && firstPath.remove();
+    secondPath && secondPath.remove();
+    return;
+  }
+  // shading_path = (second_path ∩ first_path) minus deletion rects.
+  let shading = secondPath.intersect(firstPath);
+  shading = subtractDeletions(shading, ms, P, S);
+
+  const items = [];
+  if (shading && shading.area && Math.abs(shading.area) > 0.5) {
+    for (const st of shadowBlurSteps()) {
+      const item = shading.clone();
+      item.fillColor = null;
+      item.strokeColor = new paper.Color(SHADOW_COLOR.r / 255, SHADOW_COLOR.g / 255, SHADOW_COLOR.b / 255, st.alpha / 255);
+      item.strokeWidth = st.width * S;
+      item.strokeCap = 'butt';   // Qt FlatCap
+      item.strokeJoin = 'round'; // Qt RoundJoin
+      items.push(item);
+    }
+  }
+  // inner-core = stroke(first centerline, fw+2fsw) ∩ second_path, filled SOLID at
+  // full alpha 150. (Same stroke width as firstPath here, so == firstPath ∩ second.)
+  const innerStroke = strokedBodyAtWidth(first, P, enableThird, (fw + 2 * fsw) * S);
+  if (innerStroke) {
+    let core = innerStroke.intersect(secondPath);
+    core = subtractDeletions(core, ms, P, S);
+    if (core && core.area && Math.abs(core.area) > 0.5) {
+      core.fillColor = SHADOW_PAINT;
+      core.strokeColor = null;
+      items.push(core);
+    } else {
+      core && core.remove();
+    }
+    innerStroke.remove();
+  }
+  // All shadow items clipped to second_path (the receiving strand's body).
+  if (items.length) {
+    new paper.Group({ children: [secondPath.clone(), ...items], clipped: true });
+  }
+  shading && shading.remove();
+  firstPath.remove();
+  secondPath.remove();
+}
+
 // Faithful port of masked_strand.py. The crossing of the top strand (`first`)
 // over the bottom (`second`) is painted as TWO regions filled directly:
 //   stroke-color layer = stroked(first, w+2sw) ∩ stroked(second, w+2sw)
 //   fill-color  layer  = stroked(first, w)     ∩ stroked(second, w+2sw+4)
 // each unioned with the components' visible start circles, minus deletions.
 function drawMasked(ms, byLayer, P, enableThird, S) {
+  // A hidden mask draws nothing (Qt MaskedStrand.draw early-returns on is_hidden,
+  // masked_strand.py:465 — only a dashed edit-mode outline, absent in the offscreen
+  // reference). So neither its masked body nor its own crossing shadow is painted.
+  if (ms.is_hidden === true) return;
   const parts = (ms.layer_name || '').split('_');
   if (parts.length < 4) return;
   const first = byLayer[parts[0] + '_' + parts[1]];
@@ -552,20 +1043,18 @@ function drawMasked(ms, byLayer, P, enableThird, S) {
   const fw = first.width || 0, fsw = first.stroke_width || 0;
   const sw = second.width || 0, ssw = second.stroke_width || 0;
 
-  // Crossing shadow (only when shadows are on): over strand expanded by blur ∩
-  // under strand body, drawn first so the over-strand redraw covers all but the
-  // fringe on the under strand.
+  // Crossing shadow (only when shadows are on). Faithful port of
+  // draw_mask_strand_shadow (PORT-FOR-COMPLETENESS — no mask fixture exercises
+  // this at the pixel level, so it is UNMEASURED). first = top, second = bottom:
+  //   first_path  = first body @ (fw+2fsw)   (NO blur inflation)
+  //   second_path = second body @ (sw+2ssw)
+  //   shading_path = (second_path ∩ first_path) minus deletion rects
+  //   clipped to second_path, run NUM_STEPS faded boundary strokes over
+  //     shading_path (15/30 widths, 150/75 alphas, FlatCap/RoundJoin); then
+  //   inner-core = stroke(first center, fw+2fsw) ∩ second_path filled SOLID at
+  //     alpha 150 (no separate unclipped solid-core pass for masks).
   if (SHADOW_ENABLED) {
-    const firstExp = strokedBodyAtWidth(first, P, enableThird, (fw + 2 * fsw + MAX_BLUR) * S);
-    const secondBody = strokedBodyAtWidth(second, P, enableThird, (sw + 2 * ssw) * S);
-    if (firstExp && secondBody) {
-      let sh = firstExp.intersect(secondBody);
-      sh = subtractDeletions(sh, ms, P, S);
-      if (sh && sh.area && Math.abs(sh.area) > 0.5) { sh.fillColor = SHADOW_PAINT; sh.strokeColor = null; }
-      else if (sh) sh.remove();
-    }
-    firstExp && firstExp.remove();
-    secondBody && secondBody.remove();
+    drawMaskShadow(ms, first, second, fw, fsw, sw, ssw, P, enableThird, S);
   }
 
   // stroke-color region: first@(w+2sw) ∩ second@(w+2sw)
@@ -633,6 +1122,17 @@ window.renderFixture = function (strands, meta) {
   const byLayer = {};
   for (const s of strands) byLayer[s.layer_name] = s;
 
+  // Honor the canonical layer_order from the Qt reference so the j<i z-order
+  // semantics match OSS. Guard with every()+rank.has so a partial/missing order
+  // falls back to the incoming array order. Sort a slice() copy so the caller's
+  // array is not mutated; byLayer is keyed by layer_name and stays valid.
+  if (Array.isArray(meta.layer_order) && meta.layer_order.length) {
+    const rank = new Map(meta.layer_order.map((name, idx) => [name, idx]));
+    if (strands.every((s) => rank.has(s.layer_name))) {
+      strands = strands.slice().sort((a, b) => rank.get(a.layer_name) - rank.get(b.layer_name));
+    }
+  }
+
   // Replace each strand's stored has_circles with the render-time value OSS
   // computes on load (from actual attachments + manual overrides). Drives both
   // the end caps and the flat-end side lines.
@@ -644,6 +1144,9 @@ window.renderFixture = function (strands, meta) {
   const shadowEnabled = !!meta.shadow_enabled;
   SHADOW_ENABLED = shadowEnabled;
   SHADOW_PAINT = toColor(SHADOW_COLOR);
+  // Stash the per-pair override dict module-scoped so castStrandShadow can read
+  // it in the Port phase without threading a new param. Inert until that phase.
+  SHADOW_OVERRIDES = meta.shadow_overrides || {};
 
   // Pairs that are the two components of a mask don't shadow each other (the
   // mask owns that crossing).
@@ -657,57 +1160,30 @@ window.renderFixture = function (strands, meta) {
     }
   }
 
-  // Precompute each regular strand's full body and blur-expanded body once
-  // (kept invisible; reused for all shadow pairs).
-  const fullBody = {}, expBody = {};
-  if (shadowEnabled) {
-    for (const s of strands) {
-      if (s.type === 'MaskedStrand') continue;
-      const w = s.width || 0, sw = s.stroke_width || 0;
-      const fb = strokedBodyAtWidth(s, P, enableThird, (w + 2 * sw) * S);
-      const eb = strokedBodyAtWidth(s, P, enableThird, (w + 2 * sw + MAX_BLUR) * S);
-      if (fb) fb.visible = false;
-      if (eb) eb.visible = false;
-      fullBody[s.layer_name] = fb;
-      expBody[s.layer_name] = eb;
-    }
-  }
-  const shadowCol = toColor(SHADOW_COLOR);
-
   // Draw in list order (≈ Qt paint loop): for each strand, first cast its
-  // shadow onto already-drawn lower strands, then paint its body. Masked
-  // strands repaint the top strand over the bottom.
+  // faithful two-pass shadow onto already-drawn lower strands (SOLID CORE +
+  // clipped FADED BLUR, see castStrandShadow), then paint its body. Drawing the
+  // body after the cast means it covers its own inner shadow, leaving only the
+  // fringe over lower strands. Masked strands repaint the top strand over the
+  // bottom (and own their own crossing shadow).
   for (let i = 0; i < strands.length; i++) {
     const s = strands[i];
-    if (s.type === 'MaskedStrand') { drawMasked(s, byLayer, P, enableThird, S); continue; }
-
-    if (shadowEnabled && expBody[s.layer_name]) {
-      for (let j = 0; j < i; j++) {
-        const o = strands[j];
-        if (o.type === 'MaskedStrand' || !fullBody[o.layer_name]) continue;
-        if (maskPairs.has(s.layer_name + '|' + o.layer_name)) continue;
-        // Inflated-bbox quick reject (mirrors shader_utils.py:688-702): the caster
-        // body here is already blur-expanded (expBody), so if its bounds don't
-        // overlap the receiver body's bounds the intersection is provably empty.
-        // Skip the expensive paper boolean. Pixel-identical: a non-overlapping
-        // intersect yields an empty region that is removed below anyway.
-        if (!expBody[s.layer_name].bounds.intersects(fullBody[o.layer_name].bounds)) continue;
-        const region = expBody[s.layer_name].intersect(fullBody[o.layer_name]);
-        if (!region) continue;
-        if (region.area && Math.abs(region.area) > 0.5) {
-          region.fillColor = shadowCol;
-          region.strokeColor = null;
-        } else {
-          region.remove();
-        }
-      }
+    // Hidden strands do not cast a shadow (Qt draw_strand_shadow early-returns on
+    // is_hidden, shader_utils.py:457). Their body still routes to drawMasked/
+    // drawStrand below, matching the pre-existing (unmeasured) body behavior.
+    const casts = shadowEnabled && s.is_hidden !== true;
+    if (s.type === 'MaskedStrand') {
+      // A mask FIRST casts its crossing shadow onto lower NON-mask strands (the
+      // receiver loop skips MaskedStrand receivers and the mask's own components),
+      // THEN draws its body (which owns its own-component crossing shadow).
+      if (casts) castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i);
+      drawMasked(s, byLayer, P, enableThird, S);
+      continue;
     }
+
+    if (casts) castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i);
     drawStrand(s, strands, P, enableThird, S);
   }
-
-  // Remove the invisible helper bodies.
-  for (const k in fullBody) { if (fullBody[k]) fullBody[k].remove(); }
-  for (const k in expBody) { if (expBody[k]) expBody[k].remove(); }
 
   paper.view.update();
 
@@ -785,7 +1261,14 @@ window.renderFixture = function (strands, meta) {
 // move draw only the moving strands on top — at supersample 1 (so no box-average
 // downscale) and with shadows off. Full quality + shadows return via a normal
 // renderFixture on pointer-up.
-let DRAG_BG = null; // { canvas, W, H, ox, oy, zoom, topo }
+// bands: ordered z-segments separating the static scene around the moving set.
+// Each entry is either { kind:'band', canvas } (a pre-baked maximal run of
+// consecutive static strands) or { kind:'move' } (a placeholder where the moving
+// strands are stroked live each frame). Walking `bands` in order and blitting /
+// stroking reproduces the document's true z-order, so a static strand above the
+// moving one still occludes it (mirrors move_mode.py's original_strands_order
+// redraw, but with the static runs cached so per-frame cost stays O(moving)).
+let DRAG_BG = null; // { bands, W, H, ox, oy, zoom, topo }
 
 // Gesture-invariant topology shared by every frame of a drag. has_circles is the
 // attachment structure (which endpoints carry caps / flat-end side lines); it is
@@ -849,25 +1332,63 @@ function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg, topo) {
   paper.view.update();
 }
 
-// Bake all STATIC strands (everything except meta.drag.moving) into a reusable
-// offscreen bitmap. Call once at the start of a drag gesture. Computes the
-// gesture-invariant topology ONCE here and stashes it on DRAG_BG so every
+// Bake the STATIC strands into per-band offscreen bitmaps, split by the moving
+// set so true z-order is preserved during the gesture. Call once at the start of
+// a drag. The strands array is already z-ordered (doc order); we walk it and let
+// any moving-set layer act as a SEPARATOR. Each maximal run of consecutive static
+// strands becomes its own band bitmap; the moving set's z-slot becomes a 'move'
+// placeholder stroked live each frame. In the common case (moving set contiguous)
+// this yields BELOW band, move, ABOVE band. Computes the gesture-invariant
+// topology ONCE here and stashes it (with the bands) on DRAG_BG so every
 // renderDragFrame reuses it instead of recomputing.
 window.renderDragBackground = function (strands, meta) {
   const W = meta.image_width, H = meta.image_height;
   const moving = new Set((meta.drag && meta.drag.moving) || []);
   const topo = computeDragTopology(strands);
-  const bg = document.createElement('canvas');
-  _dragPaint(bg, strands, meta, (name) => !moving.has(name), true, topo);
-  paper.project.remove();
-  DRAG_BG = { canvas: bg, W, H, ox: meta.x_offset, oy: meta.y_offset, zoom: meta.zoom || 1, topo };
-  return { baked: true, staticCount: strands.length - moving.size };
+  // Partition strands into ordered segments: maximal runs of static strands
+  // alternating with the moving-set slots. A MaskedStrand whose components move is
+  // already in the moving set (movingStrandSet), so testing layer membership is
+  // enough to keep masks that straddle a boundary out of a static band.
+  const bands = [];
+  let run = null; // current static layer-name run, or null
+  let inMove = false; // last separator slot already recorded as 'move'?
+  for (let i = 0; i < strands.length; i++) {
+    const name = strands[i].layer_name;
+    if (moving.has(name)) {
+      if (run) { bands.push({ kind: 'band', names: run }); run = null; }
+      // Collapse a contiguous cluster of moving strands into a single 'move' slot.
+      if (!inMove) { bands.push({ kind: 'move' }); inMove = true; }
+    } else {
+      if (!run) run = new Set();
+      run.add(name);
+      inMove = false;
+    }
+  }
+  if (run) bands.push({ kind: 'band', names: run });
+  // Bake each static run into its own TRANSPARENT bitmap. The white backdrop is
+  // painted once on the visible canvas in renderDragFrame (not baked into any
+  // band) so the bands composite cleanly in any order regardless of which one is
+  // first — including the case where the moving set is at the very bottom and no
+  // BELOW band exists.
+  for (const b of bands) {
+    if (b.kind !== 'band') continue;
+    const c = document.createElement('canvas');
+    _dragPaint(c, strands, meta, (name) => b.names.has(name), false, topo);
+    paper.project.remove();
+    b.canvas = c;
+    delete b.names; // names only needed during bake
+  }
+  DRAG_BG = {
+    bands, W, H, ox: meta.x_offset, oy: meta.y_offset, zoom: meta.zoom || 1, topo,
+  };
+  return { baked: true, staticCount: strands.length - moving.size, bands: bands.length };
 };
 
-// Per-move frame: blit the cached static background, then draw only the moving
-// strands on top. Falls back to a full renderFixture if no matching bake exists
-// (e.g. the view changed mid-gesture). Reuses DRAG_BG.topo (baked once at gesture
-// start) so the per-frame cost is O(moving), not O(all strands).
+// Per-move frame: composite the pre-baked static bands and the live moving
+// strokes in TRUE z-order, so a static strand above the moving one still occludes
+// it. Falls back to a full renderFixture if no matching bake exists (e.g. the view
+// changed mid-gesture). Reuses DRAG_BG.topo (baked once at gesture start) so the
+// per-frame cost is O(moving) + k band blits, not O(all strands).
 window.renderDragFrame = function (strands, meta) {
   const W = meta.image_width, H = meta.image_height;
   if (!DRAG_BG || DRAG_BG.W !== W || DRAG_BG.H !== H ||
@@ -876,6 +1397,8 @@ window.renderDragFrame = function (strands, meta) {
     return window.renderFixture(strands, meta);
   }
   const moving = new Set((meta.drag && meta.drag.moving) || []);
+  // Stroke the moving strands once into a transparent offscreen bitmap; it gets
+  // blitted at every 'move' slot in the band order (normally exactly one slot).
   const mv = document.createElement('canvas');
   _dragPaint(mv, strands, meta, (name) => moving.has(name), false, DRAG_BG.topo);
   paper.project.remove();
@@ -886,9 +1409,15 @@ window.renderDragFrame = function (strands, meta) {
   vis.style.height = H + 'px';
   const ctx = vis.getContext('2d');
   ctx.clearRect(0, 0, W, H);
-  ctx.drawImage(DRAG_BG.canvas, 0, 0); // static scene
-  ctx.drawImage(mv, 0, 0);             // moving strands on top
-  return { drawn: moving.size, mode: 'dragframe' };
+  ctx.fillStyle = 'white';
+  ctx.fillRect(0, 0, W, H); // backdrop (baked into no band; see renderDragBackground)
+  // Composite bands bottom-to-top in document z-order, dropping in the moving
+  // strokes at their z-slot. Per-frame work = k band blits + the one mv blit.
+  for (const b of DRAG_BG.bands) {
+    if (b.kind === 'move') ctx.drawImage(mv, 0, 0);
+    else ctx.drawImage(b.canvas, 0, 0);
+  }
+  return { drawn: moving.size, mode: 'dragframe', bands: DRAG_BG.bands.length };
 };
 
 // Drop the cached background at the end of a gesture (or before any full render).

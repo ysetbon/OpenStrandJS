@@ -210,6 +210,24 @@ def main():
         "shadow_enabled": bool(shadow_enabled),
         "show_control_points": bool(show_control_points),
         "num_strands": len(canvas.strands),
+        "shadow_overrides": shadow_overrides,
+        "layer_order": (
+            canvas.layer_state_manager.getOrder()
+            if getattr(canvas, "layer_state_manager", None)
+            and canvas.layer_state_manager.getOrder()
+            else [s.layer_name for s in canvas.strands]
+        ),
+        "num_steps": 2,
+        "shadow_color": (
+            {
+                "r": canvas.default_shadow_color.red(),
+                "g": canvas.default_shadow_color.green(),
+                "b": canvas.default_shadow_color.blue(),
+                "a": canvas.default_shadow_color.alpha(),
+            }
+            if getattr(canvas, "default_shadow_color", None) is not None
+            else {"r": 0, "g": 0, "b": 0, "a": 150}
+        ),
     }
     with open(out_meta, "w") as f:
         json.dump(meta, f, indent=2)
