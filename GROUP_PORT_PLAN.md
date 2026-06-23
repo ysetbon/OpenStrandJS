@@ -156,7 +156,22 @@ Legend: ✅ faithful · 🟡 present but simplified / needs fidelity work · ❌
   Rewrote the dialog (per-casting sections + per-pair rows). **Fidelity verified byte-identical**
   (stash A/B: braid 1895 / knot 20498 mismatch px with AND without #8). i18n + CSS added.
   Low nits left: stale preview comment; subtract-section can't collapse once populated (stored-only).
-- Next per the order below: **#9 mask-grid** (final loop op).
+- **Create Mask Grid (#9) — DONE** (commit `2281045`, via `group-mask-grid` workflow + a
+  crossing-detector fix). `createMaskGrid` is now geometry-aware: masks only member pairs whose
+  centerlines actually cross, over/under from z-order, dedup both directions. New `MaskGridDialog`
+  (member multi-select + Select All) wired in. **Fix:** the original `segIntersect` (proper-X only)
+  missed symmetric perpendicular crossings (the canonical weave) because a sampled vertex lands on
+  the other line (orientation 0) — made it touch-tolerant + added an attached-join guard. Verified:
+  HxV cross → one mask (z-order over); isolated + attached-join correctly skipped; idempotent.
+  Deferred: full N×N directional matrix; centerline proxy vs OSS stroked-area (T-junctions).
+
+## ALL GROUP OPERATIONS PORTED ✅
+
+Every operation in the checklist is now done or was already faithful:
+#1 create/membership · #2 delete · #3 rename · #4 duplicate · #5 move · #6 rotate ·
+#7 edit-angles · #8 edit-shadows · #9 mask-grid · #10 panel sync · #11 expand/collapse.
+Branch `group`, commits ec596a0 → 2281045. Each verified in-browser; renderer change (#8)
+proven fidelity-byte-identical. Known deferrals/divergences are listed per-op above.
 
 ## Suggested order
 
