@@ -69,15 +69,3 @@
   justify-content: center;
 }
 .tb-gear:hover { background: rgba(200, 200, 200, 0.55); }
-
-/* dev-only sample loader (no OSS equivalent) */
-.tb-dev { display: flex; gap: 2px; opacity: 0.55; }
-.tb-devbtn {
-  font: 11px system-ui;
-  padding: 2px 5px;
-  border: 1px solid var(--panel-border);
-  background: var(--button-bg);
-  color: var(--text);
-  border-radius: 4px;
-  cursor: pointer;
-}

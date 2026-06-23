@@ -9,9 +9,6 @@ import { exportPng } from '../io/exportPng';
 import { fitPan } from '../interaction/viewTransform';
 import type { ModeName } from '../model/types';
 
-// JS-only dev affordance (no OSS equivalent) — hidden in production builds.
-const FIXTURES = ['single_strand', 'three_strand_braid', 'overhand_knot', 'closed_knot'];
-
 // The OSS toolbar (main_window.py). A horizontal row of colored mode/toggle/action
 // buttons, then a flex spacer, then the State + Settings buttons. Colors, order and
 // checkable-ness are an exact transcription of UI_PORT_PLAN.md §2.2.
@@ -77,11 +74,6 @@ export function Toolbar() {
     e.target.value = '';
   }
 
-  async function loadFixture(name: string) {
-    try { applyDoc(await (await fetch(`/fixtures/${name}.json`)).json()); }
-    catch (err) { console.error('Failed to load fixture:', err); }
-  }
-
   function onSave() {
     downloadJSON('openstrand_project.json', serializeProject(useEditorStore.getState().doc));
   }
@@ -119,14 +111,6 @@ export function Toolbar() {
           {b.label ?? t(b.key, lang)}
         </button>
       ))}
-
-      {import.meta.env?.DEV && (
-        <span className="tb-dev" title="dev: sample fixtures">
-          {FIXTURES.map((name) => (
-            <button key={name} className="tb-devbtn" onClick={() => loadFixture(name)}>{name}</button>
-          ))}
-        </span>
-      )}
 
       <span className="tb-spacer" />
 
