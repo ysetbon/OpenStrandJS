@@ -50,9 +50,69 @@ export function buildWeldGraph(doc: EditorDocument): UnionFind {
   return uf;
 }
 
-// All endpoints welded to (layer,end) — including itself.
-export function weldedEndpoints(doc: EditorDocument, layer: string, end: EndKey): EndpointId[] {
+// Per-gesture weld-graph memo. The weld relation is pure topology (attachments +
+// knot_connections); it does NOT depend on positions, so a single endpoint drag
+// (which mutates only coordinates, every pointermove producing a fresh cloned doc
+// with the SAME topology) keeps an identical union-find for the whole gesture.
+// moveHandle rebuilds the graph on EVERY pointermove otherwise; we cache it across
+// the gesture and invalidate explicitly when topology can change (attach/detach/
+// commit, etc.). The cache key is a caller-supplied token, defaulting to the doc
+// object identity (mutateDoc clones the doc each move, so identity alone is NOT a
+// stable key across a gesture — callers that want gesture-wide reuse pass a stable
+// token; see weldGraphFor / invalidateWeldGraph).
+let weldCache: { token: unknown; uf: UnionFind } | null = null;
+
+// Return a weld graph for `doc`, reusing the cached one when `token` matches the
+// last call's token. Topology-changing mutations must pass a fresh token (or call
+// invalidateWeldGraph) so the stale graph is dropped. When no token is given the
+// doc identity is used (correct, but only reuses within a single render pass since
+// mutateDoc clones the doc per move).
+export function weldGraphFor(doc: EditorDocument, token?: unknown): UnionFind {
+  const cacheKey = token === undefined ? doc : token;
+  if (weldCache && weldCache.token === cacheKey) return weldCache.uf;
   const uf = buildWeldGraph(doc);
+  weldCache = { token: cacheKey, uf };
+  return uf;
+}
+
+// Drop the cached weld graph (call when topology may have changed: attach, detach,
+// delete, knot close, undo/redo, doc load — anything that alters the weld
+// relation). Safe to over-invalidate; the next weldGraphFor just rebuilds.
+export function invalidateWeldGraph(): void {
+  weldCache = null;
+}
+
+// Per-gesture stable token. An endpoint drag does not change topology, so the
+// whole gesture can share one cached weld graph. beginWeldGesture() mints a fresh
+// token at pointerdown (and clears any stale cache); gestureWeldGraph(draft) is
+// then called per pointermove and reuses the cached union-find for that token.
+let gestureToken: object | null = null;
+
+// Start a new weld-graph gesture: returns a stable token and drops the old cache.
+export function beginWeldGesture(): object {
+  gestureToken = {};
+  weldCache = null;
+  return gestureToken;
+}
+
+// End the current weld-graph gesture (drop the token + cache). Topology may change
+// after the gesture, so the next gesture must rebuild.
+export function endWeldGesture(): void {
+  gestureToken = null;
+  weldCache = null;
+}
+
+// Weld graph for `draft`, reusing the per-gesture cache when a gesture is active;
+// otherwise builds fresh (no caching). Used by moveHandle on every pointermove.
+export function gestureWeldGraph(draft: EditorDocument): UnionFind {
+  return gestureToken ? weldGraphFor(draft, gestureToken) : buildWeldGraph(draft);
+}
+
+// All endpoints welded to (layer,end) — including itself. `graph`, when supplied,
+// is reused as-is (the per-gesture cached union-find) so the O(N) rebuild is
+// skipped on every pointermove; otherwise it is built from `doc`.
+export function weldedEndpoints(doc: EditorDocument, layer: string, end: EndKey, graph?: UnionFind): EndpointId[] {
+  const uf = graph ?? buildWeldGraph(doc);
   const target = uf.find(key(layer, end));
   const out: EndpointId[] = [];
   for (const name of doc.order) {

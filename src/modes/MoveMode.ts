@@ -5,7 +5,7 @@
 
 import { useEditorStore } from '../store/editorStore';
 import { hitTest } from '../interaction/hitTest';
-import { movingStrandSet } from '../interaction/connections';
+import { movingStrandSet, beginWeldGesture, endWeldGesture } from '../interaction/connections';
 import { moveHandle, snapPoint } from '../store/actions';
 import type { HandleKind, Point, StrandRecord } from '../model/types';
 import type { Mode, ModeContext, PointerInfo } from './Mode';
@@ -36,6 +36,10 @@ export const MoveMode: Mode = {
       st.setSelection({ layerName: hit.layerName, handle: hit.handle });
       st.beginGesture();
       st.setDragging(true);
+      // Topology is invariant across an endpoint drag: mint a per-gesture weld-graph
+      // token so moveHandle reuses one cached union-find for the whole gesture
+      // instead of rebuilding it every pointermove.
+      beginWeldGesture();
       // Publish the set of strands that move with this handle so the renderer can
       // bake everything else as a static background and redraw only these per frame.
       st.setDragMoving([...movingStrandSet(st.doc, hit.layerName, hit.handle)]);
@@ -75,6 +79,7 @@ export const MoveMode: Mode = {
       const st = useEditorStore.getState();
       st.setDragging(false);
       st.setDragMoving([]);      // end the gesture's moving set
+      endWeldGesture();          // drop the per-gesture weld-graph cache
       st.commit();               // one drag = one undo step
       ctx.requestRender();       // dragging=false -> one full-quality render (shadows + supersample)
     }

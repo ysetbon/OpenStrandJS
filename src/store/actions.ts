@@ -3,8 +3,8 @@
 // store.mutateDoc(draft => ...). No object cross-references, so drafts stay
 // JSON-serializable for future snapshot history.
 
-import type { EditorDocument, GroupRecord, HandleKind, Point, RGBA, Settings, StrandRecord } from '../model/types';
-import { weldedEndpoints } from '../interaction/connections';
+import type { EditorDocument, GroupRecord, HandleKind, KnotConnection, Point, RGBA, Settings, StrandRecord } from '../model/types';
+import { gestureWeldGraph, weldedEndpoints } from '../interaction/connections';
 import { makeAttachedStrand, makeStrand } from '../model/factory';
 import { maskComponents, nextFreeSet, nextIndexInSet } from '../model/layerName';
 
@@ -78,7 +78,11 @@ export function moveHandle(
   if (delta.x === 0 && delta.y === 0) return;
   const EPS = 1e-3;
 
-  for (const ep of weldedEndpoints(draft, layerName, handle)) {
+  // Reuse the per-gesture cached weld graph (topology is invariant across an
+  // endpoint drag) instead of rebuilding the union-find on every pointermove.
+  // Falls back to a fresh build when no gesture is active.
+  const graph = gestureWeldGraph(draft);
+  for (const ep of weldedEndpoints(draft, layerName, handle, graph)) {
     const t = draft.strands[ep.layer];
     if (!t) continue;
     const pt = ep.end === 'start' ? t.start : t.end;
@@ -255,9 +259,158 @@ export function setWidth(
   }
 }
 
+// Set width_in_grid_units (extra-only — no typed field), optionally across the
+// whole set. Mirrors setWidth's set_number loop. OSS change_width writes this to
+// every non-masked strand sharing the set; change_layer_width writes it to one.
+export function setWidthGridUnits(
+  draft: EditorDocument,
+  name: string,
+  units: number,
+  wholeSet: boolean,
+): void {
+  const s = draft.strands[name];
+  if (!s) return;
+  const apply = (t: StrandRecord) => { t.extra.width_in_grid_units = units; };
+  if (wholeSet) {
+    for (const k of Object.keys(draft.strands)) {
+      const t = draft.strands[k];
+      if (t.type !== 'MaskedStrand' && t.set_number === s.set_number) apply(t);
+    }
+  } else {
+    apply(s);
+  }
+}
+
 export function setShadowOnly(draft: EditorDocument, name: string, value: boolean): void {
   const s = draft.strands[name];
   if (s) s.shadow_only = value;
+}
+
+// OSS is_strand_deletable: deletable iff it has knot connections OR not all of
+// its endpoint circles are present. A strand with both circles and no knot
+// connections is a closed-on-both-ends interior strand and may not be deleted.
+export function isStrandDeletable(s: StrandRecord): boolean {
+  if (s.knot_connections && Object.keys(s.knot_connections).length > 0) return true;
+  return !(s.has_circles[0] && s.has_circles[1]);
+}
+
+// OSS Transparent / Restore-Default Stroke item: sets circle_stroke_color (the
+// stroke around the endpoint circle). Passing null clears it.
+export function setCircleStrokeColor(draft: EditorDocument, name: string, color: RGBA | null): void {
+  const s = draft.strands[name];
+  if (s) s.circle_stroke_color = color ? { ...color } : null;
+}
+
+// OSS toggle_strand_circle_visibility: flips has_circles[index] and records the
+// manual override in extra.manual_circle_visibility so the renderer's has_circles
+// recompute respects the user's explicit choice.
+export function toggleCircleVisible(draft: EditorDocument, name: string, index: 0 | 1): void {
+  const s = draft.strands[name];
+  if (!s) return;
+  s.has_circles[index] = !s.has_circles[index];
+  const mcv = Array.isArray(s.extra.manual_circle_visibility)
+    ? [...(s.extra.manual_circle_visibility as unknown[])]
+    : [null, null];
+  mcv[index] = s.has_circles[index];
+  s.extra.manual_circle_visibility = mcv;
+}
+
+// OSS toggle_strand_line_visibility: flips the start/end side-line flag. Lines
+// are visible by default, so the first toggle turns the flag off; the renderer
+// reads start_line_visible / end_line_visible from extra.
+export function toggleLineVisible(draft: EditorDocument, name: string, end: 'start' | 'end'): void {
+  const s = draft.strands[name];
+  if (!s) return;
+  const key = `${end}_line_visible`;
+  const cur = s.extra[key];
+  s.extra[key] = cur === false ? true : false;
+}
+
+// OSS close_the_knot: connect this strand's free end to the nearest sibling in
+// the same set that also has exactly one free end. Moves the free point (plus any
+// control point — including control_point_center — coincident with it) to the
+// target's free point, caps both ends with circles, marks closed_connections +
+// manual_circle_visibility on BOTH strands, and records the knot connection on
+// both (keyed by END TYPE) with the target mirroring the initiator. Gating
+// (exactly-one-free-end) is computed by the caller (NumberedLayerButton).
+// TODO(oss-fidelity): per-end circle-stroke transparency on the target's
+// connecting edge (OSS start/end_circle_stroke_color) needs per-end stroke model
+// fields the JS renderer lacks; the target keeps an opaque-black circle stroke.
+export function closeKnot(draft: EditorDocument, name: string, freeEnd: 'start' | 'end'): void {
+  const s = draft.strands[name];
+  if (!s) return;
+  const freeIdx = freeEnd === 'start' ? 0 : 1;
+
+  // Find the nearest sibling sharing set_number (different layer) with exactly
+  // one free end (one of has_circles is false).
+  const myPoint = freeEnd === 'start' ? s.start : s.end;
+  let best: { layer: string; end: 'start' | 'end'; idx: 0 | 1; pt: Point } | null = null;
+  let bestDist = Infinity;
+  for (const k of Object.keys(draft.strands)) {
+    if (k === name) continue;
+    const t = draft.strands[k];
+    if (t.type === 'MaskedStrand') continue;
+    if (t.set_number !== s.set_number) continue;
+    const freeEnds: ('start' | 'end')[] = [];
+    if (!t.has_circles[0]) freeEnds.push('start');
+    if (!t.has_circles[1]) freeEnds.push('end');
+    if (freeEnds.length !== 1) continue;
+    const te = freeEnds[0];
+    const tIdx: 0 | 1 = te === 'start' ? 0 : 1;
+    const tp = te === 'start' ? t.start : t.end;
+    const d = Math.hypot(tp.x - myPoint.x, tp.y - myPoint.y);
+    if (d < bestDist) { bestDist = d; best = { layer: k, end: te, idx: tIdx, pt: { x: tp.x, y: tp.y } }; }
+  }
+  if (!best) return;
+
+  const target = draft.strands[best.layer];
+  const oldFree = { x: myPoint.x, y: myPoint.y };
+  const newPt = best.pt;
+  const coincident = (p: Point | null | undefined) =>
+    !!p && Math.abs(p.x - oldFree.x) + Math.abs(p.y - oldFree.y) < 1;
+  // Move this strand's free point to the target's free point; carry control_point1,
+  // control_point2 AND control_point_center if they sat on the old free position
+  // (OSS close_the_knot, numbered_layer_button.py:2556-2575).
+  const moved = freeEnd === 'start' ? s.start : s.end;
+  moved.x = newPt.x; moved.y = newPt.y;
+  for (const cp of s.control_points) {
+    if (coincident(cp)) { cp.x = newPt.x; cp.y = newPt.y; }
+  }
+  if (coincident(s.control_point_center)) s.control_point_center = { x: newPt.x, y: newPt.y };
+
+  // Cap both connection ends with circles.
+  s.has_circles[freeIdx] = true;
+  target.has_circles[best.idx] = true;
+
+  // Default the circle stroke color to opaque black when unset (OSS:2589-2600).
+  const black: RGBA = { r: 0, g: 0, b: 0, a: 255 };
+  if (!s.circle_stroke_color) s.circle_stroke_color = { ...black };
+  if (!target.circle_stroke_color) target.circle_stroke_color = { ...black };
+
+  // Mark closed_connections + manual_circle_visibility on BOTH strands so the
+  // renderer draws full closing circles (OSS:2610-2651).
+  const markClosed = (rec: StrandRecord, idx: 0 | 1) => {
+    const cc = Array.isArray(rec.extra.closed_connections)
+      ? [...(rec.extra.closed_connections as unknown[])]
+      : [false, false];
+    cc[idx] = true;
+    rec.extra.closed_connections = cc;
+    const mcv = Array.isArray(rec.extra.manual_circle_visibility)
+      ? [...(rec.extra.manual_circle_visibility as unknown[])]
+      : [null, null];
+    mcv[idx] = true;
+    rec.extra.manual_circle_visibility = mcv;
+  };
+  markClosed(s, freeIdx);
+  markClosed(target, best.idx);
+
+  // Record the knot connection on BOTH strands, keyed by END TYPE (OSS:2674-2683):
+  // the initiator is the closing strand; the target mirrors it (is_closing_strand
+  // false). connected_strand is stored by name for save/load round-trip.
+  const selfConn: KnotConnection = { connected_strand_name: best.layer, connected_end: best.end, is_closing_strand: true };
+  const mirrorConn: KnotConnection = { connected_strand_name: name, connected_end: freeEnd, is_closing_strand: false };
+  s.knot_connections[freeEnd] = selfConn;
+  target.knot_connections[best.end] = mirrorConn;
 }
 
 // ---- groups (Phase 6f) ----
@@ -432,7 +585,8 @@ if (import.meta.env?.DEV) {
   (globalThis as Record<string, unknown>).__actions = {
     moveHandle, addNewStrand, attachChild, createMask, addDeletionRect, resetMask,
     deleteStrand, deleteAllStrands, reorderLayer, toggleHidden, toggleLock,
-    setColor, setWidth, setShadowOnly,
+    setColor, setWidth, setWidthGridUnits, setShadowOnly, isStrandDeletable,
+    setCircleStrokeColor, toggleCircleVisible, toggleLineVisible, closeKnot,
     toggleLockMode, clearAllLocks, renameLayer,
     createGroupFromSet, createGroup, renameGroup, duplicateGroup,
     deleteGroup, translateGroup, rotateGroup, setGroupShadowOnly, createMaskGrid,

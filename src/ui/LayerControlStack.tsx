@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import {
-  addNewStrand, clearAllLocks, deleteAllStrands, deleteStrand, toggleLockMode,
+  addNewStrand, clearAllLocks, deleteAllStrands, deleteStrand, isStrandDeletable,
 } from '../store/actions';
 import { screenToWorld } from '../interaction/viewTransform';
+import { Modal } from './Modal';
 import { t } from './i18n';
 import './layerControls.css';
 
@@ -43,14 +45,26 @@ export function LayerControlStack() {
   const lockMode = useEditorStore((s) => s.doc.lock_mode);
   const selected = useEditorStore((s) => s.selection.layerName);
   const strands = useEditorStore((s) => s.doc.strands);
+  const multiSelectMode = useEditorStore((s) => s.multiSelectMode);
+  const multiSelectedLayers = useEditorStore((s) => s.multiSelectedLayers);
+  const clearMultiSelectedLayers = useEditorStore((s) => s.clearMultiSelectedLayers);
   const commitEdit = useEditorStore((s) => s.commitEdit);
   const setSelection = useEditorStore((s) => s.setSelection);
   const deselectAll = useEditorStore((s) => s.deselectAll);
   const toggleDrawNames = useEditorStore((s) => s.toggleDrawNames);
 
-  // Delete is enabled only when a (non-locked, existing) strand is selected and
-  // we are not in lock mode.
-  const hasDeletable = !lockMode && !!selected && !!strands[selected];
+  const [confirmAll, setConfirmAll] = useState(false);
+
+  // Delete-enable (OSS is_strand_deletable): single-select needs a selected,
+  // existing, deletable strand; multi-select needs every selected layer
+  // deletable. Lock mode always disables delete.
+  const sel = selected ? strands[selected] : undefined;
+  const hasDeletable = !lockMode && !!sel && isStrandDeletable(sel);
+  const multiDeletable =
+    multiSelectMode &&
+    multiSelectedLayers.length > 0 &&
+    multiSelectedLayers.every((n) => strands[n] && isStrandDeletable(strands[n]));
+  const deleteDisabled = lockMode ? true : (multiSelectMode ? !multiDeletable : !hasDeletable);
 
   function addStrand() {
     const { view } = useEditorStore.getState();
@@ -61,14 +75,31 @@ export function LayerControlStack() {
   }
 
   function removeSelected() {
+    // Multi-select delete path: delete every selected layer, then clear.
+    if (multiSelectMode && multiSelectedLayers.length) {
+      commitEdit((d) => {
+        for (const n of multiSelectedLayers) deleteStrand(d, n);
+      });
+      clearMultiSelectedLayers();
+      setSelection({ layerName: null, handle: null });
+      return;
+    }
     if (!selected) return;
     commitEdit((d) => deleteStrand(d, selected));
     setSelection({ layerName: null, handle: null });
   }
 
   function removeAll() {
+    // OSS request_delete_all: no-op on empty list; otherwise confirm first.
+    if (Object.keys(strands).length === 0) return;
+    setConfirmAll(true);
+  }
+
+  function confirmRemoveAll() {
     commitEdit(deleteAllStrands);
+    clearMultiSelectedLayers();
     setSelection({ layerName: null, handle: null });
+    setConfirmAll(false);
   }
 
   return (
@@ -78,16 +109,34 @@ export function LayerControlStack() {
         v={LOCK}
         label={lockMode ? t('exit_lock_mode', lang) : t('lock_layers', lang)}
         checked={lockMode}
-        onClick={() => commitEdit(toggleLockMode)}
+        onClick={() => useEditorStore.getState().enterExitLockMode()}
       />
       <LCBtn v={ADD} label={t('add_new_strand', lang)} disabled={lockMode} onClick={addStrand} />
-      <LCBtn v={DELETE} label={t('delete_strand', lang)} disabled={!hasDeletable} onClick={removeSelected} />
+      <LCBtn v={DELETE} label={t('delete_strand', lang)} disabled={deleteDisabled} onClick={removeSelected} />
       <LCBtn
         v={DESELECT}
         label={lockMode ? t('clear_all_locks', lang) : t('deselect_all', lang)}
         onClick={() => (lockMode ? commitEdit(clearAllLocks) : deselectAll())}
       />
       <LCBtn v={DELALL} label={t('delete_all', lang)} onClick={removeAll} />
+      {confirmAll && (
+        <Modal
+          title={t('delete_all', lang)}
+          onClose={() => setConfirmAll(false)}
+          footer={
+            <>
+              <button autoFocus className="dlg-btn" onClick={() => setConfirmAll(false)}>
+                {t('no', lang)}
+              </button>
+              <button className="dlg-btn" onClick={confirmRemoveAll}>
+                {t('yes', lang)}
+              </button>
+            </>
+          }
+        >
+          {t('delete_all_confirm', lang)}
+        </Modal>
+      )}
     </div>
   );
 }

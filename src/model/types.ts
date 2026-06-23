@@ -174,4 +174,10 @@ export interface RenderMeta {
   // bakes everything EXCEPT these once, and renderDragFrame draws only these over
   // the bake each frame. Absent => normal full render.
   drag?: { moving: string[] };
+  // LIVE EDITOR ONLY (the offline oracle never sets this). When true, the ss×
+  // supersampled offscreen is downscaled with the browser's native high-quality
+  // filter (a fast GPU blit) instead of the exact-but-slow JS box-average loop the
+  // oracle uses to byte-match Qt. Keeps full supersampled quality; ~5× faster
+  // full render. Absent => exact box-average (byte-identical fidelity path).
+  fast_downscale?: boolean;
 }

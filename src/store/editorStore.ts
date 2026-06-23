@@ -151,11 +151,23 @@ export interface EditorState {
   // chrome UI flags (OSS main window). Not part of the document / undo history.
   panMode: boolean;            // hand tool: left-drag pans the canvas
   multiSelectMode: boolean;    // multi-select toggle (selection logic: Phase 4)
+  // Layer names currently multi-selected (OSS panel.multi_selected_layers). UI
+  // state only; drives the gold/blue multi border + the 2-item multi menu.
+  multiSelectedLayers: string[];
+  // Snapshot of locked_layers taken when LEAVING lock mode, restored on the next
+  // entry (OSS previously_locked_layers). UI state only — not undoable.
+  previouslyLockedLayers: string[];
   showTabs: boolean;           // tab strip visibility (Tabs toolbar toggle)
   drawNames: boolean;          // draw layer names on the canvas (renderer task: later)
   setPanMode: (b: boolean) => void;
   togglePanMode: () => void;
   toggleMultiSelect: () => void;
+  toggleMultiSelectLayer: (name: string) => void;
+  clearMultiSelectedLayers: () => void;
+  // Enter/exit lock mode with OSS previously_locked_layers semantics: on enter
+  // restore the snapshot into doc.locked_layers; on exit snapshot+clear them. The
+  // doc mutation goes through commitEdit so undo captures it.
+  enterExitLockMode: () => void;
   toggleTabs: () => void;
   toggleDrawNames: () => void;
   // Clear selection AND doc.selected_strand_name in one call (no history step).
@@ -370,11 +382,39 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   panMode: false,
   multiSelectMode: false,
+  multiSelectedLayers: [],
+  previouslyLockedLayers: [],
   showTabs: true,
   drawNames: false,
   setPanMode: (panMode) => set({ panMode }),
   togglePanMode: () => set((s) => ({ panMode: !s.panMode })),
-  toggleMultiSelect: () => set((s) => ({ multiSelectMode: !s.multiSelectMode })),
+  // Toggling multi-select mode (on or off) always clears the multi-selection set,
+  // matching OSS which resets multi_selected_layers on both enter and exit.
+  toggleMultiSelect: () => set((s) => ({ multiSelectMode: !s.multiSelectMode, multiSelectedLayers: [] })),
+  // Set-membership toggle by layer name.
+  toggleMultiSelectLayer: (name) => set((s) => ({
+    multiSelectedLayers: s.multiSelectedLayers.includes(name)
+      ? s.multiSelectedLayers.filter((n) => n !== name)
+      : [...s.multiSelectedLayers, name],
+  })),
+  clearMultiSelectedLayers: () => set({ multiSelectedLayers: [] }),
+
+  // OSS toggle_lock_mode: entering restores previously_locked_layers into
+  // doc.locked_layers; exiting snapshots doc.locked_layers into
+  // previously_locked_layers then clears them. The doc mutation runs through
+  // commitEdit so undo captures the lock change; the snapshot is plain UI state.
+  enterExitLockMode: () => {
+    const s = get();
+    const entering = !s.doc.lock_mode;
+    if (entering) {
+      const restore = [...s.previouslyLockedLayers];
+      get().commitEdit((d) => { d.lock_mode = true; d.locked_layers = restore; });
+    } else {
+      set({ previouslyLockedLayers: [...s.doc.locked_layers] });
+      get().commitEdit((d) => { d.lock_mode = false; d.locked_layers = []; });
+    }
+  },
+
   toggleTabs: () => set((s) => ({ showTabs: !s.showTabs })),
   toggleDrawNames: () => set((s) => ({ drawNames: !s.drawNames })),
 
@@ -383,6 +423,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     doc.selected_strand_name = null;
     return {
       doc, selection: { layerName: null, handle: null }, docRevision: s.docRevision + 1,
+      multiSelectedLayers: [],
     };
   }),
 }));

@@ -719,6 +719,17 @@ window.renderFixture = function (strands, meta) {
   const ctx = vis.getContext('2d');
   if (ss === 1) {
     ctx.drawImage(hi, 0, 0);
+  } else if (meta.fast_downscale) {
+    // LIVE EDITOR ONLY (gated on meta.fast_downscale, which the offline oracle /
+    // fidelity harness never sets). Downscale the ss× supersampled offscreen with
+    // the browser's native high-quality filter — a GPU blit — instead of the exact
+    // JS box-average below (a W*ss × H*ss triple loop, ~200ms even for a single
+    // strand on a 1400×680 canvas, which is the dominant pointer-up cost). Still
+    // fully supersampled, so resting quality is ~indistinguishable; only the
+    // offline path keeps the exact Qt-matching box average for byte-identity.
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(hi, 0, 0, W * ss, H * ss, 0, 0, W, H);
   } else {
     // Match the Qt reference, which downsamples the ss× image with
     // QImage.scaled(..., Qt.SmoothTransformation). For an exact integer ss
@@ -774,14 +785,38 @@ window.renderFixture = function (strands, meta) {
 // move draw only the moving strands on top — at supersample 1 (so no box-average
 // downscale) and with shadows off. Full quality + shadows return via a normal
 // renderFixture on pointer-up.
-let DRAG_BG = null; // { canvas, W, H, ox, oy, zoom }
+let DRAG_BG = null; // { canvas, W, H, ox, oy, zoom, topo }
+
+// Gesture-invariant topology shared by every frame of a drag. has_circles is the
+// attachment structure (which endpoints carry caps / flat-end side lines); it is
+// position-INDEPENDENT and so identical on every frame of an endpoint/CP drag
+// (welded children move rigidly with their parent endpoint, so the attachment a
+// child registers at its parent's endpoint never changes within the gesture).
+// byLayer / enableThird are likewise topology, not position. Computing them ONCE
+// at bake — instead of re-running the O(N^2) computeHasCircles pass every frame —
+// is the per-frame win. Returns { hasCircles: Map<layer_name,[bool,bool]>,
+// byLayer, enableThird }; has_circles is stored in the Map, NOT mutated onto s,
+// so the bake/frame callers apply it only to the strands they actually draw.
+function computeDragTopology(strands) {
+  const enableThird = strands.some((s) => s.control_point_center != null);
+  const byLayer = {};
+  for (const s of strands) byLayer[s.layer_name] = s;
+  const hasCircles = new Map();
+  for (const s of strands) {
+    if (s.type === 'MaskedStrand') continue;
+    hasCircles.set(s.layer_name, computeHasCircles(s, strands));
+  }
+  return { hasCircles, byLayer, enableThird };
+}
 
 // Paint the strands for which shouldDraw(layer_name) is true into targetCanvas at
 // native (supersample-1) scale, no shadows. Shared by the bake and per-frame paths.
-// computeHasCircles still runs over ALL strands (it is topology, not position, so
-// caps stay correct). Leaves the Paper project active for the caller to read /
-// composite, then remove.
-function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg) {
+// `topo` (from computeDragTopology) carries the gesture-invariant has_circles /
+// byLayer / enableThird so the per-frame path skips the O(N^2) topology pass; when
+// absent (defensive fallback) the per-frame topology is recomputed here so the
+// function stays self-contained. Leaves the Paper project active for the caller to
+// read / composite, then remove.
+function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg, topo) {
   if (meta.curve_params) CURVE = meta.curve_params;
   SAMPLE_STEP = DRAG_SAMPLE_STEP; // coarse sampling keeps per-frame stroking cheap
 
@@ -798,38 +833,41 @@ function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg) {
   const ox = meta.x_offset, oy = meta.y_offset;
   // Matches renderFixture's P at ss=1: P(pt) = pt*S + offset.
   const P = (pt) => new paper.Point(pt.x * S + ox, pt.y * S + oy);
-  const enableThird = strands.some((s) => s.control_point_center != null);
-  const byLayer = {};
-  for (const s of strands) byLayer[s.layer_name] = s;
-  for (const s of strands) {
-    if (s.type === 'MaskedStrand') continue;
-    s.has_circles = computeHasCircles(s, strands);
-  }
+  if (!topo) topo = computeDragTopology(strands); // defensive self-contained fallback
+  const { hasCircles, byLayer, enableThird } = topo;
   SHADOW_ENABLED = false; // no shadows while dragging (restored by renderFixture on release)
   for (let i = 0; i < strands.length; i++) {
     const s = strands[i];
     if (!shouldDraw(s.layer_name)) continue;
-    if (s.type === 'MaskedStrand') drawMasked(s, byLayer, P, enableThird, S);
-    else drawStrand(s, strands, P, enableThird, S);
+    if (s.type === 'MaskedStrand') { drawMasked(s, byLayer, P, enableThird, S); continue; }
+    // Apply the cached topology to the strand we are about to draw (the Map holds
+    // every non-masked strand's value, computed once per gesture at bake).
+    const hc = hasCircles.get(s.layer_name);
+    if (hc) s.has_circles = hc;
+    drawStrand(s, strands, P, enableThird, S);
   }
   paper.view.update();
 }
 
 // Bake all STATIC strands (everything except meta.drag.moving) into a reusable
-// offscreen bitmap. Call once at the start of a drag gesture.
+// offscreen bitmap. Call once at the start of a drag gesture. Computes the
+// gesture-invariant topology ONCE here and stashes it on DRAG_BG so every
+// renderDragFrame reuses it instead of recomputing.
 window.renderDragBackground = function (strands, meta) {
   const W = meta.image_width, H = meta.image_height;
   const moving = new Set((meta.drag && meta.drag.moving) || []);
+  const topo = computeDragTopology(strands);
   const bg = document.createElement('canvas');
-  _dragPaint(bg, strands, meta, (name) => !moving.has(name), true);
+  _dragPaint(bg, strands, meta, (name) => !moving.has(name), true, topo);
   paper.project.remove();
-  DRAG_BG = { canvas: bg, W, H, ox: meta.x_offset, oy: meta.y_offset, zoom: meta.zoom || 1 };
+  DRAG_BG = { canvas: bg, W, H, ox: meta.x_offset, oy: meta.y_offset, zoom: meta.zoom || 1, topo };
   return { baked: true, staticCount: strands.length - moving.size };
 };
 
 // Per-move frame: blit the cached static background, then draw only the moving
 // strands on top. Falls back to a full renderFixture if no matching bake exists
-// (e.g. the view changed mid-gesture).
+// (e.g. the view changed mid-gesture). Reuses DRAG_BG.topo (baked once at gesture
+// start) so the per-frame cost is O(moving), not O(all strands).
 window.renderDragFrame = function (strands, meta) {
   const W = meta.image_width, H = meta.image_height;
   if (!DRAG_BG || DRAG_BG.W !== W || DRAG_BG.H !== H ||
@@ -839,7 +877,7 @@ window.renderDragFrame = function (strands, meta) {
   }
   const moving = new Set((meta.drag && meta.drag.moving) || []);
   const mv = document.createElement('canvas');
-  _dragPaint(mv, strands, meta, (name) => moving.has(name), false);
+  _dragPaint(mv, strands, meta, (name) => moving.has(name), false, DRAG_BG.topo);
   paper.project.remove();
   const vis = document.getElementById('c');
   vis.width = W;

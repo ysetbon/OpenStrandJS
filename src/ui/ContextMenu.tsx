@@ -1,13 +1,60 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEditorStore } from '../store/editorStore';
 import './contextMenu.css';
 
+/** A flat button inside a compound (Line / Circle / Arrow / Dash) row. */
+export interface MenuRowButton {
+  label: string;
+  onClick: () => void;
+}
+
 export interface MenuItem {
+  /** Plain text item (HoverLabel in OSS). */
   label: string;
   onClick?: () => void;
+  /** Retained for API compatibility; no longer drives a gutter checkmark.
+   *  (Shadow Only ✓ is now an inline label prefix from NumberedLayerButton.) */
   checked?: boolean;
+  /** Retained for API compatibility; OSS menus have no per-item red. */
   danger?: boolean;
   separator?: boolean;
   disabled?: boolean;
+  /** Compound row (Line/Circle/Arrow/Dash): left label + N inline buttons. */
+  rowLabel?: string;
+  buttons?: MenuRowButton[];
+  /** Circle row label carries no padding in OSS. */
+  noPad?: boolean;
+}
+
+/* ---- Dynamic menu width (OSS calculate_menu_width: 8pt, min 150, +20, cap 350) ---- */
+let measureCtx: CanvasRenderingContext2D | null = null;
+function measureLabel(text: string): number {
+  if (!measureCtx) {
+    const canvas = document.createElement('canvas');
+    measureCtx = canvas.getContext('2d');
+    if (measureCtx) measureCtx.font = '11px sans-serif'; // ~8pt
+  }
+  if (!measureCtx) return text.length * 7;
+  return measureCtx.measureText(text).width;
+}
+
+function computeMenuWidth(items: MenuItem[]): number {
+  let max = 150;
+  for (const item of items) {
+    if (item.separator) continue;
+    const texts: string[] = [];
+    if (item.buttons) {
+      if (item.rowLabel) texts.push(item.rowLabel);
+      for (const b of item.buttons) texts.push(b.label);
+    } else {
+      texts.push(item.label);
+    }
+    for (const t of texts) {
+      const w = measureLabel(t) + 20;
+      if (w > max) max = w;
+    }
+  }
+  return Math.min(max, 350);
 }
 
 export function ContextMenu(props: {
@@ -19,6 +66,13 @@ export function ContextMenu(props: {
   const { items, x, y, onClose } = props;
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number }>({ left: x, top: y });
+
+  const lang = useEditorStore((s) => s.settings.language);
+  const theme = useEditorStore((s) => s.settings.theme);
+  const isRtl = lang === 'he';
+  const isDark = theme === 'dark';
+
+  const minWidth = useMemo(() => computeMenuWidth(items), [items]);
 
   // Clamp to viewport once the menu has been measured.
   useLayoutEffect(() => {
@@ -65,18 +119,39 @@ export function ContextMenu(props: {
   return (
     <div
       ref={ref}
-      className="ctx-menu"
-      style={{ left: pos.left, top: pos.top }}
+      className={'ctx-menu' + (isDark ? ' ctx-theme-dark' : '')}
+      style={{ left: pos.left, top: pos.top, minWidth }}
       role="menu"
+      dir={isRtl ? 'rtl' : 'ltr'}
       onContextMenu={(e) => e.preventDefault()}
     >
       {items.map((item, i) => {
         if (item.separator) return <div key={i} className="ctx-sep" role="separator" />;
-        const cls =
-          'ctx-item' +
-          (item.danger ? ' ctx-danger' : '') +
-          (item.disabled ? ' ctx-disabled' : '') +
-          (item.checked ? ' ctx-checked' : '');
+        if (item.buttons) {
+          return (
+            <div
+              key={i}
+              className={'ctx-compound' + (item.noPad ? ' ctx-compound-nopad' : '')}
+              role="group"
+            >
+              <span className="ctx-compound-label">{item.rowLabel}</span>
+              {item.buttons.map((b, j) => (
+                <button
+                  key={j}
+                  type="button"
+                  className="ctx-compound-btn"
+                  onClick={() => {
+                    b.onClick();
+                    onClose();
+                  }}
+                >
+                  {b.label}
+                </button>
+              ))}
+            </div>
+          );
+        }
+        const cls = 'ctx-item' + (item.disabled ? ' ctx-disabled' : '');
         return (
           <div
             key={i}
@@ -85,7 +160,6 @@ export function ContextMenu(props: {
             aria-disabled={item.disabled || undefined}
             onClick={() => clickItem(item)}
           >
-            <span className="ctx-check">{item.checked ? '✓' : ''}</span>
             <span className="ctx-label">{item.label}</span>
           </div>
         );

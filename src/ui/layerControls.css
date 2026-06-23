@@ -5,6 +5,8 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  /* OSS bottom_panel contentsMargins 0,5,0,5 (spacing 2 == gap above). */
+  padding: 5px 0;
 }
 
 .lc-btn {
@@ -12,7 +14,7 @@
   width: 100%;
   box-sizing: border-box;
   padding: 5px 10px;
-  font-size: 18px;
+  font-size: 14px;
   font-weight: bold;
   color: #000;
   text-align: center;
@@ -35,4 +37,21 @@
   background: #D3D3D3;
   color: #666;
   cursor: default;
+}
+
+/* Delete-All confirmation dialog buttons (No / Yes). The shared <Modal>
+   footer (.modal-footer in dialogs.css) carries no button style, so style
+   our own here to match the themed dialog buttons used elsewhere. */
+.dlg-btn {
+  font-weight: bold;
+  padding: 5px 14px;
+  color: var(--text, #000);
+  background: var(--button-bg, #e6e6e6);
+  border: 1px solid var(--button-border, #888);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.dlg-btn:hover {
+  background: var(--button-hover, #dadada);
 }

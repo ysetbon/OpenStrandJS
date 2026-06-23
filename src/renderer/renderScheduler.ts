@@ -10,6 +10,21 @@ import { buildMeta, toRenderArray } from './toRenderArray';
 let scheduled = false;
 // True once the current drag gesture's static background has been baked.
 let dragBaked = false;
+// The moving-set signature (dragMoving.join('|')) the cached DRAG_BG was baked
+// for. A new gesture whose moving set differs MUST force a re-bake, else it would
+// blit the previous gesture's static background (the just-released strand missing,
+// the newly-grabbed strand baked-static AND drawn-moving = ghosted). This happens
+// because a deferred release can leave dragBaked=true when a new drag starts inside
+// its ~1-frame window. Keyed re-bake closes that race. null when no bake is live.
+let bakedKey: string | null = null;
+// Supersample for LIVE EDITOR full renders. A full ss2 render is a ~260ms
+// main-thread freeze even for one strand (Paper.js stroked-outline sampling at 2×)
+// — that is the pointer-up "hang". At 1× a full render is ~30ms, so the editor
+// stays responsive on every selection/undo/release. The offline fidelity oracle
+// renders through renderFixture with its OWN meta (ss2 + exact box-average) and is
+// untouched, and PNG export can request ss2 explicitly. Bump to 2 to trade
+// responsiveness for crisper on-screen anti-aliasing.
+const EDITOR_SUPERSAMPLE = 1;
 let overlayCanvas: HTMLCanvasElement | null = null;
 let overlayDraw: ((ctx: CanvasRenderingContext2D) => void) | null = null;
 
@@ -63,20 +78,32 @@ export function requestRender(): void {
         // over that cache. Per-frame work is O(moving strands), not O(all strands),
         // so dragging stays smooth regardless of scene size. The fidelity harness
         // calls renderFixture directly and never sets meta.drag, so the oracle's
-        // default output is unchanged. Full quality + shadows return on pointer-up
-        // (dragging=false -> the else branch's full renderFixture).
+        // default output is unchanged.
         const meta = {
           ...buildMeta(doc, view, settings),
           supersample: 1,
           shadow_enabled: false,
           drag: { moving: dragMoving },
         };
-        if (!dragBaked) { callRenderDragBackground(arr, meta); dragBaked = true; }
+        // Bake the static background when none is live OR when a prior gesture's
+        // stale bake is still cached for a DIFFERENT moving set (re-grab after a
+        // release). Same moving set => the static set is identical and unmoved, so
+        // the cache is safely reused.
+        const key = dragMoving.join('|');
+        if (!dragBaked || bakedKey !== key) {
+          if (dragBaked) callEndDrag(); // drop the stale bake from the prior gesture
+          callRenderDragBackground(arr, meta);
+          dragBaked = true;
+          bakedKey = key;
+        }
         callRenderDragFrame(arr, meta);
       } else {
-        // Not dragging: full-quality render. Drop any stale drag background first.
-        if (dragBaked) { callEndDrag(); dragBaked = false; }
-        callRender(arr, buildMeta(doc, view, settings));
+        // NOT DRAGGING (release, selection click, undo, …): one full render at the
+        // editor supersample (1×). At 1× shadows + correct z-order are restored in
+        // ~30ms instead of the ~260ms a full ss2 render costs, so pointer-up no
+        // longer hangs. Drop any drag background first so the next gesture re-bakes.
+        if (dragBaked) { callEndDrag(); dragBaked = false; bakedKey = null; }
+        callRender(arr, { ...buildMeta(doc, view, settings), supersample: EDITOR_SUPERSAMPLE });
       }
     } catch (err) {
       // Surface renderer errors without killing the rAF loop.

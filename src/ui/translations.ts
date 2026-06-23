@@ -80,6 +80,27 @@ export const STRINGS: Record<string, Entry> = {
   gridSize: { en: 'Grid size', fr: 'Taille de grille', it: 'Dimensione griglia', es: 'Tamaño de cuadrícula', pt: 'Tamanho da grelha', he: 'גודל רשת' },
   snap: { en: 'Snap to grid', fr: 'Aligner sur la grille', it: 'Aggancia alla griglia', es: 'Ajustar a cuadrícula', pt: 'Ajustar à grelha', he: 'הצמדה לרשת' },
   curve: { en: 'Curve params', fr: 'Paramètres de courbe', it: 'Parametri curva', es: 'Parámetros de curva', pt: 'Parâmetros de curva', he: 'פרמטרי עקומה' },
+
+  // ---- Faithful Layer Panel port (auto-extracted from OpenStrandStudio/src/translations.py) ----
+  select_layers_to_lock: { en: 'Select layers to lock/unlock', fr: 'Sélectionner les calques à verrouiller/déverrouiller', de: 'Ebenen zum Sperren/Entsperren auswählen', it: 'Seleziona livelli da bloccare/sbloccare', es: 'Seleccionar capas para bloquear/desbloquear', pt: 'Selecionar camadas para bloquear/desbloquear', he: 'בחר שכבות לנעילה/שחרור' },
+  exited_lock_mode: { en: 'Exited lock mode', fr: 'Mode verrouillage quitté', de: 'Sperrmodus beendet', it: 'Uscito dalla modalità blocco', es: 'Salió del modo bloqueo', pt: 'Saiu do modo bloqueio', he: 'יצא ממצב נעילה' },
+  delete_all_confirm: { en: 'Are you sure you want to delete all strands?', fr: 'Voulez-vous vraiment supprimer tous les brins?', de: 'Möchten Sie wirklich alle Stränge löschen?', it: 'Sei sicuro di voler eliminare tutti i trefoli?', es: '¿Está seguro de que desea eliminar todos los cordones?', pt: 'Tem certeza de que deseja excluir todas as mechas?', he: 'האם אתה בטוח שברצונך למחוק את כל החוטים?' },
+  hide_selected_layers: { en: 'Hide Selected Layers', fr: 'Masquer Couches Sélectionnées', de: 'Ausgewählte Ebenen ausblenden', it: 'Nascondi Livelli Selezionati', es: 'Ocultar Capas Seleccionadas', pt: 'Ocultar Camadas Selecionadas', he: 'הסתר שכבות נבחרות' },
+  show_selected_layers: { en: 'Show Selected Layers', fr: 'Afficher Couches Sélectionnées', de: 'Ausgewählte Ebenen einblenden', it: 'Mostra Livelli Selezionati', es: 'Mostrar Capas Seleccionadas', pt: 'Mostrar Camadas Selecionadas', he: 'הצג שכבות נבחרות' },
+  enable_shadow_only_selected: { en: 'Shadow Only Selected', fr: 'Ombre Sélectionnées', de: 'Nur Schatten (Auswahl)', it: 'Solo Ombra Selezionati', es: 'Solo Sombra Seleccionadas', pt: 'Só Sombra Selecionadas', he: 'צל לנבחרו בלבד' },
+  disable_shadow_only_selected: { en: 'Show Full Layers (Disable Shadow Only)', fr: 'Afficher Couches Complètes (Désactiver Ombre Seulement)', de: 'Volle Ebenen anzeigen (Nur Schatten deaktivieren)', it: 'Mostra Livelli Completi (Disabilita Solo Ombra)', es: 'Mostrar Capas Completas (Desactivar Solo Sombra)', pt: 'Mostrar Camadas Completas (Desativar Apenas Sombra)', he: 'הצג שכבות מלאות (בטל צל בלבד)' },
+  transparent_stroke: { en: 'Unfold Start Edge', fr: 'Déplier le Bord de Départ', de: 'Startkante auffalten', it: 'Distendi Bordo Iniziale', es: 'Desplegar Borde Inicial', pt: 'Desdobrar Borda Inicial', he: 'בטל קיפול קצה התחלה' },
+  restore_default_stroke: { en: 'Fold Over Start Edge', fr: 'Replier le Bord de Départ', de: 'Startkante umfalten', it: 'Ripiega Bordo Iniziale', es: 'Replegar Borde Inicial', pt: 'Dobrar Borda Inicial', he: 'קפל קצה התחלה' },
+  show_start_circle: { en: 'Show Start Circle', fr: 'Afficher Cercle Départ', de: 'Startkreis einblenden', it: 'Mostra Cerchio Inizio', es: 'Mostrar Círculo Inicio', pt: 'Mostrar Círculo Início', he: 'הצג עיגול התחלתי' },
+  hide_start_circle: { en: 'Hide Start Circle', fr: 'Masquer Cercle Départ', de: 'Startkreis ausblenden', it: 'Nascondi Cerchio Inizio', es: 'Ocultar Círculo Inicio', pt: 'Ocultar Círculo Início', he: 'הסתר עיגול התחלתי' },
+  show_end_circle: { en: 'Show End Circle', fr: 'Afficher Cercle Fin', de: 'Endkreis einblenden', it: 'Mostra Cerchio Fine', es: 'Mostrar Círculo Fin', pt: 'Mostrar Círculo Fim', he: 'הצג עיגול סופי' },
+  hide_end_circle: { en: 'Hide End Circle', fr: 'Masquer Cercle Fin', de: 'Endkreis ausblenden', it: 'Nascondi Cerchio Fine', es: 'Ocultar Círculo Fim', pt: 'Ocultar Círculo Fim', he: 'הסתר עיגול סופי' },
+  circle: { en: 'Circle', fr: 'Cercle', de: 'Kreis', it: 'Cerchio', es: 'Círculo', pt: 'Círculo', he: 'עיגול' },
+  show_start_line: { en: 'Show Start Line', fr: 'Afficher Ligne Départ', de: 'Startlinie einblenden', it: 'Mostra Linea Inizio', es: 'Mostrar Línea Inicio', pt: 'Mostrar Linha Início', he: 'הצג קו התחלה' },
+  hide_start_line: { en: 'Hide Start Line', fr: 'Masquer Ligne Départ', de: 'Startlinie ausblenden', it: 'Nascondi Linea Inizio', es: 'Ocultar Línea Inicio', pt: 'Ocultar Linha Início', he: 'הסתר קו התחלה' },
+  show_end_line: { en: 'Show End Line', fr: 'Afficher Ligne Fin', de: 'Endlinie einblenden', it: 'Mostra Linea Fine', es: 'Mostrar Línea Fin', pt: 'Mostrar Linha Fim', he: 'הצג קו סיום' },
+  hide_end_line: { en: 'Hide End Line', fr: 'Masquer Ligne Fin', de: 'Endlinie ausblenden', it: 'Nascondi Linea Fine', es: 'Ocultar Línea Fin', pt: 'Ocultar Linha Fim', he: 'הסתר קו סיום' },
+  line: { en: 'Line', fr: 'Ligne', de: 'Linie', it: 'Linea', es: 'Línea', pt: 'Linha', he: 'קו' },
 };
 
 export function t(key: string, lang: Lang): string {

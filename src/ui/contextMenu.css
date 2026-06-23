@@ -1,67 +1,116 @@
-/* Themed right-click menu (OSS fidelity). Colors read theme tokens; geometry
- * transcribed from OSS QMenu stylesheet: ~8-9pt font, item padding 3px 30px
- * 3px 10px, min item height ~28px, 1px border, selected-row highlight. */
+/* OSS-faithful right-click menu (numbered_layer_button.py QMenu + HoverLabel).
+ * Chrome colors are LITERAL OSS hex (light = default; dark via .ctx-theme-dark,
+ * set from JS by settings.theme==='dark'). Font 8pt (~11px). The clamped
+ * min-width [150,350] is supplied inline by ContextMenu.tsx. */
 
 .ctx-menu {
   position: fixed;
   z-index: 2000;
-  min-width: 160px;
-  padding: 4px 0;
-  background: var(--menu-bg);
-  border: 1px solid var(--menu-border);
-  border-radius: 4px;
+  min-width: 150px;
+  max-width: 350px;
+  padding: 4px;
+  background: #F0F0F0;
+  color: #000;
+  border: 1px solid #CCCCCC;
+  border-radius: 0;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28);
-  color: var(--text);
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.2;
   user-select: none;
+}
+
+.ctx-theme-dark.ctx-menu {
+  background: #333333;
+  color: #fff;
+  border: 1px solid #555555;
 }
 
 .ctx-item {
   display: flex;
   align-items: center;
-  gap: 4px;
-  min-height: 28px;
-  padding: 3px 30px 3px 10px;
+  min-height: 35px;
+  padding: 5px 25px 5px 5px;
+  border-radius: 0;
   cursor: pointer;
   white-space: nowrap;
-  color: var(--text);
+  color: inherit;
+}
+
+[dir='rtl'] .ctx-item {
+  padding: 5px 5px 5px 25px;
 }
 
 .ctx-item:hover {
-  background: var(--menu-selected-bg);
-  color: var(--menu-selected-text);
+  background: #333333;
+  color: #fff;
 }
 
-.ctx-check {
-  display: inline-block;
-  width: 14px;
-  text-align: center;
-  flex: 0 0 auto;
+.ctx-theme-dark .ctx-item:hover {
+  background: #F0F0F0;
+  color: #000;
 }
 
 .ctx-label {
   flex: 1 1 auto;
 }
 
-.ctx-danger {
-  color: #C0392B;
-}
-.ctx-danger:hover {
-  background: #C0392B;
-  color: #FFFFFF;
-}
-
 .ctx-disabled,
 .ctx-disabled:hover {
-  color: var(--text);
-  opacity: 0.4;
+  color: #888;
   background: transparent;
   cursor: default;
 }
 
+.ctx-theme-dark .ctx-disabled,
+.ctx-theme-dark .ctx-disabled:hover {
+  color: #777;
+  background: transparent;
+}
+
 .ctx-sep {
   height: 1px;
-  margin: 4px 6px;
-  background: var(--menu-border);
+  margin: 4px 0;
+  background: #CCCCCC;
+}
+
+.ctx-theme-dark .ctx-sep {
+  background: #555555;
+}
+
+/* Compound row (Line / Circle / Arrow / Dash): label + inline Start/End buttons. */
+.ctx-compound {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 5px;
+  min-height: 35px;
+}
+
+.ctx-compound-label {
+  flex: 1 1 auto;
+  padding: 2px;
+}
+
+.ctx-compound-nopad .ctx-compound-label {
+  padding: 0;
+}
+
+.ctx-compound-btn {
+  background: transparent;
+  border: none;
+  color: inherit;
+  text-align: right;
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: inherit;
+}
+
+.ctx-compound-btn:hover {
+  background: #333333;
+  color: #fff;
+}
+
+.ctx-theme-dark .ctx-compound-btn:hover {
+  background: #F0F0F0;
+  color: #000;
 }

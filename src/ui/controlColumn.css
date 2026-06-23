@@ -5,16 +5,18 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 5px;
-  padding: 5px 5px 8px;
-  border-bottom: 1px solid var(--hairline);
+  padding: 0;
 }
 
+/* OSS per-panel margins (layer_panel.py): top_panel 5,5,5,5; zoom/refresh 5,0,5,5.
+   Row gap lives in per-row padding (no column gap), intra-row spacing is 6px. */
 .cc-row {
   display: flex;
   justify-content: center;
   gap: 6px;
 }
+.cc-row-top { padding: 5px 5px 5px; }
+.cc-row-mid { padding: 0 5px 5px; }
 
 .cc-btn {
   width: 40px;
