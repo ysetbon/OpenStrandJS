@@ -140,7 +140,15 @@ Legend: ✅ faithful · 🟡 present but simplified / needs fidelity work · ❌
   OSS spec exactly (Move "Move Group: g", X/Y sliders −600..600 + px inputs + grid-step rows + OK/
   Cancel/Snap; Rotate "Rotate Strands: g", angle slider −180..180 + precise °input). Context menu in
   exact OSS order. (Native Qt-dialog pixel-diff not capturable with current tools.)
-- Next up per the order below: **#7 edit-strand-angles → #8 edit-shadows → #9 mask-grid** (loop).
+- **Edit Strand Angles (#7) — DONE** (commit `d0c317e`, via `group-edit-angles` workflow).
+  `setStrandAngle` rotates end about start (length preserved) reusing `moveHandle` weld
+  propagation; new `GroupAngleEditorDialog` (snapshot/fast-path/one-undo, like rotate) lists
+  editable members (excl. masks, `_1` mains, both-ends-closed) with angle input + ±1/±5; wired
+  into GroupPanel/LayerPanel. Verified in-browser (rotate end about start, length preserved,
+  round-trips; only `1_2` editable). Deferred OSS extras: End X/Y cols, x / x+180 checkboxes,
+  press-and-hold accel. Divergence: editing a parent angle drags welded children (moveHandle)
+  vs OSS rotate-about-own-start — flag for later if exact match needed.
+- Next per the order below: **#8 edit-shadows → #9 mask-grid** (loop continuing).
 
 ## Suggested order
 
