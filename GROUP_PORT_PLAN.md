@@ -122,6 +122,14 @@ Legend: ✅ faithful · 🟡 present but simplified / needs fidelity work · ❌
   - Behavioural nuance: a group now resolves to whole branches (picking one strand of a
     branch includes its attached children) — faithful to OSS, which has no partial-branch
     groups.
+- **Move/Rotate (#5/#6) — perf + exact UI DONE** (commit `6e01912`). Matched OSS live-drag:
+  `model/group.ts` `snapshotGroupDrag` / `applyGroupMoveSnapshot` / `applyGroupRotateSnapshot`
+  resolve+snapshot once and apply ABSOLUTELY (no per-tick re-resolution, no float drift; pivot =
+  weighted centroid). Dialogs engage the renderer drag fast-path (`setDragging`/`setDragMoving`)
+  so only the group redraws per tick, and `beginGesture`+`commit` = one undo step. Dialog UI
+  matched to OSS (rotate: angle slider + precise °input; move: px sliders/inputs −600..600 + grid-
+  step rows + OK/Cancel/Snap). Verified in-browser. Remaining move-dialog deviation: Snap rounds
+  the offset (not a true absolute snap-group-to-grid).
 - Next up per the order below: **Duplicate group (#4)** — the functional correctness fix.
 
 ## Suggested order
