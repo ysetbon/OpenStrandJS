@@ -87,6 +87,51 @@ export function sampleCenterline(s: StrandRecord, curve: Curve, perSeg = 18): Po
   return pts;
 }
 
+// Segment-segment intersection test (orientation method, CLRS). Returns true for
+// a proper X crossing AND for the boundary case where an endpoint lies on the
+// other segment. The touch case matters because the sampled centerlines place a
+// vertex exactly on the other line at symmetric crossings (e.g. a horizontal
+// strand crossed by a vertical one): there every straddling sub-segment pair has
+// an endpoint with orientation 0, so a strict proper-only test would miss the
+// crossing entirely. (The attached-join false positive that touch-tolerance would
+// introduce is filtered out in strandsCross by skipping pairs that share an
+// endpoint.)
+export function segIntersect(p1: Point, p2: Point, p3: Point, p4: Point): boolean {
+  const o = (a: Point, b: Point, c: Point): number =>
+    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+  const onSeg = (a: Point, b: Point, c: Point): boolean =>
+    Math.min(a.x, b.x) - 1e-9 <= c.x && c.x <= Math.max(a.x, b.x) + 1e-9 &&
+    Math.min(a.y, b.y) - 1e-9 <= c.y && c.y <= Math.max(a.y, b.y) + 1e-9;
+  const d1 = o(p3, p4, p1), d2 = o(p3, p4, p2), d3 = o(p1, p2, p3), d4 = o(p1, p2, p4);
+  if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+      ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return true;
+  if (d1 === 0 && onSeg(p3, p4, p1)) return true;
+  if (d2 === 0 && onSeg(p3, p4, p2)) return true;
+  if (d3 === 0 && onSeg(p1, p2, p3)) return true;
+  if (d4 === 0 && onSeg(p1, p2, p4)) return true;
+  return false;
+}
+
+// Do two strands' centerlines actually cross? Samples both centerlines (curve-
+// aware) and tests every segment pair. The straight-line fast case keeps a
+// non-curved pair to a single segment-pair test. This gates the mask grid:
+// OSS only produces a mask where the two ribbons overlap (area intersection);
+// a centerline crossing is the faithful, cheap polyline approximation of that.
+export function strandsCross(a: StrandRecord, b: StrandRecord, curve: Curve): boolean {
+  // Strands joined at a shared endpoint (an attached/welded join) are connected,
+  // not woven — skip the pair so the join point isn't masked as a crossing.
+  const eq = (p: Point, q: Point): boolean => Math.abs(p.x - q.x) < 1e-6 && Math.abs(p.y - q.y) < 1e-6;
+  for (const ea of [a.start, a.end]) for (const eb of [b.start, b.end]) if (eq(ea, eb)) return false;
+  const pa = sampleCenterline(a, curve);
+  const pb = sampleCenterline(b, curve);
+  for (let i = 0; i + 1 < pa.length; i++) {
+    for (let j = 0; j + 1 < pb.length; j++) {
+      if (segIntersect(pa[i], pa[i + 1], pb[j], pb[j + 1])) return true;
+    }
+  }
+  return false;
+}
+
 // Minimum distance from p to the polyline (world space).
 export function distToPolyline(p: Point, poly: Point[]): number {
   let best = Infinity;

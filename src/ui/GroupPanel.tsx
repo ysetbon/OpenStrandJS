@@ -65,6 +65,10 @@ export interface MainStrandSelectDialogProps {
   /** Receives the chosen member layer_names. */
   onAccept: (members: string[]) => void;
 }
+export interface MaskGridDialogProps {
+  groupName: string;
+  onClose: () => void;
+}
 
 export interface GroupDialogs {
   GroupMoveDialog?: React.ComponentType<GroupMoveDialogProps>;
@@ -73,6 +77,7 @@ export interface GroupDialogs {
   GroupAngleEditorDialog?: React.ComponentType<GroupAngleEditorDialogProps>;
   RenameDialog?: React.ComponentType<RenameDialogProps>;
   MainStrandSelectDialog?: React.ComponentType<MainStrandSelectDialogProps>;
+  MaskGridDialog?: React.ComponentType<MaskGridDialogProps>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -183,6 +188,7 @@ type DialogState =
   | { kind: 'rotate'; group: string }
   | { kind: 'angles'; group: string }
   | { kind: 'shadow'; group: string }
+  | { kind: 'maskgrid'; group: string }
   | { kind: 'rename'; group: string };
 
 interface GroupRecordLike {
@@ -233,7 +239,7 @@ export function GroupPanel(props: GroupPanelProps): JSX.Element {
     { label: t('edit_shadows', lang), onClick: () => setDialog({ kind: 'shadow', group }) },
     {
       label: t('create_mask_grid', lang),
-      onClick: () => commitEdit((d) => createMaskGrid(d, group)),
+      onClick: () => setDialog({ kind: 'maskgrid', group }),
     },
     {
       label: t('duplicate_group', lang),
@@ -300,6 +306,22 @@ export function GroupPanel(props: GroupPanelProps): JSX.Element {
           <Dlg groupName={dialog.group} onClose={closeDialog} />
         ) : (
           <PlaceholderDialog title={t('edit_shadows', lang)} onClose={closeDialog} />
+        );
+      }
+      case 'maskgrid': {
+        const Dlg = dialogs.MaskGridDialog;
+        if (Dlg) return <Dlg groupName={dialog.group} onClose={closeDialog} />;
+        // Inline fallback (no dialog injected): apply the geometry-aware grid to
+        // the whole group as one undo step, faithful to the menu's old behavior.
+        const group = dialog.group;
+        return (
+          <PlaceholderDialog
+            title={t('create_mask_grid', lang)}
+            onClose={() => {
+              commitEdit((d) => createMaskGrid(d, group));
+              closeDialog();
+            }}
+          />
         );
       }
       case 'rename': {

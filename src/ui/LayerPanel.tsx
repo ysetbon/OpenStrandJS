@@ -16,6 +16,7 @@ import { GroupShadowEditorDialog } from './dialogs/GroupShadowEditorDialog';
 import { GroupAngleEditorDialog } from './dialogs/GroupAngleEditorDialog';
 import { RenameDialog } from './dialogs/RenameDialog';
 import { MainStrandSelectDialog } from './dialogs/MainStrandSelectDialog';
+import { MaskGridDialog } from './dialogs/MaskGridDialog';
 import { t } from './i18n';
 
 // Adapters: the C4 dialogs expose onSubmit; GroupPanel's contract expects
@@ -52,6 +53,8 @@ const GROUP_DIALOGS: GroupDialogs = {
   GroupAngleEditorDialog,
   RenameDialog: RenameDialogAdapter,
   MainStrandSelectDialog: MainStrandSelectDialogAdapter,
+  // Props ({groupName,onClose}) already match the contract — no adapter needed.
+  MaskGridDialog,
 };
 
 // OSS layer panel. Top-to-bottom: the vertical ControlColumn, a title header,

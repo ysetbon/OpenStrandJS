@@ -8,6 +8,7 @@ import { weldedEndpoints } from '../interaction/connections';
 import { makeAttachedStrand, makeStrand } from '../model/factory';
 import { formatLayerName, maskComponents, nextFreeSet, nextIndexInSet, parseLayerName } from '../model/layerName';
 import { resolveGroupMembers } from '../model/group';
+import { strandsCross } from '../interaction/hitGeometry';
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 
@@ -599,24 +600,62 @@ export function setSubtractedLayers(
   });
 }
 
-// Best-effort mask grid: for each unordered pair of distinct members that don't
-// already have a mask (in either over/under direction), create an over/under
-// MaskedStrand via createMask (first member = OVER). Returns the names created.
-// TODO: faithful OSS grid logic resolves true crossings and over/under ordering
-// from geometry; this is the reasonable pairwise version.
-export function createMaskGrid(draft: EditorDocument, name: string): string[] {
+type CurveParams = Settings['curve_params'];
+
+// Renderer/hit-test default; the live UI threads settings.curve_params instead.
+const DEFAULT_CURVE: CurveParams = { base_fraction: 1.0, dist_multiplier: 2.0, exponent: 2.0 };
+
+export interface MaskGridOptions {
+  /** Restrict to this member list (default: whole-branch resolved members). */
+  members?: string[];
+  /** Curve params for the crossing test (default: renderer default). */
+  curve?: CurveParams;
+}
+
+// Geometry-aware mask grid (OSS create_mask_grid parity, group_layers.py:3511 ->
+// strand_drawing_canvas.create_masked_layer). For every UNORDERED pair of the
+// group's regular members, create a single MaskedStrand ONLY where the two
+// strands actually cross (centerline segment intersection — the cheap faithful
+// proxy for OSS's stroked-body area-intersection emptiness gate). Over/under is
+// taken from z-order: the strand LATER in draft.order is topmost, so it becomes
+// the OVER (first) component of the mask. Pairs that already have a mask in
+// EITHER direction are skipped. Returns the layer_names created.
+//
+// Signature stays back-compatible: `createMaskGrid(draft, name)` still works and
+// defaults to whole-branch members + the renderer default curve; pass options to
+// supply the dialog's picked members and live curve_params.
+export function createMaskGrid(
+  draft: EditorDocument,
+  name: string,
+  options?: MaskGridOptions,
+): string[] {
   const g = (draft.groups as Record<string, GroupRecord>)[name];
   if (!g) return [];
-  const members = (g.main_strands || []).filter(
+  const curve = options?.curve ?? DEFAULT_CURVE;
+
+  // Default to the full whole-branch membership (matches OSS _get_group_strands,
+  // which resolves the group then drops MaskedStrands). The dialog passes an
+  // explicit picked subset.
+  const source = options?.members ?? resolveGroupMembers(draft, name).regular;
+  const members = source.filter(
     (n) => draft.strands[n] && draft.strands[n].type !== 'MaskedStrand',
   );
+
   const created: string[] = [];
   for (let i = 0; i < members.length; i++) {
     for (let j = i + 1; j < members.length; j++) {
       const a = members[i], b = members[j];
       // Skip if a mask already exists in either direction.
       if (draft.strands[`${a}_${b}`] || draft.strands[`${b}_${a}`]) continue;
-      const made = createMask(draft, a, b);
+      const sa = draft.strands[a], sb = draft.strands[b];
+      if (!sa || !sb) continue;
+      // Geometry gate: only mask real crossings.
+      if (!strandsCross(sa, sb, curve)) continue;
+      // Over/under from z-order: later in order == topmost == OVER (first).
+      const ia = draft.order.indexOf(a), ib = draft.order.indexOf(b);
+      const over = ia > ib ? a : b;
+      const under = ia > ib ? b : a;
+      const made = createMask(draft, over, under);
       if (made) created.push(made);
     }
   }
