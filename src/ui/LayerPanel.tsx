@@ -13,6 +13,7 @@ import {
 import { GroupMoveDialog } from './dialogs/GroupMoveDialog';
 import { GroupRotateDialog } from './dialogs/GroupRotateDialog';
 import { GroupShadowEditorDialog } from './dialogs/GroupShadowEditorDialog';
+import { GroupAngleEditorDialog } from './dialogs/GroupAngleEditorDialog';
 import { RenameDialog } from './dialogs/RenameDialog';
 import { MainStrandSelectDialog } from './dialogs/MainStrandSelectDialog';
 import { t } from './i18n';
@@ -48,6 +49,7 @@ const GROUP_DIALOGS: GroupDialogs = {
   GroupMoveDialog,
   GroupRotateDialog,
   GroupShadowEditorDialog,
+  GroupAngleEditorDialog,
   RenameDialog: RenameDialogAdapter,
   MainStrandSelectDialog: MainStrandSelectDialogAdapter,
 };

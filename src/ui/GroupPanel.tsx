@@ -47,6 +47,10 @@ export interface GroupShadowEditorDialogProps {
   groupName: string;
   onClose: () => void;
 }
+export interface GroupAngleEditorDialogProps {
+  groupName: string;
+  onClose: () => void;
+}
 export interface RenameDialogProps {
   /** Initial text shown in the line edit. */
   initial: string;
@@ -66,6 +70,7 @@ export interface GroupDialogs {
   GroupMoveDialog?: React.ComponentType<GroupMoveDialogProps>;
   GroupRotateDialog?: React.ComponentType<GroupRotateDialogProps>;
   GroupShadowEditorDialog?: React.ComponentType<GroupShadowEditorDialogProps>;
+  GroupAngleEditorDialog?: React.ComponentType<GroupAngleEditorDialogProps>;
   RenameDialog?: React.ComponentType<RenameDialogProps>;
   MainStrandSelectDialog?: React.ComponentType<MainStrandSelectDialogProps>;
 }
@@ -281,9 +286,14 @@ export function GroupPanel(props: GroupPanelProps): JSX.Element {
           <PlaceholderDialog title={t('rotate_group_strands', lang)} onClose={closeDialog} />
         );
       }
-      case 'angles':
-        // Edit Strand Angles has no faithful action yet (OSS-parity TODO).
-        return <PlaceholderDialog title={t('edit_strand_angles', lang)} onClose={closeDialog} />;
+      case 'angles': {
+        const Dlg = dialogs.GroupAngleEditorDialog;
+        return Dlg ? (
+          <Dlg groupName={dialog.group} onClose={closeDialog} />
+        ) : (
+          <PlaceholderDialog title={t('edit_strand_angles', lang)} onClose={closeDialog} />
+        );
+      }
       case 'shadow': {
         const Dlg = dialogs.GroupShadowEditorDialog;
         return Dlg ? (

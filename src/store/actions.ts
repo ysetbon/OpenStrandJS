@@ -92,6 +92,25 @@ export function moveHandle(
   }
 }
 
+// Set strand `layerName`'s absolute angle (degrees, atan2(dy,dx) convention,
+// 0deg = +x, y-down so positive rotates +x toward +y = clockwise on screen) by
+// rotating its END about its START, preserving length. Faithful to OSS
+// StrandAngleEditDialog.update_strand_angle's pivot=start, length-preserving
+// rotation. Reuses moveHandle's endpoint-move weld propagation so any attached
+// children welded at this end (and their coincident control points) follow
+// rigidly -- identical to dragging the endpoint. JSON-serializable throughout.
+export function setStrandAngle(draft: EditorDocument, layerName: string, angleDeg: number): void {
+  const s = draft.strands[layerName];
+  if (!s) return;
+  const len = Math.hypot(s.end.x - s.start.x, s.end.y - s.start.y);
+  const rad = (angleDeg * Math.PI) / 180;
+  const newEnd: Point = {
+    x: s.start.x + Math.cos(rad) * len,
+    y: s.start.y + Math.sin(rad) * len,
+  };
+  moveHandle(draft, layerName, 'end', newEnd);
+}
+
 // Create a free first strand of a brand-new set. Returns the new layer_name.
 export function addNewStrand(draft: EditorDocument, start: Point, end: Point, color?: RGBA): string {
   const set = nextFreeSet(draft);
@@ -516,7 +535,7 @@ export function createMaskGrid(draft: EditorDocument, name: string): string[] {
 // Dev-only debug handle for testing actions directly.
 if (import.meta.env?.DEV) {
   (globalThis as Record<string, unknown>).__actions = {
-    moveHandle, addNewStrand, attachChild, createMask, addDeletionRect, resetMask,
+    moveHandle, setStrandAngle, addNewStrand, attachChild, createMask, addDeletionRect, resetMask,
     deleteStrand, deleteAllStrands, reorderLayer, toggleHidden, toggleLock,
     setColor, setWidth, setShadowOnly,
     toggleLockMode, clearAllLocks, renameLayer,
