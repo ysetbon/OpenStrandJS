@@ -6,7 +6,7 @@
 import type { EditorDocument, GroupRecord, HandleKind, Point, RGBA, Settings, StrandRecord } from '../model/types';
 import { weldedEndpoints } from '../interaction/connections';
 import { makeAttachedStrand, makeStrand } from '../model/factory';
-import { maskComponents, nextFreeSet, nextIndexInSet } from '../model/layerName';
+import { formatLayerName, maskComponents, nextFreeSet, nextIndexInSet, parseLayerName } from '../model/layerName';
 import { resolveGroupMembers } from '../model/group';
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
@@ -328,17 +328,107 @@ export function renameGroup(draft: EditorDocument, oldName: string, newName: str
   delete groups[oldName];
 }
 
-// Duplicate a group under a fresh unique name ("<name> copy", then " copy 2"…),
-// sharing the same membership. Returns the new name, or null if missing.
+// Duplicate a group by CLONING its strands into a brand-new, fully independent
+// group (OSS group_layers.py:duplicate_group). The copy must NOT share strands
+// with the original, so we deep-clone every member record under freshly allocated
+// set numbers — moving the copy then moves only the copy.
+//
+// Membership is resolved to whole branches (resolveGroupMembers): `regular` already
+// includes attached children (they share their parent's set_number), and `masks`
+// are the masks wholly inside. We allocate ONE new set per original set, remap each
+// regular "s_i" -> "<newSet>_<i>" (index preserved, since the whole branch moves to
+// a fresh set there are no collisions), and rebuild each mask name from its cloned
+// components. Everything else in each record copies verbatim. Returns the new group
+// name, or null if the group has no regular members.
 export function duplicateGroup(draft: EditorDocument, name: string): string | null {
+  const { regular, masks } = resolveGroupMembers(draft, name);
+  if (!regular.length) return null;
+
+  // 1) Allocate a NEW unique set number per distinct old set. Track `used`
+  // locally (seeded with every set in the doc) so each fresh pick is reserved
+  // before the next, avoiding the live-doc reuse trap.
+  const used = new Set<number>();
+  for (const k of Object.keys(draft.strands)) {
+    const p = parseLayerName(k);
+    if (p) used.add(p.set);
+  }
+  // Map the group's distinct old sets — SORTED ascending — to the next free set
+  // numbers (lowest-free counting from 1; masks excluded since parseLayerName
+  // returns null for them). This matches OSS group_layers.py:2578-2590, which zips
+  // sorted(unique_set_numbers) with get_next_consecutive_set_numbers.
+  const oldSets = Array.from(new Set(regular.map((l) => draft.strands[l].set_number))).sort((a, b) => a - b);
+  const setMap = new Map<number, number>();
+  for (const oldSet of oldSets) {
+    let next = 1;
+    while (used.has(next)) next++;
+    used.add(next);
+    setMap.set(oldSet, next);
+  }
+
+  // 2) Layer remap for regular "s_i" -> "<newSet>_<i>" (same index, new set).
+  const nameMap = new Map<string, string>();
+  for (const layer of regular) {
+    const p = parseLayerName(layer);
+    if (!p) continue;
+    const newSet = setMap.get(p.set);
+    if (newSet == null) continue;
+    nameMap.set(layer, formatLayerName(newSet, p.index));
+  }
+
+  // 3) Clone each regular strand verbatim, overwriting only the remapped fields.
+  for (const layer of regular) {
+    const newName = nameMap.get(layer);
+    const p = parseLayerName(layer);
+    if (!newName || !p) continue;
+    const c = clone(draft.strands[layer]);
+    c.layer_name = newName;
+    c.set_number = setMap.get(p.set) as number;
+    // Remap to the cloned parent; if the parent is outside the duplicated set
+    // (only possible for malformed cross-set data), drop the link rather than
+    // cross-linking the clone back to the original.
+    if (c.attached_to != null) c.attached_to = nameMap.get(c.attached_to) ?? null;
+    // Remap any knot connections that point at a cloned sibling; leave the rest.
+    for (const key of Object.keys(c.knot_connections || {})) {
+      const conn = c.knot_connections[key];
+      const target = nameMap.get(conn.connected_strand_name);
+      if (target) conn.connected_strand_name = target;
+    }
+    draft.strands[newName] = c;
+    draft.order.push(newName);
+  }
+
+  // 4) Clone each mask: rebuild its name from the cloned OVER/UNDER components and
+  // set its set_number from the new set of the OVER component. deep-copy verbatim
+  // (preserves deletion_rectangles / using_absolute_coords).
+  for (const mask of masks) {
+    const comp = maskComponents(mask);
+    if (!comp) continue;
+    const first = nameMap.get(comp.first);
+    const second = nameMap.get(comp.second);
+    if (!first || !second) continue;
+    const newName = `${first}_${second}`;
+    const c = clone(draft.strands[mask]);
+    c.layer_name = newName;
+    const overSet = parseLayerName(comp.first);
+    if (overSet) c.set_number = setMap.get(overSet.set) as number;
+    draft.strands[newName] = c;
+    draft.order.push(newName);
+  }
+
+  // 5) Fresh unique group name ("<name> copy", then " copy 2"…).
   const groups = draft.groups as Record<string, GroupRecord>;
-  const g = groups[name];
-  if (!g) return null;
-  let candidate = `${name} copy`;
+  let newGroupName = `${name} copy`;
   let n = 2;
-  while (groups[candidate]) candidate = `${name} copy ${n++}`;
-  groups[candidate] = { main_strands: [...(g.main_strands || [])] };
-  return candidate;
+  while (groups[newGroupName]) newGroupName = `${name} copy ${n++}`;
+
+  // 6) main_strands of the new group = each original main_strand remapped, keeping
+  // only those that actually exist as cloned strands.
+  const orig = groups[name];
+  const newMains = (orig?.main_strands || [])
+    .map((m) => nameMap.get(m))
+    .filter((m): m is string => !!m && !!draft.strands[m]);
+  groups[newGroupName] = { main_strands: newMains };
+  return newGroupName;
 }
 
 // Rotate every member strand (start/end/control_points/control_point_center) and
