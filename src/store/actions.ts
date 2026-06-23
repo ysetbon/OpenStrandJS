@@ -7,6 +7,7 @@ import type { EditorDocument, GroupRecord, HandleKind, Point, RGBA, Settings, St
 import { weldedEndpoints } from '../interaction/connections';
 import { makeAttachedStrand, makeStrand } from '../model/factory';
 import { maskComponents, nextFreeSet, nextIndexInSet } from '../model/layerName';
+import { resolveGroupMembers } from '../model/group';
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 
@@ -281,23 +282,21 @@ export function deleteGroup(draft: EditorDocument, name: string): void {
 }
 
 // Translate every member strand (and the deletion rectangles of masks wholly
-// inside the group) by (dx, dy) — moving the group as a rigid unit.
+// inside the group) by (dx, dy) — moving the group as a rigid unit. Membership is
+// resolved to whole branches (see resolveGroupMembers), so attached children move
+// with their parent.
 export function translateGroup(draft: EditorDocument, name: string, dx: number, dy: number): void {
-  const g = (draft.groups as Record<string, GroupRecord>)[name];
-  if (!g) return;
-  const members = new Set(g.main_strands || []);
+  const { regular, masks } = resolveGroupMembers(draft, name);
+  if (!regular.length) return;
   const move = (p: Point | null | undefined) => { if (p) { p.x += dx; p.y += dy; } };
-  for (const layer of members) {
+  for (const layer of regular) {
     const s = draft.strands[layer];
     if (!s) continue;
     move(s.start); move(s.end);
     move(s.control_points[0]); move(s.control_points[1]); move(s.control_point_center);
   }
-  for (const k of Object.keys(draft.strands)) {
+  for (const k of masks) {
     const m = draft.strands[k];
-    if (m.type !== 'MaskedStrand') continue;
-    const comp = maskComponents(k);
-    if (!comp || !members.has(comp.first) || !members.has(comp.second)) continue;
     for (const r of m.deletion_rectangles || []) {
       for (const c of [r.top_left, r.top_right, r.bottom_left, r.bottom_right]) if (c) { c[0] += dx; c[1] += dy; }
       if (r.x != null) { r.x += dx; }
@@ -344,15 +343,15 @@ export function duplicateGroup(draft: EditorDocument, name: string): string | nu
 
 // Rotate every member strand (start/end/control_points/control_point_center) and
 // the deletion-rectangle corners of masks wholly inside the group, by angleDeg
-// about the group centroid. The centroid is the mean of member start+end points.
+// about the group centroid. Membership is resolved to whole branches; the centroid
+// is the mean of the resolved members' start+end points.
 export function rotateGroup(draft: EditorDocument, name: string, angleDeg: number): void {
-  const g = (draft.groups as Record<string, GroupRecord>)[name];
-  if (!g) return;
-  const members = new Set(g.main_strands || []);
+  const { regular, masks } = resolveGroupMembers(draft, name);
+  if (!regular.length) return;
 
   // Centroid from member endpoints.
   let sx = 0, sy = 0, n = 0;
-  for (const layer of members) {
+  for (const layer of regular) {
     const s = draft.strands[layer];
     if (!s) continue;
     sx += s.start.x + s.end.x; sy += s.start.y + s.end.y; n += 2;
@@ -371,17 +370,14 @@ export function rotateGroup(draft: EditorDocument, name: string, angleDeg: numbe
     const [x, y] = rotXY(p.x, p.y); p.x = x; p.y = y;
   };
 
-  for (const layer of members) {
+  for (const layer of regular) {
     const s = draft.strands[layer];
     if (!s) continue;
     rotP(s.start); rotP(s.end);
     rotP(s.control_points[0]); rotP(s.control_points[1]); rotP(s.control_point_center);
   }
-  for (const k of Object.keys(draft.strands)) {
+  for (const k of masks) {
     const m = draft.strands[k];
-    if (m.type !== 'MaskedStrand') continue;
-    const comp = maskComponents(k);
-    if (!comp || !members.has(comp.first) || !members.has(comp.second)) continue;
     for (const r of m.deletion_rectangles || []) {
       for (const c of [r.top_left, r.top_right, r.bottom_left, r.bottom_right]) {
         if (c) { const [x, y] = rotXY(c[0], c[1]); c[0] = x; c[1] = y; }
@@ -393,11 +389,11 @@ export function rotateGroup(draft: EditorDocument, name: string, angleDeg: numbe
   }
 }
 
-// Best-effort group shadow toggle: set shadow_only on every member strand.
+// Group shadow toggle: set shadow_only on every resolved member strand (whole
+// branches, matching the OSS shadow editor which lists all group strands).
 export function setGroupShadowOnly(draft: EditorDocument, name: string, value: boolean): void {
-  const g = (draft.groups as Record<string, GroupRecord>)[name];
-  if (!g) return;
-  for (const layer of g.main_strands || []) {
+  const { regular } = resolveGroupMembers(draft, name);
+  for (const layer of regular) {
     const s = draft.strands[layer];
     if (s) s.shadow_only = value;
   }

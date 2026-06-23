@@ -25,6 +25,7 @@ import {
   createMaskGrid,
   renameGroup,
 } from '../store/actions';
+import { resolveGroupMembers } from '../model/group';
 import { t } from './i18n';
 import { ContextMenu, MenuItem } from './ContextMenu';
 import { Modal } from './Modal';
@@ -190,6 +191,7 @@ export interface GroupPanelProps {
 
 export function GroupPanel(props: GroupPanelProps): JSX.Element {
   const dialogs = props.dialogs ?? {};
+  const doc = useEditorStore((s) => s.doc);
   const groups = useEditorStore((s) => s.doc.groups) as Record<string, GroupRecordLike>;
   const strands = useEditorStore((s) => s.doc.strands);
   const lang = useEditorStore((s) => s.settings.language);
@@ -209,18 +211,9 @@ export function GroupPanel(props: GroupPanelProps): JSX.Element {
 
   const isExpanded = (name: string) => (name in expanded ? expanded[name] : true);
 
-  // One row per UNIQUE member main-strand id (preserve first-seen order).
-  const uniqueMembers = (name: string): string[] => {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const m of groups[name]?.main_strands || []) {
-      if (!seen.has(m)) {
-        seen.add(m);
-        out.push(m);
-      }
-    }
-    return out;
-  };
+  // One row per resolved member strand (whole branches — matches what move/rotate/
+  // shadow operate on). resolveGroupMembers already returns distinct layer_names.
+  const uniqueMembers = (name: string): string[] => resolveGroupMembers(doc, name).regular;
 
   const openMenu = (e: React.MouseEvent, group: string) => {
     e.preventDefault();

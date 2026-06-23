@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Modal } from '../Modal';
 import { useEditorStore } from '../../store/editorStore';
 import { setShadowOnly } from '../../store/actions';
-import type { GroupRecord } from '../../model/types';
+import { resolveGroupMembers } from '../../model/group';
 import { t } from '../i18n';
 
 // Per-strand shadow_only editor for a group (min 750x450). Lists every member
@@ -17,11 +17,12 @@ export function GroupShadowEditorDialog(props: {
   const doc = useEditorStore((s) => s.doc);
   const commitEdit = useEditorStore((s) => s.commitEdit);
 
-  // Member strands (existing only), in group order.
-  const members = useMemo(() => {
-    const g = (doc.groups as Record<string, GroupRecord>)[groupName];
-    return (g?.main_strands || []).filter((n) => doc.strands[n]);
-  }, [doc.groups, doc.strands, groupName]);
+  // Member strands resolved to whole branches (matches what setGroupShadowOnly
+  // and the OSS shadow editor operate on).
+  const members = useMemo(
+    () => resolveGroupMembers(doc, groupName).regular,
+    [doc.groups, doc.strands, groupName],
+  );
 
   // Staged shadow_only values, seeded from current doc.
   const [values, setValues] = useState<Record<string, boolean>>(() => {

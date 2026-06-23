@@ -22,9 +22,12 @@ existing group support (much of the scaffolding already exists — see status co
 | `main_strands` meaning | **roots** (`"x_1"`); full set resolved dynamically | the **flat full member list** |
 | Membership resolution | `resolve_group_data()` scans canvas for whole branch incl. attached + masked descendants (`group_layers.py:1776`) | none — members are exactly what's listed |
 
-**Decision needed:** adopt OSS root-resolution (store roots, resolve descendants on
-demand) **or** keep flat membership and make Move/Rotate/Create include attached &
-masked descendants explicitly. This one call settles three operations — do it first.
+**DECIDED ✅ (see Status log):** OSS root-resolution. `main_strands` stays the stored
+branches; `src/model/group.ts:resolveGroupMembers` resolves full membership on demand
+= every non-masked strand sharing a main strand's `set_number` (a "branch" — attached
+children inherit the parent's set) + every mask whose both components are in that set.
+Move/Rotate/Shadow now operate on the resolved set, so attached children move/rotate
+with their parent and the shadow editor lists the whole branch.
 
 ---
 
@@ -107,6 +110,19 @@ Legend: ✅ faithful · 🟡 present but simplified / needs fidelity work · ❌
   parity and confirm OSS JSON still loads.
 
 ---
+
+## Status log
+
+- **Membership model (#1, cross-cutting) — DONE.** Added `src/model/group.ts`
+  (`resolveGroupMembers` / `groupSetNumbers`); rewired `translateGroup`, `rotateGroup`,
+  `setGroupShadowOnly` (`src/store/actions.ts`) and the member display in `GroupPanel.tsx`
+  + `GroupShadowEditorDialog.tsx` to resolve whole branches. Typechecks clean. This
+  closes the membership half of #5/#6 and the member-scope of #8. `createMaskGrid`
+  deliberately left pairing on the stored mains pending its own task (#9).
+  - Behavioural nuance: a group now resolves to whole branches (picking one strand of a
+    branch includes its attached children) — faithful to OSS, which has no partial-branch
+    groups.
+- Next up per the order below: **Duplicate group (#4)** — the functional correctness fix.
 
 ## Suggested order
 
