@@ -28,6 +28,11 @@
 .gp-tree {
   display: flex;
   flex-direction: column;
+  /* OSS QTreeWidget scrolls internally; a long group list shouldn't overflow the
+   * panel. Grow to fill the panel and scroll once it runs out of room. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .gp-group {

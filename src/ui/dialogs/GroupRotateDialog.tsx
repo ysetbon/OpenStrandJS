@@ -65,17 +65,14 @@ export function GroupRotateDialog(props: { groupName: string; onClose: () => voi
 
   return (
     <Modal
-      title={`${t('rotate_group_strands', lang)}: ${groupName}`}
+      title={`${t('rotate_group_strands', lang)} ${groupName}`}
       onClose={cancel}
-      footer={
-        <>
-          <button onClick={cancel}>{t('cancel', lang)}</button>
-          <button onClick={apply}>{t('ok', lang)}</button>
-        </>
-      }
+      lang={lang}
+      onEnter={apply}
+      footer={<button onClick={apply}>{t('ok', lang)}</button>}
     >
       <div className="gd-row">
-        <span className="gd-label">{t('angle_label', lang)}</span>
+        <span className="gd-label">{t('angle', lang)}</span>
         <input
           type="range"
           min={-180}

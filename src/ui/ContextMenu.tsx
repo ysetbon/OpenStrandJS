@@ -62,6 +62,10 @@ export function ContextMenu(props: {
     onClose();
   };
 
+  // OSS only reserves a check gutter on menus that actually have checkable items
+  // (the group menu has none — its items are plain text rows).
+  const hasChecks = items.some((it) => it.checked != null);
+
   return (
     <div
       ref={ref}
@@ -85,7 +89,7 @@ export function ContextMenu(props: {
             aria-disabled={item.disabled || undefined}
             onClick={() => clickItem(item)}
           >
-            <span className="ctx-check">{item.checked ? '✓' : ''}</span>
+            {hasChecks && <span className="ctx-check">{item.checked ? '✓' : ''}</span>}
             <span className="ctx-label">{item.label}</span>
           </div>
         );

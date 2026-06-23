@@ -80,6 +80,8 @@ export function GroupMoveDialog(props: { groupName: string; onClose: () => void 
     <Modal
       title={`${t('move_group', lang)}: ${groupName}`}
       onClose={cancel}
+      lang={lang}
+      onEnter={apply}
       footer={
         <>
           <button onClick={apply}>{t('ok', lang)}</button>
@@ -91,15 +93,18 @@ export function GroupMoveDialog(props: { groupName: string; onClose: () => void 
       <div className="gd-row">
         <span className="gd-label">{t('x_movement', lang)}</span>
         <input type="range" min={-600} max={600} step={1} value={dx} onChange={(e) => preview(Number(e.target.value), dy)} />
+        <span className="gd-value">{Math.round(dx)}</span>
         <input type="number" min={-600} max={600} step={1} value={Math.round(dx)} onChange={(e) => preview(Number(e.target.value), dy)} />
       </div>
       <div className="gd-row">
         <span className="gd-label">{t('y_movement', lang)}</span>
         <input type="range" min={-600} max={600} step={1} value={dy} onChange={(e) => preview(dx, Number(e.target.value))} />
+        <span className="gd-value">{Math.round(dy)}</span>
         <input type="number" min={-600} max={600} step={1} value={Math.round(dy)} onChange={(e) => preview(dx, Number(e.target.value))} />
       </div>
       <div className="gd-row">
         <span className="gd-label">{t('x_grid_steps', lang)}</span>
+        <span className="gd-spacer" />
         <input type="number" min={-50} max={50} step={1} value={xStep} onChange={(e) => setXStep(clampStep(Number(e.target.value)))} />
         <button onClick={() => setXStep((v) => clampStep(v - 1))}>-</button>
         <button onClick={() => setXStep((v) => clampStep(v + 1))}>+</button>
@@ -107,6 +112,7 @@ export function GroupMoveDialog(props: { groupName: string; onClose: () => void 
       </div>
       <div className="gd-row">
         <span className="gd-label">{t('y_grid_steps', lang)}</span>
+        <span className="gd-spacer" />
         <input type="number" min={-50} max={50} step={1} value={yStep} onChange={(e) => setYStep(clampStep(Number(e.target.value)))} />
         <button onClick={() => setYStep((v) => clampStep(v - 1))}>-</button>
         <button onClick={() => setYStep((v) => clampStep(v + 1))}>+</button>

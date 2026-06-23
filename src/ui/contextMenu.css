@@ -5,7 +5,7 @@
 .ctx-menu {
   position: fixed;
   z-index: 2000;
-  min-width: 160px;
+  min-width: 120px;
   padding: 4px 0;
   background: var(--menu-bg);
   border: 1px solid var(--menu-border);
@@ -22,7 +22,7 @@
   align-items: center;
   gap: 4px;
   min-height: 28px;
-  padding: 3px 30px 3px 10px;
+  padding: 6px 40px 6px 6px;
   cursor: pointer;
   white-space: nowrap;
   color: var(--text);
@@ -44,13 +44,9 @@
   flex: 1 1 auto;
 }
 
-.ctx-danger {
-  color: #C0392B;
-}
-.ctx-danger:hover {
-  background: #C0392B;
-  color: #FFFFFF;
-}
+/* OSS does not colour Delete differently — it relies on the separator alone.
+ * The `danger` flag remains on MenuItem for callers that want it, but the group
+ * menu no longer sets it, so Delete reads as a normal item. */
 
 .ctx-disabled,
 .ctx-disabled:hover {

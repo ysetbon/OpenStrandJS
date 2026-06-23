@@ -27,6 +27,7 @@ function RenameDialogAdapter(props: RenameDialogProps): JSX.Element {
     <RenameDialog
       title={props.title}
       initial={props.initial}
+      siblings={props.siblings}
       onClose={props.onClose}
       onSubmit={(name) => props.onAccept(name)}
     />

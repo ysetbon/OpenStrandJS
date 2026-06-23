@@ -6,6 +6,13 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  overflow: auto;
+  min-height: 0;
+}
+
+/* Themed checkboxes across group dialogs (OSS uses 20px blue indicators). */
+.modal input[type='checkbox'] {
+  accent-color: var(--accent, #2d6cdf);
 }
 
 .modal-footer {
@@ -35,6 +42,23 @@
 .gd-row > input[type='number'] {
   flex: 0 0 auto;
   width: 72px;
+}
+/* Read-only live value label between a slider and its number input (OSS dx_value). */
+.gd-row > .gd-value {
+  flex: 0 0 auto;
+  min-width: 34px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+/* Pushes the grid-step input/buttons to the trailing edge so they line up under
+ * the slider/number columns (OSS addStretch before the input). */
+.gd-row > .gd-spacer {
+  flex: 1 1 auto;
+}
+.gd-row button {
+  min-width: 44px;
+  min-height: 30px;
 }
 
 .gd-check {
@@ -115,6 +139,15 @@
   box-sizing: border-box;
 }
 
+/* Field label above an input (OSS "Enter group name:" / instruction labels). */
+.gd-field-label {
+  font-weight: 600;
+}
+.gd-field-error {
+  color: var(--danger, #c0392b);
+  font-size: 12px;
+}
+
 /* ---- Group shadow editor (per-casting sections + receiver override rows) ---- */
 .gd-shadow-section {
   display: flex;
@@ -170,4 +203,200 @@
   font-size: 12px;
   opacity: 0.75;
   line-height: 1.4;
+}
+
+/* ---- Group shadow editor (OSS layout: info + global/section toggle rows) ---- */
+.gd-shadow-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 700px;
+  min-height: 0;
+}
+.gd-shadow-info {
+  font-size: 13px;
+}
+.gd-shadow-scroll {
+  flex: 1 1 auto;
+  max-height: 52vh;
+}
+/* Colour indicator before a strand name (OSS 16-20px color square). */
+.gd-swatch {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--hairline, #999);
+  border-radius: 3px;
+}
+/* A toggle-button row (global "All" + per-casting section header). */
+.gd-shadow-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+}
+.gd-shadow-global {
+  border: 1px solid var(--hairline, #c8c8c8);
+  border-radius: 4px;
+  font-weight: 600;
+}
+/* Checkable toggle buttons (OSS: blue when active). */
+.gd-toggle-btn {
+  flex: 0 0 auto;
+  min-width: 84px;
+  padding: 4px 10px;
+  cursor: pointer;
+  border: 1px solid var(--menu-border, #888);
+  border-radius: 4px;
+  background: var(--button-bg, #ececec);
+  color: var(--text);
+}
+.gd-toggle-btn:hover {
+  background: var(--button-hover, #dadada);
+}
+.gd-toggle-btn.active {
+  background: var(--accent, #4a6fa5);
+  border-color: var(--accent, #6a9fd5);
+  color: #fff;
+}
+
+/* ---- Mask grid: N×N directional crossing matrix (OSS mask_grid_dialog.py) ---- */
+.gd-maskgrid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+.gd-maskgrid-scroll {
+  overflow: auto;
+  max-height: 64vh;
+  border: 1px solid var(--hairline, #c8c8c8);
+  border-radius: 4px;
+}
+.gd-maskgrid-table {
+  border-collapse: collapse;
+}
+.gd-maskgrid-table th,
+.gd-maskgrid-table td {
+  border: 1px solid var(--hairline, #c8c8c8);
+  padding: 4px 6px;
+  text-align: center;
+  vertical-align: middle;
+}
+.gd-maskgrid-corner {
+  background: var(--panel-bg);
+  position: sticky;
+  left: 0;
+  z-index: 2;
+}
+.gd-maskgrid-colhead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel-bg);
+}
+.gd-maskgrid-colhead,
+.gd-maskgrid-rowhead {
+  display: table-cell;
+}
+.gd-maskgrid-colhead > * {
+  display: block;
+  margin: 2px auto;
+}
+.gd-maskgrid-rowhead {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--panel-bg);
+  white-space: nowrap;
+}
+.gd-maskgrid-rowhead .gd-swatch,
+.gd-maskgrid-rowhead .gd-maskgrid-name,
+.gd-maskgrid-rowhead input {
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0 3px;
+}
+.gd-maskgrid-name {
+  font-size: 12px;
+}
+.gd-maskgrid-colhead .gd-swatch {
+  margin: 0 auto;
+}
+.gd-maskgrid-cell input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+.gd-maskgrid-diag {
+  background: var(--button-hover, #e0e0e0);
+}
+
+/* ---- Strand angle editor: 9-column table + global X-angle row ---- */
+.gd-angle-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 800px;
+  min-height: 0;
+}
+.gd-angle-scroll {
+  flex: 1 1 auto;
+  max-height: 56vh;
+}
+.gd-angle-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.gd-angle-table th {
+  position: sticky;
+  top: 0;
+  background: var(--panel-bg);
+  font-weight: bold;
+  font-size: 12px;
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--hairline, #c8c8c8);
+  white-space: nowrap;
+}
+.gd-angle-table td {
+  padding: 3px 6px;
+  text-align: center;
+  border-bottom: 1px solid var(--hairline, #ececec);
+}
+.gd-angle-table td button {
+  min-width: 30px;
+  margin: 0 1px;
+}
+.gd-angle-table input[type='number'] {
+  width: 70px;
+}
+.gd-angle-name {
+  text-align: left;
+  font-weight: 600;
+}
+.gd-angle-num {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+.gd-angle-attach {
+  font-weight: bold;
+  opacity: 0.8;
+}
+.gd-angle-disabled {
+  opacity: 0.5;
+}
+.gd-angle-xrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--hairline, #c8c8c8);
+}
+.gd-angle-xinput {
+  width: 80px;
+}
+.gd-angle-holdbtn {
+  min-width: 36px;
+  min-height: 28px;
+  cursor: pointer;
 }

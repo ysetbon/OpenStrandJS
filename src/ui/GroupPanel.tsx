@@ -57,6 +57,8 @@ export interface RenameDialogProps {
   title: string;
   onClose: () => void;
   onAccept: (next: string) => void;
+  /** Existing sibling names that would collide (excludes the current name). */
+  siblings?: string[];
 }
 export interface MainStrandSelectDialogProps {
   /** Candidate member layer_names (non-masked). */
@@ -249,7 +251,6 @@ export function GroupPanel(props: GroupPanelProps): JSX.Element {
     { label: '', separator: true },
     {
       label: t('delete_group', lang),
-      danger: true,
       onClick: () => commitEdit((d) => deleteGroup(d, group)),
     },
   ];
@@ -331,6 +332,7 @@ export function GroupPanel(props: GroupPanelProps): JSX.Element {
           <Dlg
             initial={group}
             title={t('rename_group', lang)}
+            siblings={groupNames.filter((n) => n !== group)}
             onClose={closeDialog}
             onAccept={(next) => commitEdit((d) => renameGroup(d, group, next))}
           />

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Modal } from '../Modal';
-import { useEditorStore, cloneDoc } from '../../store/editorStore';
+import { useEditorStore } from '../../store/editorStore';
 import { resolveGroupMembers } from '../../model/group';
 import { movingStrandSet } from '../../interaction/connections';
 import { setStrandAngle } from '../../store/actions';
@@ -8,32 +8,18 @@ import { requestRender } from '../../renderer/renderScheduler';
 import { t } from '../i18n';
 import type { EditorDocument } from '../../model/types';
 
-// Per-strand "Edit Strand Angles" for a group, OSS-faithful to
-// StrandAngleEditDialog (group_layers.py:6109). Lists every EDITABLE member
-// strand with its current absolute angle (start->end, atan2(dy,dx) in degrees,
-// 0deg=+x, y-down so positive = clockwise on screen, normalized to (-180,180]).
-// Each row has a number input + -1/+1 and -5/+5 buttons; every change live-
-// previews via mutateDoc(setStrandAngle) which rotates that strand's END about
-// its START (length preserved) and drags welded attached children rigidly --
-// identical to dragging the endpoint.
+// "Edit Strand Angles" for a group — OSS StrandAngleEditDialog (group_layers.py:6109).
+// A 9-column table (Layer, Angle, Adjust ±1°, Fast Adjust, End X, End Y, x, 180+x,
+// Attachable) over EVERY group member; non-editable rows (the "_1" main of a set,
+// or a strand closed at both ends) are shown greyed, not hidden. The bottom row is
+// a global "Angle X" field with --/-/+/++ buttons that adjust it with press-and-hold
+// acceleration (initial ±5/±1, then after 500ms continuous ±0.4/±0.025 every 10ms);
+// the per-row "x" / "180+x" checkboxes snap that strand to the X angle (or +180).
 //
-// Lifecycle mirrors GroupRotateDialog:
-//   * snapshot the doc on open (baseRef) for Cancel,
-//   * beginGesture() so the whole session collapses to ONE undo step,
-//   * engage the renderer drag fast-path over the resolved members (+ welded
-//     peers + dependent masks), shadows off, only the group redraws,
-//   * OK commits the live state (one undo), Cancel restores baseRef (no undo).
-//
-// Editability (OSS populate_table 6437-6441): editable <=> not a "_1" main
-// strand, not a MaskedStrand, and is_attachable() (at least one open end, i.e.
-// NOT both has_circles true). resolveGroupMembers already excludes masks; we
-// additionally drop "_1" mains and strands closed at both ends.
-//
-// Deferred vs OSS (core angle editing implemented faithfully):
-//   * End X / End Y read-out columns (OSS cols 4-5),
-//   * the shared x_angle "x" / "180+x" checkbox sync (OSS cols 6-7),
-//   * continuous press-and-hold acceleration on the bottom global buttons
-//     (500ms initial delay then 10ms repeat at +/-0.025 / +/-0.4).
+// Each angle change live-previews via mutateDoc(setStrandAngle) — rotating the
+// strand's END about its START (length preserved), dragging welded children. The
+// session is one undo step (beginGesture); OSS commits on both OK and close, so
+// there is no Cancel (Escape also commits).
 const normalize180 = (a: number): number => {
   let r = a % 360;
   if (r > 180) r -= 360;
@@ -53,132 +39,225 @@ export function GroupAngleEditorDialog(props: {
 }): JSX.Element {
   const { groupName, onClose } = props;
   const lang = useEditorStore((s) => s.settings.language);
-
   const init = useEditorStore.getState();
-  const baseRef = useRef(cloneDoc(init.doc));
 
-  // Editable member rows resolved once on open.
-  const members = useRef(
-    resolveGroupMembers(init.doc, groupName).regular.filter((n) => {
+  // Re-render on every doc mutation so the Angle / End X / End Y cells stay live.
+  const liveDoc = useEditorStore((s) => s.doc);
+
+  // EVERY non-masked member (resolved once), with its editability metadata.
+  const rows = useRef(
+    resolveGroupMembers(init.doc, groupName).regular.map((n) => {
       const s = init.doc.strands[n];
-      if (!s) return false;
-      if (s.type === 'MaskedStrand') return false; // masks never editable
-      if (s.layer_name.endsWith('_1')) return false; // main strand excluded
-      // is_attachable(): editable unless BOTH ends are closed (have circles).
-      return !(s.has_circles[0] && s.has_circles[1]);
+      const isMain = n.endsWith('_1');
+      const attachable = s ? !(s.has_circles[0] && s.has_circles[1]) : false;
+      return { name: n, isMain, attachable, editable: !isMain && attachable };
     }),
   ).current;
+  const editableNames = rows.filter((r) => r.editable).map((r) => r.name);
 
-  // Live angle values (degrees), seeded from each strand's current geometry.
   const [angles, setAngles] = useState<Record<string, number>>(() => {
     const out: Record<string, number> = {};
-    for (const n of members) out[n] = angleOf(init.doc, n);
+    for (const r of rows) out[r.name] = angleOf(init.doc, r.name);
     return out;
   });
 
-  // Open the gesture + engage the drag fast-path for every member's branch
-  // (welded peers + attached children) plus any masks that depend on them.
+  // Global X angle + per-row sync checkboxes. Refs shadow the state so the
+  // press-and-hold interval reads current values (no stale closures).
+  const [xAngle, setXAngleState] = useState(0);
+  const xAngleRef = useRef(0);
+  const [xChk, setXChk] = useState<Record<string, boolean>>({});
+  const [x180Chk, setX180Chk] = useState<Record<string, boolean>>({});
+  const xChkRef = useRef<Record<string, boolean>>({});
+  const x180Ref = useRef<Record<string, boolean>>({});
+
+  // Open the gesture + engage the drag fast-path for every member's branch.
   useEffect(() => {
     const s = useEditorStore.getState();
     s.beginGesture();
     s.setDragging(true);
     const moving = new Set<string>();
-    for (const n of members) for (const m of movingStrandSet(s.doc, n, 'end')) moving.add(m);
+    for (const r of rows) for (const m of movingStrandSet(s.doc, r.name, 'end')) moving.add(m);
     s.setDragMoving([...moving]);
     return () => {
+      stopHold();
       const z = useEditorStore.getState();
-      if (z.dragging) {
-        z.setDragging(false);
-        z.setDragMoving([]);
-        requestRender();
-      }
+      if (z.dragging) { z.setDragging(false); z.setDragMoving([]); requestRender(); }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Set an absolute angle for one row and live-preview it. Because moving this
-  // strand's end can drag a welded sibling's start (changing that sibling's
-  // angle), re-read every other row from the resulting live doc so the displayed
-  // angles stay accurate; the edited row keeps the exact value set.
+  // Set an absolute angle for one row and live-preview; re-read the other rows
+  // from the resulting doc (a welded sibling's angle can shift).
   const setAngle = (n: string, deg: number) => {
     const v = normalize180(deg);
     useEditorStore.getState().mutateDoc((d) => setStrandAngle(d, n, v));
     const doc = useEditorStore.getState().doc;
     const next: Record<string, number> = {};
-    for (const m of members) next[m] = m === n ? v : angleOf(doc, m);
+    for (const r of rows) next[r.name] = r.name === n ? v : angleOf(doc, r.name);
     setAngles(next);
   };
-
-  // ±delta relative to the row's current angle.
   const bump = (n: string, delta: number) => setAngle(n, (angles[n] ?? 0) + delta);
 
-  const endDrag = () => {
-    const s = useEditorStore.getState();
-    s.setDragging(false);
-    s.setDragMoving([]);
+  // Apply the current X angle to every checked row.
+  const applyXAngle = (v: number) => {
+    for (const n of editableNames) {
+      if (xChkRef.current[n]) setAngle(n, v);
+      else if (x180Ref.current[n]) setAngle(n, normalize180(v + 180));
+    }
+  };
+  const setXAngle = (v: number) => {
+    xAngleRef.current = v;
+    setXAngleState(v);
+    applyXAngle(v);
+  };
+  const adjustXAngle = (delta: number) => setXAngle(xAngleRef.current + delta);
+
+  const toggleX = (n: string) => {
+    const on = !xChk[n];
+    xChkRef.current = { ...xChkRef.current, [n]: on };
+    setXChk((p) => ({ ...p, [n]: on }));
+    if (on) {
+      x180Ref.current = { ...x180Ref.current, [n]: false };
+      setX180Chk((p) => ({ ...p, [n]: false }));
+      setAngle(n, xAngleRef.current);
+    }
+  };
+  const toggleX180 = (n: string) => {
+    const on = !x180Chk[n];
+    x180Ref.current = { ...x180Ref.current, [n]: on };
+    setX180Chk((p) => ({ ...p, [n]: on }));
+    if (on) {
+      xChkRef.current = { ...xChkRef.current, [n]: false };
+      setXChk((p) => ({ ...p, [n]: false }));
+      setAngle(n, normalize180(xAngleRef.current + 180));
+    }
+  };
+
+  // Press-and-hold acceleration on the global --/-/+/++ buttons.
+  const holdRef = useRef<{ delay?: number; interval?: number }>({});
+  const stopHold = () => {
+    if (holdRef.current.delay) { clearTimeout(holdRef.current.delay); holdRef.current.delay = undefined; }
+    if (holdRef.current.interval) { clearInterval(holdRef.current.interval); holdRef.current.interval = undefined; }
+  };
+  const startHold = (initialDelta: number, contDelta: number) => {
+    stopHold();
+    adjustXAngle(initialDelta);
+    holdRef.current.delay = window.setTimeout(() => {
+      holdRef.current.interval = window.setInterval(() => adjustXAngle(contDelta), 10);
+    }, 500);
   };
 
   const apply = () => {
-    endDrag();
-    useEditorStore.getState().commit(); // live state is final -> one undo step
+    stopHold();
+    const s = useEditorStore.getState();
+    s.setDragging(false);
+    s.setDragMoving([]);
+    s.commit();
     requestRender();
     onClose();
   };
 
-  const cancel = () => {
-    endDrag();
-    const st = useEditorStore.getState();
-    st.setDoc(cloneDoc(baseRef.current));
-    st.commit(); // base == gestureBase -> clears gesture, no history
-    requestRender();
-    onClose();
-  };
+  const endX = (n: string) => (liveDoc.strands[n]?.end.x ?? 0).toFixed(2);
+  const endY = (n: string) => (liveDoc.strands[n]?.end.y ?? 0).toFixed(2);
+  const attachText = (r: { isMain: boolean; attachable: boolean }) =>
+    r.isMain ? 'X' : r.attachable ? '' : 'No';
+
+  const HoldBtn = (p: { label: string; initial: number; cont: number; disabled?: boolean }) => (
+    <button
+      type="button"
+      className="gd-angle-holdbtn"
+      disabled={p.disabled}
+      onPointerDown={() => startHold(p.initial, p.cont)}
+      onPointerUp={stopHold}
+      onPointerLeave={stopHold}
+    >
+      {p.label}
+    </button>
+  );
 
   return (
     <Modal
-      title={`${t('edit_strand_angles', lang)}: ${groupName}`}
-      onClose={cancel}
-      footer={
-        <>
-          <button onClick={cancel}>{t('cancel', lang)}</button>
-          <button onClick={apply}>{t('ok', lang)}</button>
-        </>
-      }
+      title={`${t('edit_strand_angles', lang)} ${groupName}`}
+      onClose={apply}
+      lang={lang}
+      onEnter={apply}
+      width={840}
+      footer={<button onClick={apply}>{t('ok', lang)}</button>}
     >
-      <div
-        style={{
-          minWidth: 750 - 48,
-          minHeight: 450 - 120,
-          display: 'flex',
-          flexDirection: 'column',
-        }}
-      >
-        <div className="gd-member-list">
-          {members.length === 0 ? (
-            <div className="gd-row">
-              <span className="gd-label">—</span>
-            </div>
-          ) : (
-            members.map((n) => (
-              <div key={n} className="gd-row" style={{ padding: '4px 0' }}>
-                <span className="gd-label">{n}</span>
-                <span className="gd-label">{t('angle_label', lang)}</span>
-                <input
-                  type="number"
-                  min={-180}
-                  max={180}
-                  step={0.01}
-                  value={Number((angles[n] ?? 0).toFixed(2))}
-                  onChange={(e) => setAngle(n, Number(e.target.value))}
-                />
-                <span className="gd-label">°</span>
-                <button onClick={() => bump(n, -5)}>-5</button>
-                <button onClick={() => bump(n, -1)}>-1</button>
-                <button onClick={() => bump(n, 1)}>+1</button>
-                <button onClick={() => bump(n, 5)}>+5</button>
-              </div>
-            ))
-          )}
+      <div className="gd-angle-editor">
+        <div className="gd-member-list gd-angle-scroll">
+          <table className="gd-angle-table">
+            <thead>
+              <tr>
+                <th>{t('layer', lang)}</th>
+                <th>{t('angle', lang)}</th>
+                <th>{t('adjust_1_degree', lang)}</th>
+                <th>{t('fast_adjust', lang)}</th>
+                <th>{t('end_x', lang)}</th>
+                <th>{t('end_y', lang)}</th>
+                <th>{t('x', lang)}</th>
+                <th>{t('x_plus_180', lang)}</th>
+                <th>{t('attachable', lang)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 && (
+                <tr><td colSpan={9} style={{ textAlign: 'center', opacity: 0.6 }}>—</td></tr>
+              )}
+              {rows.map((r) => {
+                const n = r.name;
+                const ed = r.editable;
+                return (
+                  <tr key={n} className={ed ? '' : 'gd-angle-disabled'}>
+                    <td className="gd-angle-name">{n}</td>
+                    <td>
+                      <input
+                        type="number"
+                        step={0.01}
+                        disabled={!ed}
+                        value={Number((angles[n] ?? 0).toFixed(2))}
+                        onChange={(e) => setAngle(n, Number(e.target.value))}
+                      />
+                    </td>
+                    <td>
+                      <button disabled={!ed} onClick={() => bump(n, -1)}>-</button>
+                      <button disabled={!ed} onClick={() => bump(n, 1)}>+</button>
+                    </td>
+                    <td>
+                      <button disabled={!ed} onClick={() => bump(n, -5)}>--</button>
+                      <button disabled={!ed} onClick={() => bump(n, 5)}>++</button>
+                    </td>
+                    <td className="gd-angle-num">{endX(n)}</td>
+                    <td className="gd-angle-num">{endY(n)}</td>
+                    <td>
+                      <input type="checkbox" disabled={!ed} checked={!!xChk[n]} onChange={() => toggleX(n)} />
+                    </td>
+                    <td>
+                      <input type="checkbox" disabled={!ed} checked={!!x180Chk[n]} onChange={() => toggleX180(n)} />
+                    </td>
+                    <td className="gd-angle-attach">{attachText(r)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Global X-angle field with press-and-hold acceleration buttons */}
+        <div className="gd-angle-xrow">
+          <span className="gd-label">{t('X_angle', lang)}</span>
+          <input
+            type="number"
+            step={0.01}
+            className="gd-angle-xinput"
+            value={Number(xAngle.toFixed(2))}
+            onChange={(e) => setXAngle(Number(e.target.value))}
+          />
+          <span className="gd-spacer" />
+          <HoldBtn label="--" initial={-5} cont={-0.4} />
+          <HoldBtn label="-" initial={-1} cont={-0.025} />
+          <HoldBtn label="+" initial={1} cont={0.025} />
+          <HoldBtn label="++" initial={5} cont={0.4} />
         </div>
       </div>
     </Modal>

@@ -1,45 +1,35 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Modal } from '../Modal';
 import { useEditorStore, cloneDoc } from '../../store/editorStore';
 import {
-  setShadowOnly,
   setShadowVisibility,
   setAllowFullShadow,
   setSubtractedLayers,
 } from '../../store/actions';
 import { resolveGroupMembers } from '../../model/group';
-import { t } from '../i18n';
+import { t, isRTL } from '../i18n';
 
 // OSS-faithful Group Shadow Editor (group_shadow_editor_dialog.py).
 //
-// Two layers of control per group member:
-//   1. `shadow_only` (per casting strand) — suppress the strand's own body but
-//      keep its shadow. WIRED to the renderer (toRenderArray.shadow_only ->
-//      strand-renderer skips drawStrand). This is the original toggle, kept.
-//   2. Per (casting -> receiving) shadow_overrides — for each strand BELOW the
-//      casting strand (lower z), a row with:
-//        * Visible  — WIRED: shadow_overrides[cast][recv].visibility=false skips
-//          that shadow pair in the renderer (meta.shadow_overrides).
-//        * Full Shadow — STORED-ONLY (forward-compat): the renderer does not yet
-//          implement allow_full_shadow geometry, so this writes the OSS-shape
-//          field but does not change pixels today.
-//        * Subtract Layers — STORED-ONLY (forward-compat): same; subtracted_layers
-//          is persisted in the OSS shape but not yet consumed by the renderer.
+// Layout mirrors the desktop: an info label, a global "{group} - All" toggle row,
+// then one collapsible section per casting strand (a header row of batch toggles +
+// one row per receiver below it in z-order), then the help text. The dialog is
+// NON-MODAL (the canvas stays interactive) and applies immediately — closing is the
+// only action (OSS QDialogButtonBox.Close, setModal(False)). The whole session is
+// bracketed by one undo step.
 //
-// Lifecycle mirrors GroupRotateDialog: beginGesture on open, live preview via
-// mutateDoc + requestRender (shadows STAY ON — unlike the geometry dialogs we do
-// NOT engage the drag fast-path, which disables shadows), OK commits ONE undo
-// step, Cancel restores the snapshot.
+// Per (casting -> receiving) shadow_overrides:
+//   * Visible      — WIRED to the renderer (meta.shadow_overrides skips the pair).
+//   * Full Shadow  — STORED-ONLY (OSS-shape field; renderer geometry not yet ported).
+//   * Subtract     — STORED-ONLY (subtracted_layers persisted; not yet consumed).
+// Deferred vs OSS: the per-row "Show Current Shadow" canvas path-preview button is a
+// pure renderer visualization (no model state) and is left for a renderer pass.
 export function GroupShadowEditorDialog(props: {
   groupName: string;
   onClose: () => void;
 }): JSX.Element {
   const { groupName, onClose } = props;
   const lang = useEditorStore((s) => s.settings.language);
-
-  // Live re-read of the working doc each render so toggles reflect the staged
-  // state (we mutate the live doc, not local React state — matches OSS "immediate"
-  // writes bracketed by one undo step).
   const live = useEditorStore((s) => s.doc);
 
   const members = useMemo(
@@ -47,77 +37,119 @@ export function GroupShadowEditorDialog(props: {
     [live.groups, live.strands, groupName],
   );
 
-  // Snapshot for Cancel + open the single-undo gesture bracket on mount.
-  const baseRef = useRef(cloneDoc(useEditorStore.getState().doc));
+  // One undo step for the whole session; changes apply immediately (OSS).
   useEffect(() => {
     useEditorStore.getState().beginGesture();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // z-order: doc.order last == topmost. Receivers of `casting` are the non-masked,
-  // non-hidden strands BELOW it (lower index), in OSS top-to-bottom display order.
+  const close = () => {
+    useEditorStore.getState().commit();
+    onClose();
+  };
+
+  // Receivers of `casting` = non-masked, non-hidden strands BELOW it (lower z),
+  // listed top-to-bottom (OSS display order).
   const receiversOf = (casting: string): string[] => {
     const ci = live.order.indexOf(casting);
     if (ci < 0) return [];
     const out: string[] = [];
     for (let i = ci - 1; i >= 0; i--) {
-      const nm = live.order[i];
-      const s = live.strands[nm];
+      const s = live.strands[live.order[i]];
       if (!s || s.type === 'MaskedStrand' || s.is_hidden) continue;
-      out.push(nm);
+      out.push(live.order[i]);
     }
     return out;
   };
 
-  // Available layers to subtract for a (casting, receiving) pair: all non-hidden,
-  // non-masked layers except the receiver itself (OSS keeps the caster available).
   const availableSubtract = (receiving: string): string[] =>
     live.order.filter((nm) => {
       const s = live.strands[nm];
       return s && s.type !== 'MaskedStrand' && !s.is_hidden && nm !== receiving;
     });
 
-  // Track which subtract sections are expanded (UI-only).
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const ovOf = (c: string, r: string) => (live.shadow_overrides[c] || {})[r] || {};
+  const isVisible = (c: string, r: string) => ovOf(c, r).visibility !== false;
+  const isFull = (c: string, r: string) => ovOf(c, r).allow_full_shadow === true;
+  const subsOf = (c: string, r: string) => ovOf(c, r).subtracted_layers ?? [];
+
+  const cssColor = (n: string): string => {
+    const c = live.strands[n]?.color;
+    return c ? `rgb(${c.r}, ${c.g}, ${c.b})` : 'transparent';
+  };
+
+  const [expanded, setExpanded] = useState<Record<string, boolean | undefined>>({});
   const keyOf = (c: string, r: string) => `${c}|${r}`;
 
-  const preview = (fn: (d: typeof live) => void) => {
-    useEditorStore.getState().mutateDoc(fn);
-  };
+  const preview = (fn: (d: typeof live) => void) => useEditorStore.getState().mutateDoc(fn);
 
-  const apply = () => {
-    // The live doc already holds every staged change; commit collapses the whole
-    // session into ONE undo step.
-    useEditorStore.getState().commit();
-    onClose();
-  };
+  // ── Batch toggles (section + global) ──────────────────────────────────
+  const setSectionVisible = (c: string, v: boolean) =>
+    preview((d) => receiversOf(c).forEach((r) => setShadowVisibility(d, c, r, v)));
+  const setSectionFull = (c: string, v: boolean) =>
+    preview((d) => receiversOf(c).forEach((r) => setAllowFullShadow(d, c, r, v)));
+  const setSectionSubtract = (c: string, v: boolean) =>
+    preview((d) => receiversOf(c).forEach((r) => setSubtractedLayers(d, c, r, v ? availableSubtract(r) : [])));
 
-  const cancel = () => {
-    useEditorStore.getState().setDoc(cloneDoc(baseRef.current));
-    useEditorStore.getState().commit(); // base == gestureBase -> clears gesture, no history
-    onClose();
+  const allCastings = members;
+  const setGlobalVisible = (v: boolean) => allCastings.forEach((c) => setSectionVisible(c, v));
+  const setGlobalFull = (v: boolean) => allCastings.forEach((c) => setSectionFull(c, v));
+  const setGlobalSubtract = (v: boolean) => allCastings.forEach((c) => setSectionSubtract(c, v));
+
+  const sectionVisibleAll = (c: string) => {
+    const rs = receiversOf(c);
+    return rs.length > 0 && rs.every((r) => isVisible(c, r));
   };
+  const sectionFullAll = (c: string) => {
+    const rs = receiversOf(c);
+    return rs.length > 0 && rs.every((r) => isFull(c, r));
+  };
+  const sectionSubtractAll = (c: string) => {
+    const rs = receiversOf(c);
+    return rs.length > 0 && rs.every((r) => subsOf(c, r).length > 0);
+  };
+  const globalAll = (pred: (c: string) => boolean) => allCastings.length > 0 && allCastings.every(pred);
+
+  // Render the info label with the group name bolded (OSS rich-text <b>{0}</b>).
+  const infoParts = t('group_shadow_editor_info', lang).replace(/<\/?b>/g, '').split('{0}');
+
+  const ToggleBtn = (p: { active: boolean; label: string; onClick: () => void; title?: string }) => (
+    <button
+      type="button"
+      className={'gd-toggle-btn' + (p.active ? ' active' : '')}
+      onClick={p.onClick}
+      title={p.title}
+    >
+      {p.label}
+    </button>
+  );
 
   return (
     <Modal
       title={`${t('group_shadow_editor_title', lang)} - ${groupName}`}
-      onClose={cancel}
-      footer={
-        <>
-          <button onClick={cancel}>{t('cancel', lang)}</button>
-          <button onClick={apply}>{t('ok', lang)}</button>
-        </>
-      }
+      onClose={close}
+      lang={lang}
+      modeless
+      onEnter={close}
+      footer={<button onClick={close}>{t('close', lang)}</button>}
     >
-      <div
-        style={{
-          minWidth: 750 - 48,
-          minHeight: 450 - 120,
-          display: 'flex',
-          flexDirection: 'column',
-        }}
-      >
-        <div className="gd-member-list" style={{ maxHeight: 420 }}>
+      <div className="gd-shadow-editor">
+        <div className="gd-shadow-info">
+          {infoParts[0]}
+          <b>{groupName}</b>
+          {infoParts[1] ?? ''}
+        </div>
+
+        {/* Global "All" toggle row */}
+        <div className="gd-shadow-toggle-row gd-shadow-global">
+          <span className="gd-swatch" style={{ background: 'transparent' }} />
+          <span className="gd-member-name">{`${groupName} - ${t('select_all', lang)}`}</span>
+          <ToggleBtn active={globalAll(sectionVisibleAll)} label={t('shadow_visible_on', lang)} onClick={() => setGlobalVisible(!globalAll(sectionVisibleAll))} />
+          <ToggleBtn active={globalAll(sectionFullAll)} label={t('shadow_full_on', lang)} title={t('shadow_stored_only_note', lang)} onClick={() => setGlobalFull(!globalAll(sectionFullAll))} />
+          <ToggleBtn active={globalAll(sectionSubtractAll)} label={t('shadow_subtract_on', lang)} title={t('shadow_stored_only_note', lang)} onClick={() => setGlobalSubtract(!globalAll(sectionSubtractAll))} />
+        </div>
+
+        <div className="gd-member-list gd-shadow-scroll">
           {members.length === 0 && (
             <div className="gd-member-row">
               <span className="gd-member-name">{t('shadow_no_layers', lang)}</span>
@@ -125,100 +157,78 @@ export function GroupShadowEditorDialog(props: {
           )}
           {members.map((casting) => {
             const recvs = receiversOf(casting);
-            const isShadowOnly = !!live.strands[casting]?.shadow_only;
             return (
               <div key={casting} className="gd-shadow-section">
-                <div className="gd-shadow-section-head">
+                {/* Section header: batch toggles for this casting strand */}
+                <div className="gd-shadow-toggle-row gd-shadow-section-head">
+                  <span className="gd-swatch" style={{ background: cssColor(casting) }} />
                   <span className="gd-member-name">{casting}</span>
-                  <label className="gd-check">
-                    <input
-                      type="checkbox"
-                      checked={isShadowOnly}
-                      onChange={(e) =>
-                        preview((d) => setShadowOnly(d, casting, e.target.checked))
-                      }
-                    />
-                    <span>{t('shadow_only', lang)}</span>
-                  </label>
+                  <ToggleBtn active={sectionVisibleAll(casting)} label={t('shadow_visible_on', lang)} onClick={() => setSectionVisible(casting, !sectionVisibleAll(casting))} />
+                  <ToggleBtn active={sectionFullAll(casting)} label={t('shadow_full_on', lang)} title={t('shadow_stored_only_note', lang)} onClick={() => setSectionFull(casting, !sectionFullAll(casting))} />
+                  <ToggleBtn active={sectionSubtractAll(casting)} label={t('shadow_subtract_on', lang)} title={t('shadow_stored_only_note', lang)} onClick={() => setSectionSubtract(casting, !sectionSubtractAll(casting))} />
                 </div>
+
                 {recvs.length === 0 ? (
                   <div className="gd-shadow-row gd-shadow-empty">
                     <span className="gd-member-name">{t('shadow_no_layers', lang)}</span>
                   </div>
                 ) : (
                   recvs.map((recv) => {
-                    const ov = (live.shadow_overrides[casting] || {})[recv] || {};
-                    const visible = ov.visibility !== false;
-                    const full = ov.allow_full_shadow === true;
-                    const subs = ov.subtracted_layers ?? [];
+                    const subs = subsOf(casting, recv);
                     const ek = keyOf(casting, recv);
-                    const isOpen = !!expanded[ek] || subs.length > 0;
+                    // Default-open when subtracted layers exist, but an explicit
+                    // collapse wins (fixes the can't-collapse-once-populated bug).
+                    const isOpen = expanded[ek] ?? subs.length > 0;
                     return (
                       <div key={recv} className="gd-shadow-row">
                         <div className="gd-shadow-row-main">
+                          <span className="gd-swatch" style={{ background: cssColor(recv) }} />
                           <span className="gd-member-name">{recv}</span>
                           <label className="gd-check">
                             <input
                               type="checkbox"
-                              checked={visible}
-                              onChange={(e) =>
-                                preview((d) =>
-                                  setShadowVisibility(d, casting, recv, e.target.checked),
-                                )
-                              }
+                              checked={isVisible(casting, recv)}
+                              onChange={(e) => preview((d) => setShadowVisibility(d, casting, recv, e.target.checked))}
                             />
-                            <span>{t('shadow_visible', lang)}</span>
+                            <span>{t('shadow_visible_on', lang)}</span>
                           </label>
                           <label className="gd-check" title={t('shadow_stored_only_note', lang)}>
                             <input
                               type="checkbox"
-                              checked={full}
-                              onChange={(e) =>
-                                preview((d) =>
-                                  setAllowFullShadow(d, casting, recv, e.target.checked),
-                                )
-                              }
+                              checked={isFull(casting, recv)}
+                              onChange={(e) => preview((d) => setAllowFullShadow(d, casting, recv, e.target.checked))}
                             />
-                            <span>{t('shadow_full', lang)}</span>
+                            <span>{t('shadow_full_on', lang)}</span>
                           </label>
                           <button
                             type="button"
                             className="gd-shadow-expander"
-                            onClick={() =>
-                              setExpanded((m) => ({ ...m, [ek]: !isOpen }))
-                            }
+                            onClick={() => setExpanded((m) => ({ ...m, [ek]: !isOpen }))}
                             title={t('shadow_stored_only_note', lang)}
                           >
-                            {(isOpen ? '▼ ' : '▶ ') + t('shadow_subtract_layers', lang)}
+                            {(isOpen ? '▼ ' : '▶ ') + t('shadow_subtract_on', lang)}
                           </button>
                         </div>
                         {isOpen && (
                           <div className="gd-shadow-subtract">
                             {availableSubtract(recv).length === 0 ? (
-                              <span className="gd-member-name">
-                                {t('shadow_no_layers', lang)}
-                              </span>
+                              <span className="gd-member-name">{t('shadow_no_layers', lang)}</span>
                             ) : (
-                              availableSubtract(recv).map((layer) => {
-                                const checked = subs.includes(layer);
-                                return (
-                                  <label key={layer} className="gd-check">
-                                    <input
-                                      type="checkbox"
-                                      checked={checked}
-                                      onChange={(e) => {
-                                        const next = e.target.checked
-                                          ? [...subs, layer]
-                                          : subs.filter((l) => l !== layer);
-                                        preview((d) =>
-                                          setSubtractedLayers(d, casting, recv, next),
-                                        );
-                                      }}
-                                    />
-                                    <span>{layer}</span>
-                                  </label>
-                                );
-                              })
+                              availableSubtract(recv).map((layer) => (
+                                <label key={layer} className="gd-check">
+                                  <input
+                                    type="checkbox"
+                                    checked={subs.includes(layer)}
+                                    onChange={(e) => {
+                                      const next = e.target.checked
+                                        ? [...subs, layer]
+                                        : subs.filter((l) => l !== layer);
+                                      preview((d) => setSubtractedLayers(d, casting, recv, next));
+                                    }}
+                                  />
+                                  <span>{layer}</span>
+                                </label>
+                              ))
                             )}
                           </div>
                         )}
@@ -230,7 +240,10 @@ export function GroupShadowEditorDialog(props: {
             );
           })}
         </div>
-        <div className="gd-shadow-help">{t('shadow_editor_help_text', lang)}</div>
+
+        <div className="gd-shadow-help" dir={isRTL(lang) ? 'rtl' : 'ltr'}>
+          {t('shadow_editor_help_text', lang)}
+        </div>
       </div>
     </Modal>
   );
