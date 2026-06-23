@@ -130,7 +130,17 @@ Legend: ✅ faithful · 🟡 present but simplified / needs fidelity work · ❌
   matched to OSS (rotate: angle slider + precise °input; move: px sliders/inputs −600..600 + grid-
   step rows + OK/Cancel/Snap). Verified in-browser. Remaining move-dialog deviation: Snap rounds
   the offset (not a true absolute snap-group-to-grid).
-- Next up per the order below: **Duplicate group (#4)** — the functional correctness fix.
+- **Duplicate group (#4) — DONE** (commit `9528bf0`). Rewrote `duplicateGroup` to deep-clone the
+  group's strands under fresh set numbers into an independent group (was sharing strands — a bug).
+  Set-number allocation matches OSS (`sorted(unique_sets)` → next free numbers); attached_to/knot
+  refs remapped to clones; masks rebuilt from cloned components. Verified in-browser: multi-set
+  {1,2}→{3,4}, clones exact, moving the copy leaves the original untouched, child re-parents to
+  cloned parent, one undo step. Built via the `group-duplicate` workflow + adversarial review.
+- **UI fidelity check**: Move + Rotate dialogs screenshotted in-browser and confirmed to match the
+  OSS spec exactly (Move "Move Group: g", X/Y sliders −600..600 + px inputs + grid-step rows + OK/
+  Cancel/Snap; Rotate "Rotate Strands: g", angle slider −180..180 + precise °input). Context menu in
+  exact OSS order. (Native Qt-dialog pixel-diff not capturable with current tools.)
+- Next up per the order below: **#7 edit-strand-angles → #8 edit-shadows → #9 mask-grid** (loop).
 
 ## Suggested order
 
