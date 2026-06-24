@@ -1078,6 +1078,30 @@ function drawMasked(ms, byLayer, P, enableThird, S) {
   // Paint order: stroke layer under fill layer.
   const layers = [strokeRegion, fillRegion].filter(Boolean);
   if (layers.length) new paper.Group(layers);
+
+  // Selection highlight (OSS MaskedStrand). Clicking a masked layer reddens it on
+  // the canvas: stroke the mask intersection silhouette — get_mask_path() = the FILL
+  // region (buildMaskPath) — ON TOP of the body with a semi-transparent red outline.
+  // Faithful to draw_highlight (masked_strand.py:1187-1215): width 6px, RoundCap/
+  // RoundJoin, NoBrush (fill null), color = highlight_color with alpha forced to 128
+  // (rgba(255,0,0,128)). That is the default-zoom click highlight routed via
+  // draw_highlighted_masked_strand; the 2px variant at masked_strand.py:763-775 is
+  // only the zoomed/panned _draw_direct fallback. NOTE the intentional asymmetry vs
+  // drawStrand — regular strands draw the halo UNDER the body, but a mask strokes its
+  // outline OVER the body (OSS draws the mask body then draw_highlight last). Gated on
+  // ms.is_selected so oracle fixtures (which never set it) are unaffected. buildMaskPath
+  // returns null when the components don't intersect (area<=0.5), so guard before use;
+  // the returned path is LEFT on the canvas to be painted (not removed).
+  if (ms.is_selected) {
+    const hl = buildMaskPath(ms, byLayer, P, enableThird, S);
+    if (hl) {
+      hl.fillColor = null;
+      hl.strokeColor = toColor({ r: 255, g: 0, b: 0, a: 128 });
+      hl.strokeWidth = 6 * S;
+      hl.strokeCap = 'round';
+      hl.strokeJoin = 'round';
+    }
+  }
 }
 
 // Render `strands` (flat array) using `meta` into the canvas #c.

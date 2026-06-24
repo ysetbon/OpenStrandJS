@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import { createGroup, reorderLayer, toggleLock } from '../store/actions';
+import { requestRender } from '../renderer/renderScheduler';
 import { ControlColumn } from './ControlColumn';
 import { NumberedLayerButton } from './NumberedLayerButton';
 import { LayerControlStack } from './LayerControlStack';
@@ -92,8 +93,22 @@ export function LayerPanel() {
   const visual = [...order].map((name, i) => ({ name, orderIdx: i })).reverse();
   const L = visual.length;
 
-  // OSS select_layer dispatcher (branch order: multi -> lock -> normal).
+  // Clicking a layer must repaint the canvas so the selection highlight appears —
+  // exactly like OSS select_layer, which ends with canvas.update() (layer_panel.py:2428).
+  // A panel click bumps no docRevision (setSelection/setMode don't) and nothing
+  // subscribes to selection changes, so CanvasStage's [docRevision,view,settings]
+  // render effect never fires. We therefore repaint #c imperatively here — mirroring
+  // SelectMode.ts / ControlColumn.tsx. requestRender is rAF-coalesced, so it's
+  // harmless on the lock branch (already bumped docRevision via commitEdit) and on
+  // the locked-layer no-op early return. Covers regular Strand, AttachedStrand AND
+  // MaskedStrand (the highlight depends only on is_selected, set for all types).
   function select(name: string) {
+    selectLayer(name);
+    requestRender();
+  }
+
+  // OSS select_layer dispatcher (branch order: multi -> lock -> normal).
+  function selectLayer(name: string) {
     // (1) Multi-select mode: toggle membership only; never change the main
     //     selection (OSS select_layer 2298-2309, returns early).
     if (multiSelectMode) {
