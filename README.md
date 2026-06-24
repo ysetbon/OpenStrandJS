@@ -1,58 +1,79 @@
 # OpenStrandJS
 
-A fidelity-first JavaScript/Canvas reimplementation of [OpenStrand Studio](../OpenStrandStudio)
-(a PyQt5 strand/knot diagramming tool). The goal is a web app whose rendering
-matches the Qt original under a small-tolerance pixel diff (~99%), and whose
-logic (save/load, masking topology, undo/redo) matches exactly.
+**A web app for drawing strands, knots, and braids — right in your browser.**
 
-## Method: never reinvent, always translate-and-verify
+OpenStrandJS is a browser-based reimplementation of [OpenStrand Studio](https://github.com/ysetbon/OpenStrandStudio),
+the desktop strand/knot diagramming tool. Nothing to install — open the link and start drawing.
 
-The Python source is the **spec**; the running Qt app is the **oracle**. Every
-JS module is a faithful translation of its Qt counterpart, verified against the
-real app's output before moving on.
+### ▶️ [**Try it live → ysetbon.github.io/OpenStrandJS**](https://ysetbon.github.io/OpenStrandJS/)
 
-## Stack
+[![OpenStrandJS editor — two crossing strands](docs/screenshot.png)](https://ysetbon.github.io/OpenStrandJS/)
 
-- **TypeScript** — sanity for a large port.
-- **Paper.js** — closest analog to Qt's `QPainterPath`: it has the boolean path
-  ops (`unite`/`subtract`/`intersect`) and stroke-to-outline the masking engine
-  depends on (used 111× in the Qt source).
-- **Canvas2D** in a real browser (via Playwright/Chromium for the headless diff)
-  — the eventual runtime's rasterizer, so we tune against the right target.
-- **React** — later, for the editing UI, once rendering is proven.
+> *Click the image above to open the live editor.*
 
-## Build order (renderer before UI)
+---
 
-The hard part is the visual engine, not buttons. We prove the renderer + diff
-harness first; UI comes only after a knot matches closely.
+## What you can do
 
-1. Scaffold + verification harness ← *in progress*
-2. Reference render (Qt) → JS render → `pixelmatch` diff, over a fixture corpus
-3. Port rendering from JSON: basic strands → masked (boolean) strands → shadows
-4. Tune until a simple knot matches (`/loop` on one fixture at a time)
-5. Expand UI (React) around the proven renderer
+- 🧵 **Draw strands** — click **New Strand**, then drag on the canvas.
+- 🔗 **Attach & connect** strands end-to-end to build knots and braids.
+- 🎭 **Mask crossings** so strands weave over and under each other.
+- 🎚️ **Move, rotate, and adjust** angles and lengths of any strand.
+- 🌑 **Shadows** for a sense of depth where strands overlap.
+- 🗂️ **Layers panel** — every strand is a layer you can select, recolor, and reorder.
+- 👥 **Groups** — move and transform several strands together.
+- 💾 **Save / load** your work and **export a PNG** of the result.
 
-## Harness
+## Try it online
 
+No setup required — just open:
+
+**https://ysetbon.github.io/OpenStrandJS/**
+
+Works in any modern browser (Chrome, Edge, Firefox, Safari).
+
+## Run it on your own machine
+
+You only need [Node.js](https://nodejs.org/) (v18+).
+
+```bash
+git clone https://github.com/ysetbon/OpenStrandJS.git
+cd OpenStrandJS
+npm install
+npm run dev        # opens http://localhost:5173
 ```
-npm run reference -- fixtures/mxn_lh_1x1.json artifacts/mxn_lh_1x1/reference.png artifacts/mxn_lh_1x1/reference.meta.json
-npm run render    -- fixtures/mxn_lh_1x1.json artifacts/mxn_lh_1x1   # (Playwright + Paper.js) — TODO
-npm run diff      -- artifacts/mxn_lh_1x1                            # pixelmatch — TODO
+
+To build the static site yourself:
+
+```bash
+npm run build:editor   # output in dist-editor/
+npm run preview        # serve the built site locally
 ```
 
-- `tools/reference_render.py` drives the **real Qt canvas headlessly** and emits a
-  PNG + `meta.json` (exact image size + content offset). It does **not** auto-crop
-  (unlike the Qt exporter), so the JS side can render into an identically sized
-  canvas at the identical offset and the diff measures rendering fidelity alone.
-- Requires the sibling `../OpenStrandStudio` repo with its `.venv` (PyQt5). Override
-  the location with the `OSS_ROOT` env var.
+## About this project
 
-## Fixtures
+OpenStrandJS is a faithful, "fidelity-first" port of the original desktop app,
+**[OpenStrand Studio](https://github.com/ysetbon/OpenStrandStudio)** (a PyQt5
+application). The goal is a web version whose rendering matches the desktop
+original closely — pixel-for-pixel where possible — and whose behaviour
+(masking, save/load, undo/redo) matches exactly.
 
-Copied from the OpenStrandStudio corpus:
-- `mxn_lh_1x1.json` — simplest single crossing (1 Strand + 1 AttachedStrand).
-- `three_strand_braid.json` — real masked braid; the first hard masking target.
+It's built with **TypeScript**, **React**, **[Paper.js](http://paperjs.org/)**
+(for the path/boolean geometry the masking engine needs), and the HTML5
+**Canvas**. See [`UI_PORT_PLAN.md`](UI_PORT_PLAN.md) and the other `*_PLAN.md`
+files for the porting notes.
+
+## Deploying
+
+This repo auto-publishes to GitHub Pages. To push the current build live:
+
+```bash
+npm run deploy     # builds and publishes to the gh-pages branch
+```
+
+The site then updates at https://ysetbon.github.io/OpenStrandJS/ within a minute.
 
 ## License
 
-GNU General Public License v3.0 (same as OpenStrand Studio).
+GNU General Public License v3.0 — the same license as
+[OpenStrand Studio](https://github.com/ysetbon/OpenStrandStudio).
