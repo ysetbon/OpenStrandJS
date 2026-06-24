@@ -44,6 +44,12 @@ export interface StrandRecord {
   control_points: [Point, Point];        // [cp1, cp2]
   control_point_center: Point | null;
   control_point_center_locked: boolean;
+  // Curvature bias (OSS CurvatureBiasControl): each in [0,1], neutral 0.5 (no-op).
+  // bias_triangle skews the start->center handles toward cp1; bias_circle skews the
+  // center->end handles toward cp2. Only ever non-0.5 when the user drags a bias
+  // control (which requires both feature toggles on), so absent/0.5 == unbiased.
+  bias_triangle: number;
+  bias_circle: number;
 
   width: number;
   stroke_width: number;
@@ -118,7 +124,8 @@ export type ModeName = 'select' | 'move' | 'attach' | 'mask' | 'view' | 'rotate'
 
 export type HandleKind =
   | 'start' | 'end'
-  | 'control_point1' | 'control_point2' | 'control_point_center';
+  | 'control_point1' | 'control_point2' | 'control_point_center'
+  | 'bias_triangle' | 'bias_circle';
 
 export interface Selection {
   layerName: LayerName | null;
@@ -210,6 +217,12 @@ export interface RenderStrand {
   control_points: [Point, Point];
   control_point_center: Point | null;
   control_point_center_locked: boolean;
+  // Per-strand curvature bias (default 0.5 == unbiased). Consumed by buildProfile
+  // ONLY when meta.curvature_bias is set (live editor with both toggles on); the
+  // offline oracle never sets it, so absent fields fall back to 0.5 and the stroked
+  // outline is byte-identical to today.
+  bias_triangle?: number;
+  bias_circle?: number;
   deletion_rectangles?: DeletionRect[];
   // Cap / side-line inputs the renderer reads (flat-end side lines, closed-knot
   // caps, folded/unfolded state, has_circles recompute).
@@ -265,4 +278,11 @@ export interface RenderMeta {
   // strands, on world multiples of `size`. Absent => no grid (matches
   // reference_render.py's canvas.show_grid=False, so fixtures stay grid-free).
   grid?: { size: number };
+  // Set by the LIVE editor (buildMeta) AND PNG export (exportMeta) as the effective
+  // gate enable_third_control_point && enable_curvature_bias_control, so on-screen and
+  // exported curves are WYSIWYG. The OFFLINE fidelity oracle never sets it. When true,
+  // buildProfile reads each strand's bias_triangle/bias_circle (default 0.5) into the
+  // bezier handle fractions; absent => bias fixed at 0.5 (unbiased), so fixtures with no
+  // bias data render byte-identically.
+  curvature_bias?: boolean;
 }

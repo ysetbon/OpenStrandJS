@@ -18,14 +18,18 @@ type Profile = { mode: 'line' } | { mode: 'multi'; segments: Cubic[] };
 
 type Curve = Settings['curve_params'];
 
-// Faithful port of _build_curve_profile (the non-bias path; bias fixed at 0.5).
-function buildProfile(s: StrandRecord, curve: Curve, enableThird: boolean): Profile {
+// Faithful port of _build_curve_profile. `enableBias` mirrors the renderer's
+// BIAS_ENABLED (meta.curvature_bias): when off, bias is fixed at 0.5 so the hit
+// centerline matches the drawn (unbiased) curve. bias_triangle skews cp1/cp2,
+// bias_circle skews cp3/cp4 — identical split to web/strand-renderer.js::buildProfile.
+function buildProfile(s: StrandRecord, curve: Curve, enableThird: boolean, enableBias: boolean): Profile {
   const start = s.start, end = s.end;
   const cps = s.control_points || [start, end];
   const control_point1 = cps[0] || start;
   const control_point2 = cps[1] || end;
   const { base_fraction, dist_multiplier, exponent } = curve;
-  const bias = 0.5;
+  const bias_triangle = (enableBias && typeof s.bias_triangle === 'number') ? s.bias_triangle : 0.5;
+  const bias_circle = (enableBias && typeof s.bias_circle === 'number') ? s.bias_circle : 0.5;
 
   const thirdLocked = enableThird && s.control_point_center_locked && s.control_point_center;
   if (thirdLocked && s.control_point_center) {
@@ -38,10 +42,10 @@ function buildProfile(s: StrandRecord, curve: Curve, enableThird: boolean): Prof
     frac1 = Math.min(frac1 * dist_multiplier, 8.33);
     frac2 = Math.min(frac2 * dist_multiplier, 8.33);
     if (exponent !== 1.0) { frac1 = Math.pow(frac1, 1 / exponent); frac2 = Math.pow(frac2, 1 / exponent); }
-    const cp1 = add(p0, mul(sub(p1, p0), frac1 * (0.5 + bias)));
-    const cp2 = sub(p2, mul(ct, dist2 * frac2 * (0.5 + bias)));
-    const cp3 = add(p2, mul(ct, dist3 * frac2 * (0.5 + bias)));
-    const cp4 = add(p4, mul(sub(p3, p4), frac2 * (0.5 + bias)));
+    const cp1 = add(p0, mul(sub(p1, p0), frac1 * (0.5 + bias_triangle)));
+    const cp2 = sub(p2, mul(ct, dist2 * frac2 * (0.5 + bias_triangle)));
+    const cp3 = add(p2, mul(ct, dist3 * frac2 * (0.5 + bias_circle)));
+    const cp4 = add(p4, mul(sub(p3, p4), frac2 * (0.5 + bias_circle)));
     return { mode: 'multi', segments: [{ p0, cp1, cp2, p3: p2 }, { p0: p2, cp1: cp3, cp2: cp4, p3: p4 }] };
   }
 
@@ -58,11 +62,27 @@ function buildProfile(s: StrandRecord, curve: Curve, enableThird: boolean): Prof
   let frac1 = Math.min(Math.min(0.1 + base_fraction * 0.2, 2.34) * dist_multiplier, 8.33);
   let frac2 = Math.min(Math.min(0.05 + base_fraction * 0.1, 1.17) * dist_multiplier, 8.33);
   if (exponent !== 1.0) { frac1 = Math.pow(frac1, 1 / exponent); frac2 = Math.pow(frac2, 1 / exponent); }
-  const cp1 = add(p0, mul(sub(p1, p0), frac1 * (0.5 + bias)));
-  const cp2 = sub(p2, mul(ct, dist2 * frac2 * (0.5 + bias)));
-  const cp3 = add(p2, mul(ct, dist3 * frac2 * (0.5 + bias)));
-  const cp4 = add(p4, mul(sub(p3, p4), frac2 * (0.5 + bias)));
+  const cp1 = add(p0, mul(sub(p1, p0), frac1 * (0.5 + bias_triangle)));
+  const cp2 = sub(p2, mul(ct, dist2 * frac2 * (0.5 + bias_triangle)));
+  const cp3 = add(p2, mul(ct, dist3 * frac2 * (0.5 + bias_circle)));
+  const cp4 = add(p4, mul(sub(p3, p4), frac2 * (0.5 + bias_circle)));
   return { mode: 'multi', segments: [{ p0, cp1, cp2, p3: p2 }, { p0: p2, cp1: cp3, cp2: cp4, p3: p4 }] };
+}
+
+// Bias control positions (OSS CurvatureBiasControl.update_positions_from_biases):
+// each square sits at center + (cp - center) * bias, so neutral 0.5 == the midpoint
+// of the center->cp segment. Triangle slides toward cp1, circle toward cp2. Returns
+// null when the strand has no center control point. Shared by the overlay, hit-test,
+// and the bias drag so all three agree on where the squares are.
+export function biasPositions(s: StrandRecord): { triangle: Point; circle: Point } | null {
+  const c = s.control_point_center;
+  if (!c) return null;
+  const [cp1, cp2] = s.control_points;
+  const bt = s.bias_triangle ?? 0.5, bc = s.bias_circle ?? 0.5;
+  return {
+    triangle: { x: c.x + (cp1.x - c.x) * bt, y: c.y + (cp1.y - c.y) * bt },
+    circle: { x: c.x + (cp2.x - c.x) * bc, y: c.y + (cp2.y - c.y) * bc },
+  };
 }
 
 function cubicAt(c: Cubic, t: number): Point {
@@ -76,9 +96,9 @@ function cubicAt(c: Cubic, t: number): Point {
 
 // Sampled centerline (world space). ~per-segment resolution good enough for
 // click hit-testing.
-export function sampleCenterline(s: StrandRecord, curve: Curve, perSeg = 18): Point[] {
+export function sampleCenterline(s: StrandRecord, curve: Curve, enableBias = false, perSeg = 18): Point[] {
   const enableThird = s.control_point_center != null;
-  const prof = buildProfile(s, curve, enableThird);
+  const prof = buildProfile(s, curve, enableThird, enableBias);
   if (prof.mode === 'line') return [s.start, s.end];
   const pts: Point[] = [];
   for (const seg of prof.segments) {

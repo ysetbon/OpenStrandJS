@@ -465,7 +465,30 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setSettings: (patch) => set((s) => {
     const settings = { ...s.settings, ...patch };
     saveSettings(settings);
-    return { settings, docRevision: s.docRevision + 1 };
+    let doc = s.doc;
+    // OSS enable_third_control_point setter side-effect (strand_drawing_canvas.py:6432-6445):
+    // turning the third CP OFF resets every non-masked strand's center to the cp1/cp2
+    // midpoint and UNLOCKS it, so locked 3-point curves fall back to the standard
+    // profile. Keeping this a DOC mutation means the renderer stays purely
+    // control_point_center_locked-gated — the offline oracle never needs the setting
+    // (byte-identical) and the toggle still flattens curves live. (Turning it ON is a
+    // no-op here: JS strands always carry a center, so OSS's "seed missing centers" has
+    // nothing to do.) Not pushed to undo history — matches OSS (a settings toggle, not an edit).
+    if ('enable_third_control_point' in patch
+        && s.settings.enable_third_control_point && !patch.enable_third_control_point) {
+      const strands = { ...s.doc.strands };
+      for (const k of Object.keys(strands)) {
+        const t = strands[k];
+        if (t.type === 'MaskedStrand') continue;
+        const mid = {
+          x: (t.control_points[0].x + t.control_points[1].x) / 2,
+          y: (t.control_points[0].y + t.control_points[1].y) / 2,
+        };
+        strands[k] = { ...t, control_point_center: mid, control_point_center_locked: false };
+      }
+      doc = { ...s.doc, strands };
+    }
+    return { settings, doc, docRevision: s.docRevision + 1 };
   }),
   // Any explicit mode switch disarms a pending new-strand draw (matching OSS, where
   // choosing another tool exits new-strand mode). armNewStrand() sets the flag

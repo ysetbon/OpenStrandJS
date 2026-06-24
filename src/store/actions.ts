@@ -99,6 +99,8 @@ export function moveHandle(
     recenter(s);
     return;
   }
+  // Bias controls are applied via setBias (constrained projection), never moveHandle.
+  if (handle === 'bias_triangle' || handle === 'bias_circle') return;
 
   // Endpoint move (faithful to OSS move_mode.py:2925-2972). The grabbed endpoint and
   // every CONNECTED peer endpoint snap to the SAME absolute position -- where "peer"
@@ -144,6 +146,31 @@ export function moveHandle(
   // Any MaskedStrand built on a moved strand has its erase windows ride along by the
   // shift of the intersection CENTROID — OSS move_mode.py:2978-3031.
   trackMaskDeletionRects(draft, moved, curve);
+}
+
+// Drag a curvature bias control (OSS CurvatureBiasControl.handle_mouse_move): project
+// the cursor onto the line center->cp (cp1 for 'triangle', cp2 for 'circle'), clamp to
+// [0, lineLen], and set the bias to proj/lineLen (neutral 0.5 == segment midpoint). No
+// grid snap. Pressing the triangle control also marks triangle_has_moved (OSS:288-289;
+// already true here since the control is only grabbable once the curve has been shaped).
+export function setBias(
+  draft: EditorDocument,
+  layerName: string,
+  which: 'triangle' | 'circle',
+  world: Point,
+): void {
+  const s = draft.strands[layerName];
+  if (!s || !s.control_point_center) return;
+  const c = s.control_point_center;
+  const cp = which === 'triangle' ? s.control_points[0] : s.control_points[1];
+  const lvx = cp.x - c.x, lvy = cp.y - c.y;
+  const lineLen = Math.hypot(lvx, lvy);
+  if (lineLen <= 0) return;
+  let proj = ((world.x - c.x) * lvx + (world.y - c.y) * lvy) / lineLen;
+  proj = Math.max(0, Math.min(lineLen, proj));
+  const bias = proj / lineLen;
+  if (which === 'triangle') { s.bias_triangle = bias; s.triangle_has_moved = true; }
+  else s.bias_circle = bias;
 }
 
 // When a constituent strand of a MaskedStrand moves, the mask's intersection region
@@ -989,7 +1016,7 @@ export function createMaskGrid(
 // Dev-only debug handle for testing actions directly.
 if (import.meta.env?.DEV) {
   (globalThis as Record<string, unknown>).__actions = {
-    moveHandle, setStrandAngle, addNewStrand, attachChild, createMask, addDeletionRect, resetMask,
+    moveHandle, setBias, setStrandAngle, addNewStrand, attachChild, createMask, addDeletionRect, resetMask,
     deleteStrand, deleteAllStrands, reorderLayer, toggleHidden, toggleLock,
     setColor, setWidth, setWidthGridUnits, setShadowOnly, isStrandDeletable,
     setCircleStrokeColor, toggleCircleVisible, toggleLineVisible, closeKnot,
@@ -1113,6 +1140,8 @@ export function createMask(
     control_points: [clone(a.start), clone(a.end)],
     control_point_center: null,
     control_point_center_locked: false,
+    bias_triangle: 0.5,
+    bias_circle: 0.5,
     width: a.width,
     stroke_width: a.stroke_width,
     color: clone(a.color),

@@ -8,6 +8,11 @@
 import type { DeletionRect, EditorDocument, Point, RGBA, StrandRecord } from '../model/types';
 
 const approx = (x: number, y: number) => Math.abs(x - y) < 0.1;
+// Curvature bias is a normalized [0,1] scalar, NOT a coordinate, so the 0.1px
+// tolerance above is far too coarse (a 0.1 bias delta is several visible px on a wide
+// strand). Use OSS's bias-significance threshold (save_load_manager.py:563-565, mirrored
+// in saveLoad.ts) so a real bias drag is never deduped away into a lost undo step.
+const biasEq = (x: number, y: number) => Math.abs(x - y) < 0.001;
 
 const ptEq = (p: Point | null | undefined, q: Point | null | undefined): boolean => {
   if (!p && !q) return true;
@@ -40,6 +45,8 @@ export function strandVisualEqual(a: StrandRecord, b: StrandRecord): boolean {
   if (!ptEq(a.control_points[0], b.control_points[0]) || !ptEq(a.control_points[1], b.control_points[1])) return false;
   if (!ptEq(a.control_point_center, b.control_point_center)) return false;
   if (!!a.control_point_center_locked !== !!b.control_point_center_locked) return false;
+  if (!biasEq(a.bias_triangle ?? 0.5, b.bias_triangle ?? 0.5)) return false;
+  if (!biasEq(a.bias_circle ?? 0.5, b.bias_circle ?? 0.5)) return false;
   if (!approx(a.width, b.width) || !approx(a.stroke_width, b.stroke_width)) return false;
   if (!rgbaEq(a.color, b.color) || !rgbaEq(a.stroke_color, b.stroke_color)) return false;
   if (!rgbaNullEq(a.circle_stroke_color, b.circle_stroke_color)) return false;

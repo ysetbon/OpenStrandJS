@@ -7,8 +7,9 @@
 
 import { useEditorStore } from '../store/editorStore';
 import { moveGrab } from '../interaction/hitTest';
+import { biasPositions } from '../interaction/hitGeometry';
 import { movingStrandSet, beginWeldGesture, endWeldGesture } from '../interaction/connections';
-import { moveHandle, snapMove, autoAdjustCp1OnGrab, resetStraightCurveFlags, seedMaskCenters } from '../store/actions';
+import { moveHandle, setBias, snapMove, autoAdjustCp1OnGrab, resetStraightCurveFlags, seedMaskCenters } from '../store/actions';
 import type { HandleKind, Point, Selection, StrandRecord } from '../model/types';
 import type { Mode, ModeContext, PointerInfo } from './Mode';
 
@@ -27,6 +28,8 @@ function handlePos(s: StrandRecord, handle: HandleKind): Point {
     case 'control_point1': return s.control_points[0];
     case 'control_point2': return s.control_points[1];
     case 'control_point_center': return s.control_point_center ?? s.start;
+    case 'bias_triangle': return biasPositions(s)?.triangle ?? s.control_point_center ?? s.start;
+    case 'bias_circle': return biasPositions(s)?.circle ?? s.control_point_center ?? s.start;
   }
 }
 
@@ -82,6 +85,14 @@ export const MoveMode: Mode = {
   onPointerMove(p: PointerInfo, ctx: ModeContext) {
     const st = useEditorStore.getState();
     if (drag) {
+      // Bias controls slide along center->cp; OSS projects the RAW cursor onto that
+      // line (no cursor-lock offset, no grid snap). Handle before the endpoint/CP path.
+      if (drag.handle === 'bias_triangle' || drag.handle === 'bias_circle') {
+        const which = drag.handle === 'bias_triangle' ? 'triangle' : 'circle';
+        const d = drag;
+        st.mutateDoc((draft) => setBias(draft, d.layer, which, p.world));
+        return;
+      }
       const raw = { x: p.world.x + drag.offset.x, y: p.world.y + drag.offset.y };
       // Zoom/Ctrl-gated grid snap (OSS mouseMoveEvent:4036-4079).
       const pos = snapMove(raw, st.settings, st.view.zoom, p.ctrl);

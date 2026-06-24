@@ -37,6 +37,8 @@ export function makeStrand(o: MakeStrandOpts): StrandRecord {
     control_points: [clone(o.start), clone(o.end)],
     control_point_center: { x: (o.start.x + o.end.x) / 2, y: (o.start.y + o.end.y) / 2 },
     control_point_center_locked: false,
+    bias_triangle: 0.5,
+    bias_circle: 0.5,
     width: o.width ?? DEFAULT_STRAND_WIDTH,
     stroke_width: o.stroke_width ?? DEFAULT_STROKE_WIDTH,
     color: clone(color),

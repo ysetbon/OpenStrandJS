@@ -27,6 +27,10 @@ export function exportMeta(exportZoom = 2, margin = 40): { meta: RenderMeta; w: 
     shadow_enabled: doc.shadow_enabled,
     shadow_overrides: doc.shadow_overrides,
     curve_params: settings.curve_params,
+    // PNG export is WYSIWYG (OSS save_canvas_as_image renders via the live draw path):
+    // honor curvature bias exactly as the on-screen canvas does. Safe for the offline
+    // oracle — the fidelity harness builds its own meta and never calls exportPng.
+    curvature_bias: (settings.enable_third_control_point && settings.enable_curvature_bias_control) || undefined,
   };
   return { meta, w, h };
 }

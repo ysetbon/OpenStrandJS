@@ -6,7 +6,7 @@
 // Phase 1).
 
 import type { EditorDocument, HandleKind, Point, Settings, StrandRecord } from '../model/types';
-import { distToPolyline, sampleCenterline } from './hitGeometry';
+import { distToPolyline, sampleCenterline, biasPositions } from './hitGeometry';
 import { buildConnTable } from './connections';
 import { maskComponents } from '../model/layerName';
 
@@ -65,11 +65,12 @@ export function hitTest(world: Point, doc: EditorDocument, settings: Settings): 
     }
   }
 
-  // Pass 2: bodies.
+  // Pass 2: bodies. Match the drawn curve's bias so a biased body stays clickable.
+  const enableBias = settings.enable_third_control_point && settings.enable_curvature_bias_control;
   for (const name of rev) {
     const s = doc.strands[name];
     if (!isInteractable(s, doc)) continue;
-    const poly = sampleCenterline(s, settings.curve_params);
+    const poly = sampleCenterline(s, settings.curve_params, enableBias);
     const reach = s.width / 2 + s.stroke_width + 2;
     if (distToPolyline(world, poly) <= reach) return { kind: 'body', layerName: name };
   }
@@ -130,8 +131,22 @@ function canMoveSide(doc: EditorDocument, s: StrandRecord, side: 0 | 1): boolean
 // NOT on control_point_center_locked (which would be chicken-and-egg: locked is only set
 // BY grabbing the center). With the feature off (default), the center is never grabbable —
 // exactly matching OSS with the toggle off.
-function moveCpHandles(s: StrandRecord, enableThird: boolean): { handle: HandleKind; pos: Point }[] {
-  const out: { handle: HandleKind; pos: Point }[] = [{ handle: 'control_point1', pos: s.control_points[0] }];
+function moveCpHandles(s: StrandRecord, enableThird: boolean, enableBias: boolean): { handle: HandleKind; pos: Point }[] {
+  const out: { handle: HandleKind; pos: Point }[] = [];
+  // OSS try_move_control_points (the authoritative PRESS path, move_mode.py:1978) checks
+  // the BIAS controls FIRST — before cp1/cp2/center — so a bias square dragged onto the
+  // center (bias->0, where the square overlaps the center handle) re-grabs the BIAS
+  // control, not the center. Mirror that press order here (moveGrab returns first match).
+  // Gate: bias toggle on AND center LOCKED (should_show_controls). enableBias already
+  // implies enableThird (effective gate computed in moveGrab).
+  if (enableThird && enableBias && s.control_point_center_locked && s.triangle_has_moved && s.control_point_center) {
+    const bp = biasPositions(s);
+    if (bp) {
+      out.push({ handle: 'bias_triangle', pos: bp.triangle });
+      out.push({ handle: 'bias_circle', pos: bp.circle });
+    }
+  }
+  out.push({ handle: 'control_point1', pos: s.control_points[0] });
   if (s.control_point2_shown) out.push({ handle: 'control_point2', pos: s.control_points[1] });
   if (enableThird && s.triangle_has_moved && s.control_point_center) {
     out.push({ handle: 'control_point_center', pos: s.control_point_center });
@@ -143,12 +158,13 @@ export type MoveGrab = { layerName: string; handle: HandleKind } | null;
 
 export function moveGrab(world: Point, doc: EditorDocument, settings: Settings): MoveGrab {
   const enableThird = settings.enable_third_control_point;
+  const enableBias = enableThird && settings.enable_curvature_bias_control;
   // Pass 1 — control points, ALL strands, FORWARD. First hit wins over any endpoint.
   for (const name of doc.order) {
     const s = doc.strands[name];
     if (!moveGrabbable(s)) continue;
     if (doc.lock_mode && doc.locked_layers.includes(name)) continue;  // locked: no CP grab
-    for (const h of moveCpHandles(s, enableThird)) {
+    for (const h of moveCpHandles(s, enableThird, enableBias)) {
       if (inSquare(world, h.pos, CP_HALF)) return { layerName: name, handle: h.handle };
     }
   }
@@ -199,6 +215,7 @@ export function moveGrab(world: Point, doc: EditorDocument, settings: Settings):
 // approximated as "inside both component bodies" (the renderer's exact region is
 // first.stroked ∩ second.stroked, but body containment is enough to grab a mask).
 export function maskHitTest(world: Point, doc: EditorDocument, settings: Settings): string | null {
+  const enableBias = settings.enable_third_control_point && settings.enable_curvature_bias_control;
   for (const name of [...doc.order].reverse()) {
     const s = doc.strands[name];
     if (!s || s.type !== 'MaskedStrand' || s.is_hidden) continue;
@@ -209,8 +226,8 @@ export function maskHitTest(world: Point, doc: EditorDocument, settings: Setting
     // Match the renderer's mask region: first.stroked(width) ∩
     // second.stroked(width + 2*stroke + 4) -> first uses ±width/2, second is
     // expanded by stroke + 2 on each side.
-    const inA = distToPolyline(world, sampleCenterline(a, settings.curve_params)) <= a.width / 2 + 1;
-    const inB = distToPolyline(world, sampleCenterline(b, settings.curve_params)) <= b.width / 2 + b.stroke_width + 3;
+    const inA = distToPolyline(world, sampleCenterline(a, settings.curve_params, enableBias)) <= a.width / 2 + 1;
+    const inB = distToPolyline(world, sampleCenterline(b, settings.curve_params, enableBias)) <= b.width / 2 + b.stroke_width + 3;
     if (inA && inB) return name;
   }
   return null;
@@ -225,12 +242,13 @@ export function maskHitTest(world: Point, doc: EditorDocument, settings: Setting
 // when EXACTLY ONE strand is at the point, else clear" rule and the hover target.
 export function maskStrandsAtPoint(world: Point, doc: EditorDocument, settings: Settings): string[] {
   const out: string[] = [];
+  const enableBias = settings.enable_third_control_point && settings.enable_curvature_bias_control;
   for (const name of [...doc.order].reverse()) {
     const s = doc.strands[name];
     if (!isInteractable(s, doc)) continue;
     const endR = Math.max(s.width / 2, 15);
     if (near(world, s.start, endR) || near(world, s.end, endR)) { out.push(name); continue; }
-    const poly = sampleCenterline(s, settings.curve_params);
+    const poly = sampleCenterline(s, settings.curve_params, enableBias);
     if (distToPolyline(world, poly) <= s.width / 2 + s.stroke_width + 2) out.push(name);
   }
   return out;

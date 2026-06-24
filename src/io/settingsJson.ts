@@ -120,5 +120,11 @@ export function settingsFromJson(raw: unknown, current: Settings): Partial<Setti
   num('default_width_grid_units', 'default_width_grid_units');
   col('highlight_color', 'highlight_color');
 
+  // Interlock (mirrors GeneralPage + OSS settings_dialog.py:1923-1931): curvature bias
+  // can never be enabled while the third control point is off. Harden a hand-edited /
+  // stale blob so the effective bias gate stays consistent regardless of file contents.
+  const thirdEff = out.enable_third_control_point ?? current.enable_third_control_point;
+  if (!thirdEff) out.enable_curvature_bias_control = false;
+
   return out;
 }

@@ -45,6 +45,11 @@ const SHADOW_COLOR = { r: 0, g: 0, b: 0, a: 150 };
 const MAX_BLUR = 30;
 const NUM_STEPS = 2; // loaded reference setting (user_settings.txt NumSteps:2)
 let SHADOW_ENABLED = false; // set per-fixture from meta.shadow_enabled
+// Curvature bias gate. Set per-render from meta.curvature_bias (LIVE editor only;
+// the offline oracle never sets it). When false, buildProfile uses bias 0.5 (the
+// unbiased curve) regardless of any per-strand bias values, so fixtures stay
+// byte-identical and toggling the bias setting OFF neutralises the curve live.
+let BIAS_ENABLED = false;
 let SHADOW_PAINT = null;    // paper.Color for shadows (solid-core paint)
 let SHADOW_OVERRIDES = {};  // meta.shadow_overrides, keyed [caster][receiver] (consumed in the Port phase)
 
@@ -58,7 +63,10 @@ function buildProfile(s, enableThird) {
   const base_fraction = CURVE.base_fraction;
   const dist_multiplier = CURVE.dist_multiplier;
   const exponent = CURVE.exponent;
-  const bias_triangle = 0.5, bias_circle = 0.5; // no bias control in fixtures
+  // Per-strand curvature bias, gated by BIAS_ENABLED (meta.curvature_bias). Absent /
+  // disabled => 0.5 each => (0.5+bias)=1.0 factors => the original unbiased curve.
+  const bias_triangle = (BIAS_ENABLED && typeof s.bias_triangle === 'number') ? s.bias_triangle : 0.5;
+  const bias_circle = (BIAS_ENABLED && typeof s.bias_circle === 'number') ? s.bias_circle : 0.5;
 
   const thirdLocked = enableThird && s.control_point_center_locked && s.control_point_center;
 
@@ -1126,6 +1134,7 @@ function drawMasked(ms, byLayer, P, enableThird, S, shadowOnly) {
 // Render `strands` (flat array) using `meta` into the canvas #c.
 window.renderFixture = function (strands, meta) {
   if (meta.curve_params) CURVE = meta.curve_params;
+  BIAS_ENABLED = !!meta.curvature_bias;
   SAMPLE_STEP = 1; // full-accuracy sampling for the oracle / pointer-up render
   const W = meta.image_width, H = meta.image_height;
   // Match the reference, which renders at `supersample`x then downscales.
@@ -1379,6 +1388,7 @@ function computeDragTopology(strands) {
 // read / composite, then remove.
 function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg, topo) {
   if (meta.curve_params) CURVE = meta.curve_params;
+  BIAS_ENABLED = !!meta.curvature_bias;
   SAMPLE_STEP = DRAG_SAMPLE_STEP; // coarse sampling keeps per-frame stroking cheap
 
   const W = meta.image_width, H = meta.image_height;

@@ -17,6 +17,7 @@ import type {
 const MODELED_KEYS = new Set([
   'type', 'index', 'layer_name', 'set_number', 'start', 'end',
   'control_points', 'control_point_center', 'control_point_center_locked',
+  'bias_control',
   'width', 'stroke_width', 'color', 'stroke_color', 'has_circles',
   'is_hidden', 'shadow_only', 'circle_stroke_color',
   'knot_connections', 'attached_to', 'attachment_side',
@@ -69,6 +70,17 @@ function loadStrand(raw: any): StrandRecord {
     if (!MODELED_KEYS.has(k)) extra[k] = raw[k];
   }
 
+  // Curvature bias is serialized nested (OSS save_load_manager.py:233-239
+  // bias_control {triangle_bias, circle_bias, triangle/circle_position}). We model only
+  // the two scalars (positions are derived). Default 0.5 == unbiased.
+  const num01 = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
+  const bc = (raw.bias_control && typeof raw.bias_control === 'object') ? raw.bias_control : null;
+  const bias_triangle = num01(bc?.triangle_bias, 0.5);
+  const bias_circle = num01(bc?.circle_bias, 0.5);
+  // OSS marks a loaded strand's triangle as "moved" when its bias deviates from
+  // neutral (save_load_manager.py:563-566), so the center/bias controls re-appear.
+  const biasMoved = Math.abs(bias_triangle - 0.5) > 0.001 || Math.abs(bias_circle - 0.5) > 0.001;
+
   const knot: Record<string, KnotConnection> = {};
   if (raw.knot_connections && typeof raw.knot_connections === 'object') {
     for (const [endKey, info] of Object.entries<any>(raw.knot_connections)) {
@@ -90,6 +102,8 @@ function loadStrand(raw: any): StrandRecord {
     control_points: [cp1, cp2],
     control_point_center: raw.control_point_center != null ? asPoint(raw.control_point_center, start) : null,
     control_point_center_locked: !!raw.control_point_center_locked,
+    bias_triangle,
+    bias_circle,
     width: raw.width ?? 46,
     stroke_width: raw.stroke_width ?? 4,
     color: asColor(raw.color, { r: 200, g: 170, b: 230, a: 255 }),
@@ -99,7 +113,7 @@ function loadStrand(raw: any): StrandRecord {
     shadow_only: !!raw.shadow_only,
     circle_stroke_color: raw.circle_stroke_color != null ? asColor(raw.circle_stroke_color, BLACK) : null,
     knot_connections: knot,
-    triangle_has_moved: raw.triangle_has_moved ?? undefined,
+    triangle_has_moved: (raw.triangle_has_moved ?? undefined) || (biasMoved || undefined),
     control_point2_shown: raw.control_point2_shown ?? undefined,
     control_point2_activated: raw.control_point2_activated ?? undefined,
     extra,
@@ -176,6 +190,15 @@ function serializeStrand(s: StrandRecord, index: number): Record<string, unknown
   out.control_point_center = s.control_point_center
     ? { x: s.control_point_center.x, y: s.control_point_center.y } : null;
   out.control_point_center_locked = s.control_point_center_locked;
+  // Curvature bias: emit the OSS nested shape ONLY when non-neutral, so unbiased
+  // strands keep their current on-disk form (no bias_control key) and biased ones
+  // round-trip to python main.py. Positions are derived (OSS recomputes from bias).
+  const bt = s.bias_triangle ?? 0.5, bcir = s.bias_circle ?? 0.5;
+  if (Math.abs(bt - 0.5) > 0.001 || Math.abs(bcir - 0.5) > 0.001) {
+    out.bias_control = { triangle_bias: bt, circle_bias: bcir, triangle_position: null, circle_position: null };
+  } else {
+    delete out.bias_control; // drop any stale passthrough copy from a prior load
+  }
   if (s.triangle_has_moved !== undefined) out.triangle_has_moved = s.triangle_has_moved;
   if (s.control_point2_shown !== undefined) out.control_point2_shown = s.control_point2_shown;
   if (s.control_point2_activated !== undefined) out.control_point2_activated = s.control_point2_activated;

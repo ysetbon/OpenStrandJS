@@ -20,7 +20,7 @@ import {
 } from '../model/factory';
 import { worldToScreen } from '../interaction/viewTransform';
 import { strandHandles } from '../interaction/hitTest';
-import { sampleCenterline } from '../interaction/hitGeometry';
+import { sampleCenterline, biasPositions } from '../interaction/hitGeometry';
 
 export interface OverlayState {
   doc: EditorDocument;
@@ -153,6 +153,62 @@ function drawGlyphs(ctx: CanvasRenderingContext2D, st: OverlayState, s: StrandRe
   if (s.control_point_center && st.settings.enable_third_control_point && s.triangle_has_moved) {
     drawSquareGlyph(ctx, worldToScreen(s.control_point_center, st.view), z, coreCss);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Curvature bias controls (OSS curvature_bias_control.py draw_bias_controls).
+// Two squares sliding along center->cp1 (triangle) / center->cp2 (circle). Drawn as
+// outer black border (18px) -> green filled inner square (16px) -> strand-color icon
+// (9px triangle/circle). A dashed influence line center->cp shows when bias != 0.5:
+// red for the triangle, blue for the circle, alpha scaled by |bias-0.5|.
+// ---------------------------------------------------------------------------
+const BIAS_SQUARE = 16;   // OSS control_size (canvas units * zoom -> screen px)
+const BIAS_ICON = 9;      // OSS icon_size
+
+function drawBiasSquare(ctx: CanvasRenderingContext2D, c: Point, z: number, coreCss: string, isTriangle: boolean): void {
+  const outer = (BIAS_SQUARE + 2) * 0.5 * z;
+  ctx.beginPath(); ctx.rect(c.x - outer, c.y - outer, outer * 2, outer * 2);
+  ctx.lineJoin = 'miter'; ctx.lineWidth = 2 * z; ctx.strokeStyle = BLACK; ctx.stroke();
+  const inner = BIAS_SQUARE * 0.5 * z;
+  ctx.beginPath(); ctx.rect(c.x - inner, c.y - inner, inner * 2, inner * 2);
+  ctx.fillStyle = GREEN; ctx.fill();
+  ctx.lineWidth = 1.5 * z; ctx.strokeStyle = GREEN; ctx.stroke();
+  const ic = BIAS_ICON * 0.5 * z;
+  ctx.fillStyle = coreCss;
+  if (isTriangle) {
+    ctx.beginPath();
+    ctx.moveTo(c.x, c.y - ic); ctx.lineTo(c.x - ic, c.y + ic); ctx.lineTo(c.x + ic, c.y + ic);
+    ctx.closePath(); ctx.fill();
+  } else {
+    ctx.beginPath(); ctx.arc(c.x, c.y, ic, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function drawBiasControls(ctx: CanvasRenderingContext2D, st: OverlayState, s: StrandRecord): void {
+  // Effective gate (OSS should_show_controls): both toggles + center LOCKED + triangle moved.
+  if (!st.settings.enable_third_control_point || !st.settings.enable_curvature_bias_control) return;
+  if (!s.control_point_center_locked || !s.triangle_has_moved || !s.control_point_center) return;
+  const bp = biasPositions(s);
+  if (!bp) return;
+  const z = st.view.zoom;
+  const coreCss = css(s.color);
+  const center = worldToScreen(s.control_point_center, st.view);
+  const bt = s.bias_triangle ?? 0.5, bc = s.bias_circle ?? 0.5;
+  // Influence lines (drawn first, under the squares). alpha = round(100*|bias-0.5|*2).
+  const influence = (cpWorld: Point, rgb: string, bias: number) => {
+    if (Math.abs(bias - 0.5) < 1e-6) return;
+    const alpha = Math.max(0, Math.min(255, Math.round(100 * Math.abs(bias - 0.5) * 2))) / 255;
+    const cp = worldToScreen(cpWorld, st.view);
+    ctx.save();
+    ctx.setLineDash([4 * z, 3 * z]); ctx.lineWidth = GLYPH_FILL_W * z;
+    ctx.strokeStyle = `rgba(${rgb},${alpha})`;
+    ctx.beginPath(); ctx.moveTo(center.x, center.y); ctx.lineTo(cp.x, cp.y); ctx.stroke();
+    ctx.restore();
+  };
+  influence(s.control_points[0], '255,0,0', bt);
+  influence(s.control_points[1], '0,0,255', bc);
+  drawBiasSquare(ctx, worldToScreen(bp.triangle, st.view), z, coreCss, true);
+  drawBiasSquare(ctx, worldToScreen(bp.circle, st.view), z, coreCss, false);
 }
 
 // ---------------------------------------------------------------------------
@@ -331,7 +387,8 @@ function maskBodyHighlight(
 ): void {
   const s = st.doc.strands[layer];
   if (!s || s.type === 'MaskedStrand') return;
-  const world = sampleCenterline(s, st.settings.curve_params);
+  const enableBias = st.settings.enable_third_control_point && st.settings.enable_curvature_bias_control;
+  const world = sampleCenterline(s, st.settings.curve_params, enableBias);
   if (world.length < 2) return;
   const pts = world.map((wp) => worldToScreen(wp, st.view));
   const half = (s.width + s.stroke_width * 2) * st.view.zoom / 2;   // body half-width
@@ -413,6 +470,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, st: OverlayState): vo
       if (affected && name !== affected) continue;
       drawConnectors(ctx, st, s);
       drawGlyphs(ctx, st, s);
+      drawBiasControls(ctx, st, s);
     }
   }
 

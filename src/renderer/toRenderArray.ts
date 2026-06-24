@@ -54,6 +54,8 @@ export function toRenderArray(
       control_points: s.control_points,
       control_point_center: s.control_point_center,
       control_point_center_locked: s.control_point_center_locked,
+      bias_triangle: s.bias_triangle,
+      bias_circle: s.bias_circle,
       start_line_visible: ex.start_line_visible as boolean | undefined,
       end_line_visible: ex.end_line_visible as boolean | undefined,
       closed_connections: ex.closed_connections as [boolean, boolean] | undefined,
@@ -94,5 +96,9 @@ export function buildMeta(doc: EditorDocument, view: ViewState, settings: Settin
     // and stays byte-identical. Same absent-default gating as drag / fast_downscale.
     canvas_bg: THEME_CANVAS_BG[settings.theme] ?? '#FFFFFF',
     grid: settings.show_grid && settings.grid_size > 0 ? { size: settings.grid_size } : undefined,
+    // Effective bias gate (third CP must also be on). LIVE EDITOR ONLY — absent in the
+    // oracle/export meta, so buildProfile falls back to 0.5 (unbiased) and fixtures stay
+    // byte-identical. undefined (not false) to mirror the other absent-default keys.
+    curvature_bias: (settings.enable_third_control_point && settings.enable_curvature_bias_control) || undefined,
   };
 }
