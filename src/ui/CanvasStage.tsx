@@ -42,8 +42,15 @@ export function CanvasStage() {
     const host = cCanvas ? new InteractionHost(cCanvas) : null;
 
     const measure = () => {
-      const r = wrap.getBoundingClientRect();
-      setView({ width: Math.max(1, Math.floor(r.width)), height: Math.max(1, Math.floor(r.height)) });
+      // Use the LAYOUT size (clientWidth/Height), NOT getBoundingClientRect():
+      // under a CSS page zoom (html{zoom}) getBoundingClientRect returns VISUAL
+      // (post-zoom) px, but the renderer writes view.width back as the canvas
+      // style.width in LAYOUT px — feeding the visual size there double-counts the
+      // zoom and the canvas fills only zoom× the stage (grid shrunk, wrong bounds).
+      // clientWidth/Height are layout px (zoom-independent) and identical to the
+      // box at zoom 1, so the canvas fills the stage at any page zoom. .stage has
+      // no padding/border, so clientWidth == the visual content area.
+      setView({ width: Math.max(1, wrap.clientWidth), height: Math.max(1, wrap.clientHeight) });
     };
     measure();
     const ro = new ResizeObserver(measure);
