@@ -10,7 +10,7 @@
 .theme-default {
   --window-bg: #ECECEC;
   --text: #000000;
-  --canvas-bg: #FFFFFF;
+  --canvas-bg: #ECECEC;   /* OSS default canvas shows the window bg (#ECECEC), matching the renderer's meta.canvas_bg fill; avoids a white flash/margin around #c */
   --button-bg: #E8E8E8;
   --button-hover: #DADADA;
   --button-pressed: #C8C8C8;

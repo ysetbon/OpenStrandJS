@@ -1154,13 +1154,40 @@ window.renderFixture = function (strands, meta) {
   paper.setup(hi);
 
   const bg = new paper.Path.Rectangle(new paper.Point(0, 0), new paper.Size(W * ss, H * ss));
-  bg.fillColor = 'white';
+  // Theme canvas backdrop. LIVE EDITOR sets meta.canvas_bg (#ECECEC/#FFFFFF/#2C2C2C);
+  // the offline oracle / export omit it => 'white' (opaque, so the box-average
+  // downscale's fully-opaque-backdrop assumption holds and fixtures stay identical).
+  bg.fillColor = meta.canvas_bg || 'white';
 
   const ox = meta.x_offset, oy = meta.y_offset;
   // world -> backing: position scaled by S (= ss*zoom), offset by ss. At zoom 1
   // this is exactly (pt + offset) * ss.
   const P = (pt) => new paper.Point(pt.x * S + ox * ss, pt.y * S + oy * ss);
   const enableThird = strands.some((s) => s.control_point_center != null);
+
+  // OSS background grid (strand_drawing_canvas.py::draw_grid): solid rgb(200,200,200)
+  // width-1 lines on world multiples of grid_size, drawn BEHIND the strands (OSS
+  // paints the grid at paintEvent line 1911, before the strand loop at 1939). Drawn
+  // into the SAME supersampled buffer here (after the bg fill, before the strand
+  // loop) so it sits under every strand and is anti-aliased identically. LIVE EDITOR
+  // ONLY — gated on meta.grid, which the offline oracle / export never set
+  // (reference_render.py forces show_grid=False), so fixtures stay grid-free and
+  // byte-identical. P maps world->backing (pt*S + off*ss); 1*S keeps the line ~1px
+  // in the final downscaled image, matching Qt's width-1 pen at zoom 1.
+  if (meta.grid && meta.grid.size > 0) {
+    const gs = meta.grid.size;
+    const wLeft = (0 - ox * ss) / S, wTop = (0 - oy * ss) / S;
+    const wRight = (W * ss - ox * ss) / S, wBottom = (H * ss - oy * ss) / S;
+    const gcol = new paper.Color(200 / 255, 200 / 255, 200 / 255);
+    for (let x = Math.floor(wLeft / gs) * gs; x <= wRight; x += gs) {
+      const ln = new paper.Path.Line(P({ x, y: wTop }), P({ x, y: wBottom }));
+      ln.strokeColor = gcol; ln.strokeWidth = 1 * S;
+    }
+    for (let y = Math.floor(wTop / gs) * gs; y <= wBottom; y += gs) {
+      const ln = new paper.Path.Line(P({ x: wLeft, y }), P({ x: wRight, y }));
+      ln.strokeColor = gcol; ln.strokeWidth = 1 * S;
+    }
+  }
 
   const byLayer = {};
   for (const s of strands) byLayer[s.layer_name] = s;
@@ -1460,8 +1487,32 @@ window.renderDragFrame = function (strands, meta) {
   vis.style.height = H + 'px';
   const ctx = vis.getContext('2d');
   ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = 'white';
+  ctx.fillStyle = meta.canvas_bg || 'white';
   ctx.fillRect(0, 0, W, H); // backdrop (baked into no band; see renderDragBackground)
+  // OSS grid behind strands, drawn here (after the theme backdrop, before the band /
+  // move composite) so it stays UNDER every strand during a drag. LIVE EDITOR ONLY —
+  // the oracle never hits the drag path. The baked static bands are transparent
+  // (whiteBg=false), so the grid shows through the gaps. Native ss=1 mapping:
+  // P(pt) = pt*S + offset; line width 1*S; solid rgb(200,200,200) like OSS.
+  if (meta.grid && meta.grid.size > 0) {
+    const gs = meta.grid.size;
+    const S = meta.zoom || 1;
+    const ox = meta.x_offset, oy = meta.y_offset;
+    const wLeft = -ox / S, wTop = -oy / S;
+    const wRight = (W - ox) / S, wBottom = (H - oy) / S;
+    ctx.save();
+    ctx.strokeStyle = 'rgb(200,200,200)';
+    ctx.lineWidth = 1 * S;
+    for (let x = Math.floor(wLeft / gs) * gs; x <= wRight; x += gs) {
+      const px = x * S + ox;
+      ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, H); ctx.stroke();
+    }
+    for (let y = Math.floor(wTop / gs) * gs; y <= wBottom; y += gs) {
+      const py = y * S + oy;
+      ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(W, py); ctx.stroke();
+    }
+    ctx.restore();
+  }
   // Composite bands bottom-to-top in document z-order, dropping in the moving
   // strokes at their z-slot. Per-frame work = k band blits + the one mv blit.
   for (const b of DRAG_BG.bands) {

@@ -7,8 +7,20 @@
 // Phase 6).
 
 import type {
-  EditorDocument, RenderMeta, RenderStrand, Settings, ViewState,
+  EditorDocument, RenderMeta, RenderStrand, Settings, Theme, ViewState,
 } from '../model/types';
+
+// OSS canvas background per theme. The original's canvas widget shows the PARENT
+// window background (default #ECECEC, light #FFFFFF, dark #2C2C2C) behind the grid
+// + strands — verified by grabbing the real app per theme (the dark canvas reads
+// #2C2C2C, which can only come from the window bg showing through, since the
+// canvas's own stylesheet is white in every theme due to a casing bug). So the
+// canvas backdrop == the theme's --window-bg, NOT a hardcoded white.
+const THEME_CANVAS_BG: Record<Theme, string> = {
+  default: '#ECECEC',
+  light: '#FFFFFF',
+  dark: '#2C2C2C',
+};
 
 // `highlightSet` (optional) marks extra strands as selected for highlight
 // purposes — used during an endpoint drag so welded/attached peers that move
@@ -75,5 +87,12 @@ export function buildMeta(doc: EditorDocument, view: ViewState, settings: Settin
     shadow_enabled: doc.shadow_enabled,
     shadow_overrides: doc.shadow_overrides,
     curve_params: settings.curve_params,
+    // Theme canvas backdrop + OSS grid. LIVE EDITOR ONLY: these two keys are set
+    // ONLY here (the single live-path meta builder). The offline fidelity oracle
+    // (reference_render.py meta) and PNG export (exportPng's own meta literal) never
+    // set them, so renderFixture falls back to a white opaque backdrop with no grid
+    // and stays byte-identical. Same absent-default gating as drag / fast_downscale.
+    canvas_bg: THEME_CANVAS_BG[settings.theme] ?? '#FFFFFF',
+    grid: settings.show_grid && settings.grid_size > 0 ? { size: settings.grid_size } : undefined,
   };
 }

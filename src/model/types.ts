@@ -254,4 +254,15 @@ export interface RenderMeta {
   // oracle uses to byte-match Qt. Keeps full supersampled quality; ~5× faster
   // full render. Absent => exact box-average (byte-identical fidelity path).
   fast_downscale?: boolean;
+  // LIVE EDITOR ONLY (the offline oracle / PNG export never set this). The opaque
+  // canvas backdrop color (the active theme's window bg: #ECECEC default, #FFFFFF
+  // light, #2C2C2C dark), mirroring OSS where the canvas widget shows the parent
+  // window background behind the grid + strands. Absent => 'white' (byte-identical
+  // fidelity path; the box-average downscale still sees a fully opaque backdrop).
+  canvas_bg?: string;
+  // LIVE EDITOR ONLY (the offline oracle / PNG export never set this). When present,
+  // draw the OSS background grid (solid rgb(200,200,200) width-1 lines) BEHIND the
+  // strands, on world multiples of `size`. Absent => no grid (matches
+  // reference_render.py's canvas.show_grid=False, so fixtures stay grid-free).
+  grid?: { size: number };
 }
