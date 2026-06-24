@@ -4,24 +4,13 @@
 // JSON-serializable for future snapshot history.
 
 import type { EditorDocument, GroupRecord, HandleKind, KnotConnection, Point, RGBA, Settings, ShadowOverride, StrandRecord } from '../model/types';
-import { gestureWeldGraph, weldedEndpoints } from '../interaction/connections';
+import { gestureConnTable, connectedMovers } from '../interaction/connections';
 import { makeAttachedStrand, makeStrand } from '../model/factory';
 import { formatLayerName, maskComponents, nextFreeSet, nextIndexInSet, parseLayerName } from '../model/layerName';
 import { resolveGroupMembers } from '../model/group';
 import { strandsCross } from '../interaction/hitGeometry';
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
-
-// Snap `end` so the segment start->end lies on a 45-degree increment, keeping
-// length (the desktop locks the first strand of a set to 45-degree angles).
-export function snapAngle45(start: Point, end: Point): Point {
-  const dx = end.x - start.x, dy = end.y - start.y;
-  const len = Math.hypot(dx, dy);
-  if (len < 1e-6) return { ...end };
-  const step = Math.PI / 4;
-  const ang = Math.round(Math.atan2(dy, dx) / step) * step;
-  return { x: start.x + Math.cos(ang) * len, y: start.y + Math.sin(ang) * len };
-}
 
 export function snapPoint(p: Point, settings: Settings): Point {
   if (!settings.snap_to_grid_enabled || settings.grid_size <= 0) return p;
@@ -71,29 +60,35 @@ export function moveHandle(
     return;
   }
 
-  // Endpoint move: faithful port of update_end -- a control point follows its
-  // endpoint ONLY when it sits at that endpoint's default (coincident) position;
-  // a manually-placed control point stays put so the curve reshapes. Welded
-  // peers move with it. Center is recomputed as the cp midpoint unless pinned.
+  // Endpoint move (faithful to OSS move_mode.py:2925-2972). The grabbed endpoint and
+  // every CONNECTED peer endpoint snap to the SAME absolute position -- where "peer"
+  // is decided by the DIRECTED, first-claim-wins connection table + move-test
+  // (connections.ts), not a symmetric weld component. A control point that sits at
+  // its endpoint's old (coincident) position follows by that endpoint's own delta; a
+  // manually-placed one stays put so the curve reshapes. Center re-derives unless pinned.
   const cur = handle === 'start' ? s.start : s.end;
-  const delta = { x: pos.x - cur.x, y: pos.y - cur.y };
-  if (delta.x === 0 && delta.y === 0) return;
+  if (pos.x === cur.x && pos.y === cur.y) return;
   const EPS = 1e-3;
 
-  // Reuse the per-gesture cached weld graph (topology is invariant across an
-  // endpoint drag) instead of rebuilding the union-find on every pointermove.
-  // Falls back to a fresh build when no gesture is active.
-  const graph = gestureWeldGraph(draft);
-  for (const ep of weldedEndpoints(draft, layerName, handle, graph)) {
-    const t = draft.strands[ep.layer];
-    if (!t) continue;
-    const pt = ep.end === 'start' ? t.start : t.end;
-    const old = { x: pt.x, y: pt.y };
-    pt.x += delta.x; pt.y += delta.y;
-    const cpIdx = ep.end === 'start' ? 0 : 1;
-    const cp = t.control_points[cpIdx];
-    if (Math.hypot(cp.x - old.x, cp.y - old.y) < EPS) { cp.x += delta.x; cp.y += delta.y; }
+  const moveEnd = (t: StrandRecord, end: 'start' | 'end') => {
+    const pt = end === 'start' ? t.start : t.end;
+    const oldx = pt.x, oldy = pt.y;
+    const dx = pos.x - oldx, dy = pos.y - oldy;
+    pt.x = pos.x; pt.y = pos.y;
+    const cp = t.control_points[end === 'start' ? 0 : 1];
+    if (Math.hypot(cp.x - oldx, cp.y - oldy) < EPS) { cp.x += dx; cp.y += dy; }
     recenter(t);
+  };
+
+  // Grabbed endpoint moves directly; peers follow only when their slot points back at
+  // it. Reuse the per-gesture cached connection table (topology is invariant across an
+  // endpoint drag); falls back to a fresh build when no gesture is active.
+  moveEnd(s, handle);
+  const side: 0 | 1 = handle === 'end' ? 1 : 0;
+  const table = gestureConnTable(draft);
+  for (const m of connectedMovers(table, draft, layerName, side)) {
+    const t = draft.strands[m.name];
+    if (t) moveEnd(t, m.end);
   }
 }
 

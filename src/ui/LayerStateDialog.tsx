@@ -2,8 +2,8 @@ import type { CSSProperties } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import { t } from './i18n';
 import { Modal } from './Modal';
-import { buildWeldGraph, weldedEndpoints } from '../interaction/connections';
-import type { EditorDocument, EndKey, RGBA } from '../model/types';
+import { buildConnTable, connectionSlot } from '../interaction/connections';
+import type { EndKey, RGBA } from '../model/types';
 
 function hex2(n: number): string {
   const v = Math.max(0, Math.min(255, Math.round(n)));
@@ -16,14 +16,13 @@ function rgbaHex(c: RGBA): string {
 
 const r0 = (n: number) => Math.round(n);
 
-// OSS get_layer_connections format: the welded peer of (layer,end) on a DIFFERENT
-// layer, as `peerLayer(0|1)`, else 'null'. The union-find is OSS's connection graph
-// (already derived on demand by connections.ts — no LayerStateManager needed).
-function connStr(doc: EditorDocument, uf: ReturnType<typeof buildWeldGraph>, layer: string, end: EndKey): string {
-  const peers = weldedEndpoints(doc, layer, end, uf).filter((p) => !(p.layer === layer && p.end === end));
-  if (peers.length === 0) return 'null';
-  const p = peers[0];
-  return `${p.layer}(${p.end === 'start' ? 0 : 1})`;
+// OSS get_layer_connections format: the directed neighbor of (layer,end) as
+// `neighbor(0|1)` (0=neighbor's start, 1=neighbor's end), else 'null'. Mirrors OSS's
+// single-slot, first-claim-wins, knot-overwrite table (connections.ts — no
+// LayerStateManager needed).
+function connStr(table: ReturnType<typeof buildConnTable>, layer: string, end: EndKey): string {
+  const slot = connectionSlot(table, layer, end);
+  return slot ? `${slot.name}(${slot.point})` : 'null';
 }
 
 const HEADING: CSSProperties = { fontWeight: 600, opacity: 0.65, margin: '10px 0 2px', fontSize: '0.85em' };
@@ -39,7 +38,7 @@ export function LayerStateDialog(props: { onClose: () => void }): JSX.Element {
   const { order, strands, selected_strand_name } = doc;
 
   const lockedSet = new Set(doc.locked_layers);
-  const uf = buildWeldGraph(doc);
+  const table = buildConnTable(doc);
   const nonMasked = order.filter((n) => strands[n] && strands[n].type !== 'MaskedStrand');
   const masked = order.filter((n) => strands[n] && strands[n].type === 'MaskedStrand');
 
@@ -93,7 +92,7 @@ export function LayerStateDialog(props: { onClose: () => void }): JSX.Element {
             {nonMasked.map((name) => (
               <div key={name} className="layer-state-row">
                 <span className="ls-name">{name}</span>
-                <span className="ls-conn">[{connStr(doc, uf, name, 'start')}, {connStr(doc, uf, name, 'end')}]</span>
+                <span className="ls-conn">[{connStr(table, name, 'start')}, {connStr(table, name, 'end')}]</span>
               </div>
             ))}
 

@@ -1,10 +1,10 @@
-// Draw a new strand on empty space (press-drag-release; 45-degree locked since
-// it's the first strand of a new set) OR attach a child by dragging out of a
-// free parent endpoint's 120px circle. The strand is created on pointer-up so a
-// zero-length drag cancels cleanly.
+// Draw a new strand on empty space (press-drag-release at a FREE angle, grid-snapped
+// when snap-to-grid is enabled — matching OSS, which never 45-locks a mouse-drawn
+// first strand) OR attach a child by dragging out of a free parent endpoint's 120px
+// circle. The strand is created on pointer-up so a zero-length drag cancels cleanly.
 
 import { useEditorStore } from '../store/editorStore';
-import { addNewStrand, attachChild, snapAngle45 } from '../store/actions';
+import { addNewStrand, attachChild, snapPoint } from '../store/actions';
 import { screenToWorld } from '../interaction/viewTransform';
 import type { EditorDocument, HandleKind, Point, ViewState } from '../model/types';
 import type { Mode, ModeContext, PointerInfo } from './Mode';
@@ -117,7 +117,7 @@ export const AttachMode: Mode = {
     if (drag) {
       const world = constrainToViewport(p.world, st.view);
       const end = drag.kind === 'new'
-        ? snapAngle45(drag.start, world)
+        ? snapPoint(world, st.settings)
         : clampMinLen(drag.start, world, MIN_ATTACH_LEN);
       st.setPending({ kind: drag.kind, start: drag.start, end, parent: drag.parent, side: drag.side });
       ctx.requestOverlay();
@@ -141,17 +141,20 @@ export const AttachMode: Mode = {
     const st = useEditorStore.getState();
     const d = drag;
     const world = constrainToViewport(p.world, st.view);
-    // Cancel test runs on the RAW (pre-clamp) distance so a near-zero drag still
-    // cancels even though clampMinLen would otherwise stretch it to 40px.
-    const raw = d.kind === 'new' ? snapAngle45(d.start, p.world) : p.world;
     const end = d.kind === 'new'
-      ? snapAngle45(d.start, world)
+      ? snapPoint(world, st.settings)        // free angle, grid-snapped when enabled
       : clampMinLen(d.start, world, MIN_ATTACH_LEN);
     drag = null;
     st.setPending(null);
     st.setDragging(false);
 
-    if (Math.hypot(raw.x - d.start.x, raw.y - d.start.y) < MIN_LEN) {
+    // Cancel a too-short drag. For 'attach' measure the RAW cursor distance (clampMinLen
+    // would otherwise stretch it to MIN_ATTACH_LEN); for 'new' measure the SNAPPED end so
+    // a grid-snap that collapses the endpoint back onto the start cancels too.
+    const dragLen = d.kind === 'new'
+      ? Math.hypot(end.x - d.start.x, end.y - d.start.y)
+      : Math.hypot(p.world.x - d.start.x, p.world.y - d.start.y);
+    if (dragLen < MIN_LEN) {
       st.commit();               // nothing created -> commit() discards the no-op gesture
       ctx.requestOverlay();
       return;

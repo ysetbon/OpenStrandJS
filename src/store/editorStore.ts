@@ -41,7 +41,7 @@ const DEFAULT_SETTINGS: Settings = {
   curve_params: { base_fraction: 1.0, dist_multiplier: 2.0, exponent: 2.0 },
   grid_size: 28,
   show_grid: false,
-  snap_to_grid_enabled: false,
+  snap_to_grid_enabled: true,   // OSS default (snap_to_grid_attach_enabled = True); new strands draw free-angle, endpoints quantized to grid_size
   default_strand_color: DEFAULT_STRAND_COLOR,
   default_stroke_color: DEFAULT_STROKE_COLOR,
   default_strand_width: DEFAULT_STRAND_WIDTH,
