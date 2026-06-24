@@ -51,23 +51,27 @@ function syncOverlay(): void {
   if (overlayDraw) overlayDraw(ctx);
 }
 
-// Redraw just the overlay (cheap; no renderFixture). Used for hover/selection.
-export function requestOverlay(): void {
-  if (scheduled) return;
-  scheduled = true;
-  requestAnimationFrame(() => { scheduled = false; syncOverlay(); });
-}
+// requestOverlay (cheap, overlay-only) and requestRender (full #c render) share
+// ONE rAF-coalesced frame, deduped by `scheduled`. `pendingFull` records whether
+// that frame must do a full render. requestRender always WINS: calling it while an
+// overlay-only frame is already queued UPGRADES that frame to a full render.
+//
+// They previously shared only `scheduled` but queued two SEPARATE callbacks, so a
+// pending overlay rAF (queued by the last pointer-move of a create/attach drag)
+// SWALLOWED the requestRender fired on pointer-up — its early `if (scheduled)
+// return` bailed, the overlay-only rAF ran, and the just-committed strand was never
+// drawn to #c. It then stayed invisible until the next full render (e.g. when you
+// moved it). The CanvasStage docRevision effect was only an intermittent backstop
+// (it raced the same flag), which is why the strand vanished only "sometimes".
+let pendingFull = false;
 
-if (import.meta.env?.DEV) {
-  (globalThis as Record<string, unknown>).__requestOverlay = () => requestOverlay();
-  (globalThis as Record<string, unknown>).__requestRender = () => requestRender();
-}
-
-export function requestRender(): void {
+function schedule(): void {
   if (scheduled) return;
   scheduled = true;
   requestAnimationFrame(() => {
     scheduled = false;
+    if (!pendingFull) { syncOverlay(); return; }  // overlay-only frame
+    pendingFull = false;
     const { doc, view, settings, dragging, dragMoving, selection } = useEditorStore.getState();
     try {
       // During an endpoint drag, highlight every strand that moves with the
@@ -116,4 +120,22 @@ export function requestRender(): void {
     }
     syncOverlay();
   });
+}
+
+// Redraw just the overlay (cheap; no renderFixture). Used for hover/selection.
+// Never downgrades a full render already requested for the current frame.
+export function requestOverlay(): void {
+  schedule();
+}
+
+// Full #c re-render (renderFixture). Coalesced into the shared frame and flagged so
+// it can never be swallowed by a pending overlay-only frame.
+export function requestRender(): void {
+  pendingFull = true;
+  schedule();
+}
+
+if (import.meta.env?.DEV) {
+  (globalThis as Record<string, unknown>).__requestOverlay = () => requestOverlay();
+  (globalThis as Record<string, unknown>).__requestRender = () => requestRender();
 }
