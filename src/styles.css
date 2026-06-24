@@ -9,11 +9,12 @@
 @import './ui/tabEdge.css';
 
 * { box-sizing: border-box; }
-/* Default the whole app to 80% — equivalent to pressing Ctrl+- to 80% in the
- * browser. The render only "looked best" at 80% browser zoom, so we bake that
- * in: the new 100% renders exactly like the old 80%. zoom (not transform) is
- * used so the layout reflows to fill the viewport like real browser zoom does. */
-html { zoom: 0.8; }
+/* Default the whole app to 64% — equivalent to pressing Ctrl+- to ~64% in the
+ * browser. The 80% bake-in still looked best with an extra 80% browser zoom on
+ * top (0.8 × 0.8 = 0.64), so fold that in: the new 100% renders exactly like
+ * the old 80% baseline viewed at 80% browser zoom. zoom (not transform) is used
+ * so the layout reflows to fill the viewport like real browser zoom does. */
+html { zoom: 0.64; }
 html, body, #root { height: 100%; margin: 0; }
 body {
   font: 14px/1.4 system-ui, -apple-system, sans-serif;
