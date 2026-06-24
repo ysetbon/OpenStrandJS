@@ -34,8 +34,14 @@ export function makeStrand(o: MakeStrandOpts): StrandRecord {
     set_number: o.set_number,
     start: clone(o.start),
     end: clone(o.end),
-    control_points: [clone(o.start), clone(o.end)],
-    control_point_center: { x: (o.start.x + o.end.x) / 2, y: (o.start.y + o.end.y) / 2 },
+    // OSS strand.py __init__ collapses cp1, cp2 AND the center onto `start`
+    // (a degenerate triangle), so a fresh strand draws as a straight line and the
+    // first cp1 grab triggers auto_adjust_control_points (move_mode.py:2469) — which,
+    // when the third CP is enabled, repositions cp2 to the end and LOCKS the center.
+    // Seeding cp2 at `end` here (the prior JS behavior) suppressed that auto-adjust, so
+    // the center never auto-locked and the curvature-bias squares could never appear.
+    control_points: [clone(o.start), clone(o.start)],
+    control_point_center: clone(o.start),
     control_point_center_locked: false,
     bias_triangle: 0.5,
     bias_circle: 0.5,
