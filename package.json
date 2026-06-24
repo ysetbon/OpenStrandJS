@@ -8,6 +8,7 @@
     "dev": "vite",
     "build:editor": "vite build",
     "preview": "vite preview",
+    "deploy": "node tools/deploy-pages.mjs",
     "reference": "../OpenStrandStudio/src/build_env/Scripts/python.exe tools/reference_render.py",
     "build": "tsc",
     "render": "node tools/js_render.mjs",
