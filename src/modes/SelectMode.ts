@@ -14,7 +14,7 @@ function hoverFromHit(world: PointerInfo['world']) {
 
 export const SelectMode: Mode = {
   name: 'select',
-  cursor: 'default',
+  cursor: 'pointer',     // OSS Qt.PointingHandCursor (select_mode.py:17)
 
   onPointerDown(p: PointerInfo, ctx: ModeContext) {
     const st = useEditorStore.getState();

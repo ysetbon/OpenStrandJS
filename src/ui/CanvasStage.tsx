@@ -4,6 +4,7 @@ import { requestRender, setOverlay } from '../renderer/renderScheduler';
 import { InteractionHost } from '../interaction/InteractionHost';
 import { drawOverlay } from '../overlay/overlayRenderer';
 import { modes } from '../modes';
+import { t } from './i18n';
 
 // The only component that touches <canvas>. Owns #c (renderer output) and
 // #overlay (handles/selection). Measures its box into the view state, mounts the
@@ -16,6 +17,12 @@ export function CanvasStage() {
   const view = useEditorStore((s) => s.view);
   const settings = useEditorStore((s) => s.settings);
   const mode = useEditorStore((s) => s.mode);
+  // Validated target: only active while the mask still exists in the current doc
+  // (a tab switch / file load / undo / delete that removes it ends the session,
+  // so the banner + crosshair never get stuck across documents).
+  const maskEditTarget = useEditorStore((s) =>
+    (s.maskEditTarget && s.doc.strands[s.maskEditTarget]?.type === 'MaskedStrand') ? s.maskEditTarget : null);
+  const lang = useEditorStore((s) => s.settings.language);
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -55,13 +62,22 @@ export function CanvasStage() {
 
   useEffect(() => {
     const cCanvas = document.getElementById('c') as HTMLCanvasElement | null;
-    if (cCanvas) cCanvas.style.cursor = modes[mode]?.cursor ?? 'default';
-  }, [mode]);
+    // An active Edit Mask session forces the crosshair (OSS enter_mask_edit_mode).
+    if (cCanvas) cCanvas.style.cursor = maskEditTarget ? 'crosshair' : (modes[mode]?.cursor ?? 'default');
+  }, [mode, maskEditTarget]);
 
   return (
     <div className="stage" ref={wrapRef}>
       <canvas id="c" />
       <canvas id="overlay" />
+      {/* OSS mask_edit_label banner: "MASK EDIT MODE / Press ESC to exit". */}
+      {maskEditTarget && (
+        <div className="mask-edit-banner" role="status">
+          {t('mask_edit_mode_message', lang).split('\n').map((line, i) => (
+            <div key={i}>{line}</div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -93,7 +93,27 @@ export function maskHitTest(world: Point, doc: EditorDocument, settings: Setting
   return null;
 }
 
+// All non-masked strands whose body OR endpoint-selection circle contains the
+// point, topmost first — the mask-mode picker (OSS mask_mode.find_strands_at_point).
+// OSS endpoint paths are circles of radius max(width/2, 15); the body is the
+// stroked selection path (approximated by distToPolyline <= width/2+stroke+2).
+// Mask mode never selects/hovers MaskedStrands; we also skip hidden/locked (a
+// hidden strand has no visible body to click). Used to enforce OSS's "select only
+// when EXACTLY ONE strand is at the point, else clear" rule and the hover target.
+export function maskStrandsAtPoint(world: Point, doc: EditorDocument, settings: Settings): string[] {
+  const out: string[] = [];
+  for (const name of [...doc.order].reverse()) {
+    const s = doc.strands[name];
+    if (!isInteractable(s, doc)) continue;
+    const endR = Math.max(s.width / 2, 15);
+    if (near(world, s.start, endR) || near(world, s.end, endR)) { out.push(name); continue; }
+    const poly = sampleCenterline(s, settings.curve_params);
+    if (distToPolyline(world, poly) <= s.width / 2 + s.stroke_width + 2) out.push(name);
+  }
+  return out;
+}
+
 // Dev-only debug handle for hit-testing.
 if (import.meta.env?.DEV) {
-  (globalThis as Record<string, unknown>).__hit = { hitTest, maskHitTest };
+  (globalThis as Record<string, unknown>).__hit = { hitTest, maskHitTest, maskStrandsAtPoint };
 }

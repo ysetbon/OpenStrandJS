@@ -133,6 +133,10 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
     return mc ? s.doc.strands[mc.second]?.color : undefined;
   });
   const commitEdit = useEditorStore((s) => s.commitEdit);
+  // Per-mask Edit Mask session: which mask (if any) is being edited.
+  const maskEditTarget = useEditorStore((s) => s.maskEditTarget);
+  const enterMaskEdit = useEditorStore((s) => s.enterMaskEdit);
+  const exitMaskEdit = useEditorStore((s) => s.exitMaskEdit);
 
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [colorPick, setColorPick] = useState<'fill' | 'stroke' | null>(null);
@@ -159,7 +163,14 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
   // ---- store-wired menu actions ----
   const doToggleHidden = () => commitEdit((d) => toggleHidden(d, name));
   const doToggleShadowOnly = () => commitEdit((d) => setShadowOnly(d, name, !shadowOnly));
-  const doResetMask = () => commitEdit((d) => resetMask(d, name));
+  // Reset Mask drops all deletion rectangles. OSS canvas.reset_mask first exits an
+  // active edit session targeting this same mask (strand_drawing_canvas.py:7253-7255).
+  const doResetMask = () => {
+    if (maskEditTarget === name) exitMaskEdit();
+    commitEdit((d) => resetMask(d, name));
+  };
+  // Edit Mask -> enter the per-mask deletion-rectangle erase session for this mask.
+  const doEditMask = () => enterMaskEdit(name);
   const applyColor = (kind: 'fill' | 'stroke', hex: string) => {
     const prev = kind === 'fill' ? strand?.color : strand?.stroke_color;
     const rgba = hexToRgba(hex, prev);
@@ -250,8 +261,7 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
 
     if (isMasked) {
       items.push(
-        // TODO(oss-fidelity): on_edit_mask_click interactive flow not ported.
-        { label: t('edit_mask', lang), disabled: true },
+        { label: t('edit_mask', lang), onClick: doEditMask },
         { label: t('reset_mask', lang), onClick: doResetMask },
       );
       return items;
@@ -368,6 +378,14 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
   if (isMasked) classes.push('nlb-masked');
   if (maskedMode) classes.push('nlb-mask-mode');
   if (pickedForMask) classes.push('nlb-mask-picked');
+  // Edit Mask session: red-border the edited mask; dim + lock every other button.
+  // Guard on the target still existing so a tab switch / undo that removed the mask
+  // never leaves every button stuck-locked with no edited button to exit from.
+  const editActive = maskEditTarget != null && strands[maskEditTarget]?.type === 'MaskedStrand';
+  const editingThis = editActive && maskEditTarget === name;
+  const editLocked = editActive && maskEditTarget !== name;
+  if (editingThis) classes.push('nlb-mask-editing');
+  if (editLocked) classes.push('nlb-edit-locked');
 
   // fill: masked uses first strand's color; otherwise the strand's own color.
   const base = isMasked ? firstColor : strand?.color;
@@ -388,9 +406,12 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
         aria-pressed={selected}
         tabIndex={0}
         draggable={draggable}
-        onClick={() => onSelect(name)}
+        onClick={() => { if (!editActive) onSelect(name); }}
         onContextMenu={(e) => {
           e.preventDefault();
+          // During an Edit Mask session every button's context menu is disabled
+          // (OSS setContextMenuPolicy(Qt.NoContextMenu)); exit with ESC.
+          if (editActive) return;
           // OSS suppresses the normal per-button menu in multi-select mode and
           // shows the 2-item multi menu instead (built in menuItems()).
           setMenu({ x: e.clientX, y: e.clientY });

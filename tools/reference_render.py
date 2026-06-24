@@ -177,6 +177,31 @@ def main():
                     parent.canvas = canvas
                 parent.draw(painter, skip_painter_setup=True)
         strand.draw(painter, skip_painter_setup=True)
+
+    # Optional interaction-mode HOVER highlight, for the hover pixel-diff harness
+    # (tools/compare_hover.mjs). Default (env unset) draws nothing, so the oracle
+    # output is byte-identical. OSS_HOVER_LAYER = layer_name to hover;
+    # OSS_HOVER_MODE = 'mask' (the only mode with a body hover highlight).
+    hover_layer = os.environ.get("OSS_HOVER_LAYER")
+    hover_mode = os.environ.get("OSS_HOVER_MODE", "mask")
+    if hover_layer:
+        hov = next((s for s in canvas.strands
+                    if getattr(s, "layer_name", None) == hover_layer), None)
+        if hov is not None and hover_mode == "mask":
+            from mask_mode import MaskMode
+            mm = getattr(canvas, "mask_mode", None) or MaskMode(canvas, None)
+            mm.canvas = canvas
+            mm.selected_strands = []
+            mm.hovered_strand = hov
+            mm.draw(painter)   # OSS's exact hover paint (yellow@170 + black 2px)
+        elif hov is not None and hover_mode == "select":
+            from select_mode import SelectMode
+            sm = getattr(canvas, "select_mode", None) or SelectMode(canvas)
+            sm.canvas = canvas
+            canvas.show_hover_highlights = True
+            sm.hovered_strand = hov
+            sm.draw(painter)   # same yellow hover; masks use get_mask_path
+
     painter.end()
 
     if factor != 1:

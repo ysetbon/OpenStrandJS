@@ -132,6 +132,29 @@ export function strandsCross(a: StrandRecord, b: StrandRecord, curve: Curve): bo
   return false;
 }
 
+// Do two strands' STROKED BODIES overlap? This is the faithful gate for creating
+// a two-click mask: OSS create_masked_layer refuses a mask only when
+// get_stroked_path(s1).intersected(get_stroked_path(s2)).isEmpty()
+// (strand_drawing_canvas.py:3141-3150). Unlike strandsCross (which gates the group
+// auto-grid and deliberately excludes endpoint-sharing/attached pairs), a mask of
+// two CONNECTED or overlapping ribbons IS valid here, so we test true body overlap:
+// the centerlines cross, OR any sample of one lies within the combined stroked
+// half-widths of the other (covers shared endpoints, T-junctions, and near-parallel
+// touching ribbons that never cross at the centerline).
+export function strandBodiesOverlap(a: StrandRecord, b: StrandRecord, curve: Curve): boolean {
+  const pa = sampleCenterline(a, curve);
+  const pb = sampleCenterline(b, curve);
+  for (let i = 0; i + 1 < pa.length; i++) {
+    for (let j = 0; j + 1 < pb.length; j++) {
+      if (segIntersect(pa[i], pa[i + 1], pb[j], pb[j + 1])) return true;
+    }
+  }
+  const reach = a.width / 2 + a.stroke_width + b.width / 2 + b.stroke_width;
+  for (const p of pa) if (distToPolyline(p, pb) <= reach) return true;
+  for (const p of pb) if (distToPolyline(p, pa) <= reach) return true;
+  return false;
+}
+
 // Minimum distance from p to the polyline (world space).
 export function distToPolyline(p: Point, poly: Point[]): number {
   let best = Infinity;

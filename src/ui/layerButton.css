@@ -162,6 +162,12 @@
 .nlb.nlb-mask-mode { background: #808080 !important; border: none !important; }
 .nlb.nlb-mask-picked { background: var(--nlb-checked, #808080) !important; color: #fff; }
 
+/* ---- Edit Mask session (OSS request_edit_mask, layer_panel.py:2565-2574): the
+ * edited mask button gets a 2px RED border + faint red wash; every OTHER layer
+ * button is dimmed (opacity 0.5) and made non-interactive (setEnabled(False)). */
+.nlb.nlb-mask-editing { border: 2px solid red !important; background-color: rgba(255, 0, 0, 0.1) !important; }
+.nlb.nlb-edit-locked { opacity: 0.5; pointer-events: none; }
+
 /* offscreen native color input (driven programmatically by the menu) */
 .nlb-color-input {
   position: absolute;

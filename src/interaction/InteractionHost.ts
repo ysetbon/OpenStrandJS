@@ -8,14 +8,23 @@ import { screenToWorld, worldToScreen } from './viewTransform';
 import { requestOverlay, requestRender } from '../renderer/renderScheduler';
 import { modes } from '../modes';
 import { SelectMode } from '../modes/SelectMode';
+import { addDeletionRect } from '../store/actions';
 import type { Mode, ModeContext, PointerInfo } from '../modes/Mode';
 import type { Point } from '../model/types';
+
+// Normalized world-space rectangle from two corners.
+function rectOf(a: Point, b: Point) {
+  return { minX: Math.min(a.x, b.x), minY: Math.min(a.y, b.y), maxX: Math.max(a.x, b.x), maxY: Math.max(a.y, b.y) };
+}
 
 export class InteractionHost {
   private panning = false;
   private panStart: Point = { x: 0, y: 0 };
   private panOrigin: Point = { x: 0, y: 0 };
   private spaceHeld = false;
+  // Active per-mask "Edit Mask" eraser drag (OSS mask_edit_mode erase_start_pos /
+  // current_erase_rect). Set on pointer-down while store.maskEditTarget is active.
+  private maskErase: { start: Point } | null = null;
 
   constructor(private el: HTMLCanvasElement) {
     el.addEventListener('pointerdown', this.onPointerDown);
@@ -42,6 +51,15 @@ export class InteractionHost {
 
   private mode(): Mode {
     return modes[useEditorStore.getState().mode] ?? SelectMode;
+  }
+
+  // The active Edit-Mask target, but ONLY if the mask still exists in the doc — a
+  // tab switch / file load / undo / delete that removed it ends the session, so we
+  // never erase against (or lock the UI to) a stale cross-document target.
+  private editTarget(): string | null {
+    const st = useEditorStore.getState();
+    const t = st.maskEditTarget;
+    return (t && st.doc.strands[t]?.type === 'MaskedStrand') ? t : null;
   }
 
   private ctx(): ModeContext {
@@ -79,6 +97,17 @@ export class InteractionHost {
       return;
     }
     if (e.button !== 0) return;
+    // Per-mask Edit Mask session intercepts the drag as a deletion-rectangle erase
+    // (OSS strand_drawing_canvas mousePressEvent checks mask_edit_mode first). Only
+    // when the target mask still exists (a doc change that removed it ends the session).
+    const target = this.editTarget();
+    if (target) {
+      const w = this.info(e).world;
+      this.maskErase = { start: w };
+      useEditorStore.getState().setEraser({ layerName: target, rect: rectOf(w, w) });
+      requestOverlay();
+      return;
+    }
     this.mode().onPointerDown(this.info(e), this.ctx());
   };
 
@@ -91,15 +120,39 @@ export class InteractionHost {
       });
       return;
     }
+    // Edit Mask eraser drag: grow the white preview rectangle (OSS current_erase_rect).
+    if (this.maskErase) {
+      const target = this.editTarget();
+      const world = screenToWorld(this.toScreen(e), useEditorStore.getState().view);
+      if (target) useEditorStore.getState().setEraser({ layerName: target, rect: rectOf(this.maskErase.start, world) });
+      requestOverlay();
+      return;
+    }
     this.mode().onPointerMove(this.info(e), this.ctx());
-    // Cursor feedback: show a grab cursor when a handle is under the pointer.
-    const hov = useEditorStore.getState().hover;
-    this.el.style.cursor = hov.handle ? 'grab' : this.mode().cursor;
+    // Cursor feedback: crosshair during an Edit Mask session, grab over a handle.
+    const st = useEditorStore.getState();
+    this.el.style.cursor = this.editTarget() ? 'crosshair' : (st.hover.handle ? 'grab' : this.mode().cursor);
   };
 
   private onPointerUp = (e: PointerEvent) => {
     try { this.el.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
     if (this.panning) { this.panning = false; return; }
+    // Finalize an Edit Mask erase: commit one deletion rectangle (one undo step),
+    // OSS mouseReleaseEvent appends to deletion_rectangles + subtracts the path.
+    if (this.maskErase) {
+      const st = useEditorStore.getState();
+      const target = this.editTarget();
+      const rect = rectOf(this.maskErase.start, screenToWorld(this.toScreen(e), st.view));
+      this.maskErase = null;
+      st.setEraser(null);
+      // Live mutation (no commit): the enclosing Edit-Mask gesture commits the whole
+      // session as ONE undo step on exit (OSS saves once, not per rectangle).
+      if (target && rect.maxX > rect.minX && rect.maxY > rect.minY) {
+        st.mutateDoc((d) => addDeletionRect(d, target, rect));
+      }
+      requestRender();
+      return;
+    }
     this.mode().onPointerUp(this.info(e), this.ctx());
   };
 
@@ -125,11 +178,19 @@ export class InteractionHost {
     const st = useEditorStore.getState();
     const ctrl = e.ctrlKey || e.metaKey;
     const k = e.key.toLowerCase();
+    const editing = this.editTarget();
     if (e.key === 'Escape') {
+      // In an Edit Mask session ESC exits it (OSS mask_edit_mode_message: "Press
+      // ESC to exit"); otherwise ESC clears the selection.
+      if (editing) { st.exitMaskEdit(); this.maskErase = null; requestRender(); return; }
       st.setSelection({ layerName: null, handle: null });
       requestOverlay();
       return;
     }
+    // OSS disables the main-window buttons + shortcuts during an Edit Mask session
+    // (request_edit_mask -> disable_all_mainwindow_buttons). Swallow undo/redo/New
+    // Strand so they can't mutate the doc mid-erase; exit with ESC.
+    if (editing) return;
     // Undo: Ctrl/Cmd+Z (no shift) or bare Z. Redo: Ctrl/Cmd+Shift+Z, Ctrl+Y, or bare X.
     if ((ctrl && k === 'z' && !e.shiftKey) || (!ctrl && k === 'z')) {
       e.preventDefault(); st.undo(); requestRender(); return;

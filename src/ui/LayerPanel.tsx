@@ -1,6 +1,6 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
-import { createGroup, reorderLayer, toggleLock } from '../store/actions';
+import { createGroup, createMask, reorderLayer, toggleLock } from '../store/actions';
 import { requestRender } from '../renderer/renderScheduler';
 import { ControlColumn } from './ControlColumn';
 import { NumberedLayerButton } from './NumberedLayerButton';
@@ -77,6 +77,26 @@ export function LayerPanel() {
   const setMode = useEditorStore((s) => s.setMode);
   const commitEdit = useEditorStore((s) => s.commitEdit);
   const setSelection = useEditorStore((s) => s.setSelection);
+  // Panel mask-create (Ctrl-hold) state.
+  const maskCreateMode = useEditorStore((s) => s.maskCreateMode);
+  const firstMaskedLayer = useEditorStore((s) => s.firstMaskedLayer);
+  const enterMaskCreate = useEditorStore((s) => s.enterMaskCreate);
+  const exitMaskCreate = useEditorStore((s) => s.exitMaskCreate);
+
+  // OSS layer_panel masked_mode: holding Ctrl WHILE THE PANEL IS HOVERED enters the
+  // transient mask-create mode (every button flat gray, two clicks make a mask);
+  // releasing Ctrl or leaving the panel exits. Scoped to panel-hover so Ctrl never
+  // hijacks global shortcuts (undo/redo/save) when the pointer is elsewhere.
+  const panelHovered = useRef(false);
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Control' && panelHovered.current) useEditorStore.getState().enterMaskCreate();
+    };
+    const onKeyUp = (e: KeyboardEvent) => { if (e.key === 'Control') useEditorStore.getState().exitMaskCreate(); };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); };
+  }, []);
 
   // Drag-reorder state: source order index + the resolved insertion boundary in
   // VISUAL space (0 = above the topmost row, visual.length = below the bottom-
@@ -103,7 +123,28 @@ export function LayerPanel() {
   // the locked-layer no-op early return. Covers regular Strand, AttachedStrand AND
   // MaskedStrand (the highlight depends only on is_selected, set for all types).
   function select(name: string) {
+    // OSS checks multi-select BEFORE masked_mode, so multi-select wins when both are
+    // somehow active; otherwise a Ctrl-hold mask-create pick takes the click.
+    if (!multiSelectMode && maskCreateMode) { pickMaskLayer(name); return; }
     selectLayer(name);
+    requestRender();
+  }
+
+  // Two-click panel mask create (OSS handle_masked_layer_selection): the first
+  // click picks (darkens) a regular layer; a second distinct regular layer creates
+  // the over/under mask at their crossing and selects it; re-clicking the first
+  // clears. Stays armed for the next pair while Ctrl is held.
+  function pickMaskLayer(name: string) {
+    const st = useEditorStore.getState();
+    const t = st.doc.strands[name];
+    if (!t || t.type === 'MaskedStrand') return;     // can't mask a MaskedStrand
+    const first = st.firstMaskedLayer;
+    if (!first) { st.setFirstMaskedLayer(name); requestRender(); return; }
+    if (first === name) { st.setFirstMaskedLayer(null); requestRender(); return; }
+    let newName: string | null = null;
+    commitEdit((d) => { newName = createMask(d, first, name, st.settings.curve_params); });
+    st.setFirstMaskedLayer(null);
+    if (newName) setSelection({ layerName: newName, handle: null });
     requestRender();
   }
 
@@ -209,7 +250,11 @@ export function LayerPanel() {
   const showLine = dragIdx.current != null && dropBoundary != null;
 
   return (
-    <div className="layer-panel">
+    <div
+      className="layer-panel"
+      onMouseEnter={() => { panelHovered.current = true; }}
+      onMouseLeave={() => { panelHovered.current = false; exitMaskCreate(); }}
+    >
       {/* Left sub-column: control column, layer list, 6-button stack (OSS left_panel). */}
       <div className="lp-left">
         {/* 10px transparent splitter strip (OSS SplitterHandle, fixed 10px). */}
@@ -232,6 +277,8 @@ export function LayerPanel() {
                   attachable={attachable}
                   selectable={selectable}
                   multiSelected={multiSelectMode && multiSelectedLayers.includes(name)}
+                  maskedMode={maskCreateMode}
+                  pickedForMask={firstMaskedLayer === name}
                   draggable
                   onDragStart={(idx) => onDragStart(idx)}
                   onDragOver={(idx, e) => onDragOver(idx, e)}

@@ -531,7 +531,17 @@ function castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i) 
   let clip = null;              // PASS B clip = ⋃ receiver rendered geometry
   for (let j = 0; j < i; j++) {
     const o = strands[j];
-    if (o.type === 'MaskedStrand') continue;     // mask receivers handled by drawMasked
+    // A mask CAN receive a shadow from a higher strand (Qt draw_strand_shadow uses
+    // other_stroke_path = get_proper_masked_strand_path when the receiver has
+    // get_mask_path, shader_utils.py:718-722). A hidden mask draws nothing so it
+    // receives nothing; and a mask never receives a shadow from one of its own
+    // components (it owns that crossing region).
+    if (o.type === 'MaskedStrand') {
+      if (o.is_hidden === true) continue;
+      const comp = (o.layer_name || '').split('_');
+      if (comp.length >= 4 &&
+          (s.layer_name === comp[0] + '_' + comp[1] || s.layer_name === comp[2] + '_' + comp[3])) continue;
+    }
     if (maskPairs.has(s.layer_name + '|' + o.layer_name)) continue; // same-mask component pair
 
     // Per-pair shadow override (keyed [caster][receiver]). allow_full_shadow gates
@@ -547,7 +557,11 @@ function castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i) 
     }
     const allowFull = !!(ov && ov.allow_full_shadow);
 
-    const recv = buildShadowReceiverGeom(o, strands, P, enableThird, S);
+    // A mask receiver uses its crossing FILL region (get_proper_masked_strand_path
+    // = get_mask_path); a regular/attached receiver uses its rendered body+circles.
+    const recv = o.type === 'MaskedStrand'
+      ? buildMaskPath(o, byLayer, P, enableThird, S)
+      : buildShadowReceiverGeom(o, strands, P, enableThird, S);
     if (!recv) continue;
     if (!rejectBounds.intersects(recv.bounds)) { recv.remove(); continue; }
     let region = casterFootprint.intersect(recv);
@@ -1030,7 +1044,7 @@ function drawMaskShadow(ms, first, second, fw, fsw, sw, ssw, P, enableThird, S) 
 //   stroke-color layer = stroked(first, w+2sw) ∩ stroked(second, w+2sw)
 //   fill-color  layer  = stroked(first, w)     ∩ stroked(second, w+2sw+4)
 // each unioned with the components' visible start circles, minus deletions.
-function drawMasked(ms, byLayer, P, enableThird, S) {
+function drawMasked(ms, byLayer, P, enableThird, S, shadowOnly) {
   // A hidden mask draws nothing (Qt MaskedStrand.draw early-returns on is_hidden,
   // masked_strand.py:465 — only a dashed edit-mode outline, absent in the offscreen
   // reference). So neither its masked body nor its own crossing shadow is painted.
@@ -1056,6 +1070,11 @@ function drawMasked(ms, byLayer, P, enableThird, S) {
   if (SHADOW_ENABLED) {
     drawMaskShadow(ms, first, second, fw, fsw, sw, ssw, P, enableThird, S);
   }
+
+  // shadow_only mask: it has cast its shadows (regular cast in the main loop +
+  // the crossing shadow above) but paints no visible body (OSS masked_strand.py
+  // skips all body rendering and returns early when self.shadow_only).
+  if (shadowOnly) return;
 
   // stroke-color region: first@(w+2sw) ∩ second@(w+2sw)
   const fStroke = maskComponentPath(first, P, enableThird, S, fw + 2 * fsw);
@@ -1201,7 +1220,9 @@ window.renderFixture = function (strands, meta) {
       // receiver loop skips MaskedStrand receivers and the mask's own components),
       // THEN draws its body (which owns its own-component crossing shadow).
       if (casts) castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i);
-      drawMasked(s, byLayer, P, enableThird, S);
+      // shadow_only mask (OSS masked_strand.py:561-568): still owns its crossing
+      // shadow (drawn inside drawMasked) but paints NO body fill/stroke.
+      drawMasked(s, byLayer, P, enableThird, S, s.shadow_only === true);
       continue;
     }
 

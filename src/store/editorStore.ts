@@ -99,6 +99,17 @@ export interface EditorState {
   pending: PendingStrand | null;     // new-strand / attach rubber-band preview
   maskPending: string[];             // 0..2 strands picked for an over/under mask
   eraser: { layerName: string; rect: { minX: number; minY: number; maxX: number; maxY: number } } | null;
+  // Per-mask "Edit Mask" session (OSS canvas.mask_edit_mode + editing_masked_strand).
+  // When set, the InteractionHost intercepts canvas drags as deletion-rectangle
+  // erases on this mask (independent of the toolbar mode), the layer panel shows
+  // the edit banner + disables every other layer button, and the edited button
+  // gets the red border. null == not editing a mask.
+  maskEditTarget: string | null;
+  // Transient panel mask-CREATE mode (OSS layer_panel Ctrl-hold masked_mode):
+  // every layer button goes flat gray, the first clicked layer darkens, the second
+  // click creates the over/under mask. firstMaskedLayer is the first pick (or null).
+  maskCreateMode: boolean;
+  firstMaskedLayer: string | null;
   // bumped whenever the document changes so subscribers can re-render the canvas
   docRevision: number;
 
@@ -147,6 +158,14 @@ export interface EditorState {
   setPending: (pending: PendingStrand | null) => void;
   setMaskPending: (maskPending: string[]) => void;
   setEraser: (eraser: EditorState['eraser']) => void;
+  // Enter/exit the per-mask edit session. enterMaskEdit selects the mask and arms
+  // erase interception; exitMaskEdit clears the target + any in-progress eraser.
+  enterMaskEdit: (name: string) => void;
+  exitMaskEdit: () => void;
+  // Panel mask-create mode (Ctrl-hold over the layer panel).
+  enterMaskCreate: () => void;
+  exitMaskCreate: () => void;
+  setFirstMaskedLayer: (name: string | null) => void;
 
   // chrome UI flags (OSS main window). Not part of the document / undo history.
   panMode: boolean;            // hand tool: left-drag pans the canvas
@@ -203,6 +222,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   pending: null,
   maskPending: [],
   eraser: null,
+  maskEditTarget: null,
+  maskCreateMode: false,
+  firstMaskedLayer: null,
   docRevision: 0,
   past: [],
   future: [],
@@ -307,6 +329,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     selection: { layerName: doc.selected_strand_name, handle: null },
     docRevision: s.docRevision + 1,
     past: [], future: [], gestureBase: null,    // a fresh load starts new history
+    // Any in-flight mask edit/create session belongs to the old document — drop it.
+    maskEditTarget: null, maskCreateMode: false, firstMaskedLayer: null, eraser: null,
   })),
 
   setDoc: (doc) => set((s) => ({ doc, docRevision: s.docRevision + 1 })),
@@ -405,6 +429,35 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setPending: (pending) => set({ pending }),
   setMaskPending: (maskPending) => set({ maskPending }),
   setEraser: (eraser) => set({ eraser }),
+
+  // OSS request_edit_mask -> enter_mask_edit_mode: only masked layers are editable.
+  // Selects the mask (so its red outline shows), clears any pending pick, and opens
+  // ONE undo gesture for the whole session — every erased rectangle accumulates live
+  // and the session commits as a single undo step on exit (OSS saves once on exit,
+  // not per rectangle).
+  enterMaskEdit: (name) => {
+    const t = get().doc.strands[name];
+    if (!t || t.type !== 'MaskedStrand') return;
+    set((s) => ({
+      maskEditTarget: name, maskPending: [], eraser: null,
+      selection: { layerName: name, handle: null },
+      doc: s.doc.selected_strand_name === name ? s.doc : { ...s.doc, selected_strand_name: name },
+      docRevision: s.docRevision + 1,
+    }));
+    get().beginGesture();   // baseline = doc with the mask selected; erases commit on exit
+  },
+  // OSS exit_mask_edit_mode: commit the session as one undo step (no-op if nothing
+  // was erased — areVisuallyEqual discards it), then drop the target + eraser preview.
+  exitMaskEdit: () => {
+    if (get().maskEditTarget == null) return;
+    get().commit();
+    set((s) => ({ maskEditTarget: null, eraser: null, docRevision: s.docRevision + 1 }));
+  },
+
+  // OSS enter_masked_mode/exit_masked_mode (Ctrl over the layer panel).
+  enterMaskCreate: () => set((s) => (s.maskCreateMode ? {} : { maskCreateMode: true, firstMaskedLayer: null })),
+  exitMaskCreate: () => set((s) => (!s.maskCreateMode ? {} : { maskCreateMode: false, firstMaskedLayer: null })),
+  setFirstMaskedLayer: (firstMaskedLayer) => set({ firstMaskedLayer }),
 
   panMode: false,
   newStrandArmed: false,

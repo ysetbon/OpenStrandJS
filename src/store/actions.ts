@@ -8,7 +8,7 @@ import { gestureConnTable, connectedMovers } from '../interaction/connections';
 import { makeAttachedStrand, makeStrand } from '../model/factory';
 import { formatLayerName, maskComponents, nextFreeSet, nextIndexInSet, parseLayerName } from '../model/layerName';
 import { resolveGroupMembers } from '../model/group';
-import { strandsCross } from '../interaction/hitGeometry';
+import { strandsCross, strandBodiesOverlap } from '../interaction/hitGeometry';
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 
@@ -907,16 +907,31 @@ export function renameLayer(draft: EditorDocument, oldName: string, newName: str
 // `second` is UNDER. layer_name concatenates the components ("a_b_c_d"). The
 // renderer resolves components by name, so the mask inherits the first strand's
 // paint for serialization only. Returns the new layer_name, or null if invalid.
-export function createMask(draft: EditorDocument, first: string, second: string): string | null {
+export function createMask(
+  draft: EditorDocument,
+  first: string,
+  second: string,
+  curve?: Parameters<typeof strandsCross>[2],
+): string | null {
   if (first === second) return null;
   const a = draft.strands[first], b = draft.strands[second];
   if (!a || !b || a.type === 'MaskedStrand' || b.type === 'MaskedStrand') return null;
   const layer_name = `${first}_${second}`;
   if (draft.strands[layer_name]) return null; // duplicate mask
+  // OSS create_masked_layer refuses a mask only when the two STROKED BODIES don't
+  // overlap (intersection_path.isEmpty() -> return). strandBodiesOverlap is the
+  // faithful proxy: it allows endpoint-sharing/attached pairs and thick overlaps
+  // OSS would mask (strandsCross — used by the group grid — wrongly excludes those).
+  // Gated only when a curve is supplied (the two-click + grid create paths pass it).
+  if (curve && !strandBodiesOverlap(a, b, curve)) return null;
+  // set_number = the two components' set numbers concatenated as digits
+  // (OSS masked_strand.py:42 int(f'{first.set_number}{second.set_number}')).
+  const concat = Number(`${a.set_number}${b.set_number}`);
+  const set_number = Number.isFinite(concat) ? concat : a.set_number;
   const mask: StrandRecord = {
     type: 'MaskedStrand',
     layer_name,
-    set_number: a.set_number,
+    set_number,
     start: clone(a.start),
     end: clone(a.end),
     control_points: [clone(a.start), clone(a.end)],

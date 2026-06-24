@@ -37,6 +37,27 @@ body {
 #c { background: var(--canvas-bg); touch-action: none; }
 #overlay { pointer-events: none; }
 
+/* OSS mask_edit_label banner (shown during an Edit Mask session): two centered
+ * lines over the top of the canvas, non-interactive so it never blocks erasing. */
+.mask-edit-banner {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  padding: 6px 16px;
+  border-radius: 6px;
+  background: rgba(220, 0, 0, 0.85);
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1.25;
+  text-align: center;
+  letter-spacing: 0.5px;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
 /* ---- layer panel (OSS QHBoxLayout: left_panel | 270px right group_panel) ---- */
 .layer-panel {
   width: var(--panel-w, 490px); flex: 0 0 var(--panel-w, 490px);

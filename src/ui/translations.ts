@@ -46,6 +46,10 @@ export const STRINGS: Record<string, Entry> = {
   shadow_only: { en: 'Shadow Only', fr: 'Ombre Seulement', de: 'Nur Schatten', it: 'Solo Ombra', es: 'Solo Sombra', pt: 'Apenas Sombra', he: 'צל בלבד' },
   edit_mask: { en: 'Edit Mask', fr: 'Éditer Masque', de: 'Maske bearbeiten', it: 'Modifica Maschera', es: 'Editar Máscara', pt: 'Editar Máscara', he: 'ערוך מסכה' },
   reset_mask: { en: 'Reset Mask', fr: 'Réinit Masque', de: 'Maske zurücksetzen', it: 'Reimposta Maschera', es: 'Restablecer Máscara', pt: 'Redefinir Máscara', he: 'אפס מסכה' },
+  // Per-mask "Edit Mask" interaction banner (strand_drawing_canvas mask_edit_mode).
+  // The \n is rendered as two centered lines, matching the Qt mask_edit_label.
+  mask_edit_mode_message: { en: 'MASK EDIT MODE\nPress ESC to exit', fr: 'MODE ÉDITION\nÉCHAP pour quitter', de: 'MASKENMODUS\nESC zum Beenden', it: 'MODALITÀ MASK\nPremi ESC', es: 'MODO MÁSCARA\nPresiona ESC', pt: 'MODO MÁSCARA\nPressione ESC', he: 'מצב עריכת מסכה\nלחץ ESC ליציאה' },
+  mask_edit_mode_exited: { en: 'Mask Edit Mode\nExited', fr: 'Mode Édition\nMasque Terminé', de: 'Maskenmodus\nBeendet', it: 'Modalità Mask\nTerminata', es: 'Modo Máscara\nFinalizado', pt: 'Modo Máscara\nEncerrado', he: 'מצב מסכה\nהסתיים' },
   edit_shadows: { en: 'Edit Shadows', fr: 'Modifier Ombres', de: 'Schatten Bearbeiten', it: 'Modifica Ombre', es: 'Editar Sombras', pt: 'Editar Sombras', he: 'ערוך צללים' },
   group_shadow_editor_title: { en: 'Group Shadow Editor', fr: 'Éditeur d\'Ombres de Groupe', de: 'Gruppen-Schatteneditor', it: 'Editor Ombre Gruppo', es: 'Editor de Sombras de Grupo', pt: 'Editor de Sombras de Grupo', he: 'עורך צללי קבוצה' },
   shadow_visible: { en: 'Visible', fr: 'Visible', de: 'Sichtbar', it: 'Visibile', es: 'Visible', pt: 'Visível', he: 'גלוי' },

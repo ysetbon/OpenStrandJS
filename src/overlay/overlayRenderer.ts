@@ -60,9 +60,6 @@ const FILL_ATTACH_START = 'rgba(255,0,0,0.235)';    // red alpha 60
 const FILL_ATTACH_END = 'rgba(0,0,255,0.235)';      // blue alpha 60
 const FILL_ATTACH_HOT = 'rgba(255,230,160,0.549)';  // pale yellow alpha 140
 
-const MASK_COLOR = '#d61f9c';
-const HOT_COLOR = '#e8651a';
-
 const css = (c: RGBA): string => `rgba(${c.r},${c.g},${c.b},${(c.a ?? 255) / 255})`;
 const CP_SEP = 6;                              // matches hitTest.sep threshold
 const sepFromEnds = (cp: Point, a: Point, b: Point): boolean =>
@@ -329,41 +326,88 @@ function drawGrid(ctx: CanvasRenderingContext2D, st: OverlayState): void {
   ctx.restore();
 }
 
-function highlightCenterline(ctx: CanvasRenderingContext2D, st: OverlayState, layer: string, color: string): void {
+// Mask-mode body highlight (OSS MaskMode.draw, mask_mode.py:237-312): OSS strokes
+// get_path() into a body-band polygon (width + 2*stroke_width, FLAT caps + MITER
+// joins) and draws it ONCE with brush=`fill` + pen=`outline` — i.e. the band is
+// FILLED with the (semi-transparent) colour and its PERIMETER is stroked with a 2px
+// border. We must do the same: fill an offset-outline polygon (so the translucent
+// yellow/red composites over the STRAND showing through #c, NOT over an opaque
+// band) and stroke only its edge. Drawing a solid band under the fill would make
+// the translucent colour composite over black and come out far too dark.
+// Used for the HOVER hint (yellow@170 fill + solid black 2px border) and the
+// PICKED/selection highlight (red@128 fill + black@128 border).
+const MASK_HL_BORDER = 2;                            // OSS pen width 2 (world px ×zoom)
+function maskBodyHighlight(
+  ctx: CanvasRenderingContext2D, st: OverlayState, layer: string,
+  fill: string, outline: string,
+): void {
   const s = st.doc.strands[layer];
   if (!s || s.type === 'MaskedStrand') return;
-  const poly = sampleCenterline(s, st.settings.curve_params);
+  const world = sampleCenterline(s, st.settings.curve_params);
+  if (world.length < 2) return;
+  const pts = world.map((wp) => worldToScreen(wp, st.view));
+  const half = (s.width + s.stroke_width * 2) * st.view.zoom / 2;   // body half-width
+  // Offset the centerline by ±half along the local normal to get the two long
+  // edges; closing left-forward + right-back yields the band polygon with FLAT
+  // (squared) caps at both ends (matching Qt FlatCap).
+  const left: Point[] = [], right: Point[] = [];
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
+    let dx = b.x - a.x, dy = b.y - a.y;
+    const L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L;
+    const nx = -dy, ny = dx;                                  // unit normal
+    left.push({ x: pts[i].x + nx * half, y: pts[i].y + ny * half });
+    right.push({ x: pts[i].x - nx * half, y: pts[i].y - ny * half });
+  }
+  ctx.save();
   ctx.beginPath();
-  poly.forEach((wp, i) => {
-    const p = worldToScreen(wp, st.view);
-    if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
-  });
-  ctx.lineWidth = (s.width + s.stroke_width * 2) * st.view.zoom;
-  ctx.strokeStyle = color;
-  ctx.globalAlpha = 0.35;
-  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-  ctx.stroke();
-  ctx.globalAlpha = 1;
+  left.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+  for (let i = right.length - 1; i >= 0; i--) ctx.lineTo(right[i].x, right[i].y);
+  ctx.closePath();
+  ctx.fillStyle = fill; ctx.fill();
+  ctx.lineJoin = 'miter';
+  ctx.lineWidth = MASK_HL_BORDER * st.view.zoom; ctx.strokeStyle = outline; ctx.stroke();
+  ctx.restore();
 }
+
+// OSS highlight colors (mask_mode.py): hover = yellow QColor(255,230,160,170) fill
+// + solid black border; picked = highlight_color (red) @128 fill + black @128 border.
+const MASK_HOVER_FILL = 'rgba(255,230,160,0.667)';
+const MASK_HOVER_OUTLINE = 'rgba(0,0,0,1)';
+const MASK_PICK_FILL = 'rgba(255,0,0,0.5)';
+const MASK_PICK_OUTLINE = 'rgba(0,0,0,0.5)';
 
 export function drawOverlay(ctx: CanvasRenderingContext2D, st: OverlayState): void {
   const { doc, selection, mode } = st;
 
   drawGrid(ctx, st);
 
-  // Mask-pending: highlight already-picked strands.
-  for (const layer of st.maskPending) highlightCenterline(ctx, st, layer, MASK_COLOR);
+  // Yellow body HOVER highlight on the strand under the cursor. OSS draws this in
+  // BOTH select mode (select_mode.py:101-136) and mask mode (mask_mode.py:237-270)
+  // with the identical QColor(255,230,160,170) fill + black 2px border. In mask mode
+  // it is suppressed for an already-picked strand, and each picked strand instead
+  // gets the red@128 selection highlight (mask_mode.py:272-312).
+  if (mode === 'select' && st.hover.layerName) {
+    maskBodyHighlight(ctx, st, st.hover.layerName, MASK_HOVER_FILL, MASK_HOVER_OUTLINE);
+  } else if (mode === 'mask') {
+    const hov = st.hover.layerName;
+    if (hov && !st.maskPending.includes(hov)) {
+      maskBodyHighlight(ctx, st, hov, MASK_HOVER_FILL, MASK_HOVER_OUTLINE);
+    }
+    for (const layer of st.maskPending) maskBodyHighlight(ctx, st, layer, MASK_PICK_FILL, MASK_PICK_OUTLINE);
+  }
 
-  // Mask-edit eraser rectangle.
+  // Mask-EDIT eraser rectangle (OSS mask_edit_mode paint, strand_drawing_canvas.py
+  // 2769-2772): semi-transparent WHITE fill + a white 1px DASHED outline.
   if (st.eraser) {
     const r = st.eraser.rect;
     const a = worldToScreen({ x: r.minX, y: r.minY }, st.view);
     const b = worldToScreen({ x: r.maxX, y: r.maxY }, st.view);
     ctx.save();
-    ctx.fillStyle = 'rgba(232,101,26,0.18)';
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
     ctx.fillRect(a.x, a.y, b.x - a.x, b.y - a.y);
     ctx.setLineDash([6, 4]);
-    ctx.lineWidth = 2; ctx.strokeStyle = HOT_COLOR;
+    ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(255,255,255,1)';
     ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
     ctx.restore();
   }

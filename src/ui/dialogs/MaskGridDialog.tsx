@@ -16,6 +16,7 @@ export function MaskGridDialog(props: { groupName: string; onClose: () => void }
   const { groupName, onClose } = props;
   const lang = useEditorStore((s) => s.settings.language);
   const doc = useEditorStore((s) => s.doc);
+  const curve = useEditorStore((s) => s.settings.curve_params);
   const commitEdit = useEditorStore((s) => s.commitEdit);
 
   // Group's regular (non-masked) members in z-order — these index the matrix.
@@ -71,7 +72,9 @@ export function MaskGridDialog(props: { groupName: string; onClose: () => void }
       }),
     );
     if (!pairs.length) return;
-    commitEdit((d) => { for (const [over, under] of pairs) createMask(d, over, under); });
+    // Pass the curve so createMask runs its crossing gate, mirroring OSS
+    // create_masked_layer which refuses a mask whose two bodies don't overlap.
+    commitEdit((d) => { for (const [over, under] of pairs) createMask(d, over, under, curve); });
     setChecked({}); // applied masks now render as checked + disabled
   };
 
