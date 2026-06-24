@@ -9,12 +9,13 @@
 @import './ui/tabEdge.css';
 
 * { box-sizing: border-box; }
-/* Default the whole app to 64% — equivalent to pressing Ctrl+- to ~64% in the
- * browser. The 80% bake-in still looked best with an extra 80% browser zoom on
- * top (0.8 × 0.8 = 0.64), so fold that in: the new 100% renders exactly like
- * the old 80% baseline viewed at 80% browser zoom. zoom (not transform) is used
- * so the layout reflows to fill the viewport like real browser zoom does. */
-html { zoom: 0.64; }
+/* NO `html { zoom }`. CSS zoom scales the whole DOM including the self-measuring
+ * <canvas>: CanvasStage measures wrap.getBoundingClientRect() (which a page zoom
+ * scales) into view.width, but strand-renderer.js sets vis.style.width in
+ * unscaled layout px — so the canvas rendered at zoom× the stage size, shrinking
+ * the grid and leaving a dead gap (drawable bounds wrong). OSS keeps the canvas
+ * at 1:1 and applies zoom as a real painter transform (zoom_factor, default 1.0);
+ * we match that — the in-app zoom buttons / wheel drive view.zoom instead. */
 html, body, #root { height: 100%; margin: 0; }
 body {
   font: 14px/1.4 system-ui, -apple-system, sans-serif;
