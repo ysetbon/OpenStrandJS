@@ -123,8 +123,19 @@ function saveTabEdgePosition(p: { anchor: string; dx: number; dy: number }): voi
   try { localStorage.setItem(TAB_EDGE_KEY, JSON.stringify(p)); } catch { /* ignore */ }
 }
 
+// The app opens zoomed out to 65%. This is a REAL view transform (threaded
+// through the renderer's meta.zoom, the overlay grid, and screenToWorld) — NOT a
+// CSS `html{zoom}` page scale, which scaled the self-measuring canvas and broke
+// the grid/bounds (see canvas-css-zoom-gotcha). The canvas backing store still
+// fills the stage 1:1, so bounds stay correct; only the drawn content + grid
+// scale by DEFAULT_ZOOM. OSS does the same via zoom_factor (its default is 1.0;
+// we deliberately ship a zoomed-out 0.65 default for a roomier initial view).
+// Note: move-mode endpoint snapping is gentle below zoom 0.8 (snapMove); zoom to
+// ≥80% (wheel) for full grid snap, exactly like OSS at the same zoom.
+export const DEFAULT_ZOOM = 0.65;
+
 const DEFAULT_VIEW: ViewState = {
-  zoom: 1, panX: 0, panY: 0, width: 1000, height: 700, supersample: 2,
+  zoom: DEFAULT_ZOOM, panX: 0, panY: 0, width: 1000, height: 700, supersample: 2,
 };
 
 export interface EditorState {

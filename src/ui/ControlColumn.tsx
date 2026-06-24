@@ -1,4 +1,4 @@
-import { useEditorStore } from '../store/editorStore';
+import { useEditorStore, DEFAULT_ZOOM } from '../store/editorStore';
 import { requestRender } from '../renderer/renderScheduler';
 import { fitPan } from '../interaction/viewTransform';
 import { STRINGS, t } from './i18n';
@@ -66,7 +66,9 @@ export function ControlColumn() {
   };
   const resetStates = () => {
     const st = useEditorStore.getState();
-    st.setView({ zoom: 1, ...fitPan(st.doc, { ...st.view, zoom: 1 }) });
+    // Reset/home restores the app's DEFAULT view zoom (65%), not 100%, so the
+    // "home" button returns to the same framing the app opens with.
+    st.setView({ zoom: DEFAULT_ZOOM, ...fitPan(st.doc, { ...st.view, zoom: DEFAULT_ZOOM }) });
     st.setSelection({ layerName: null, handle: null });
     requestRender();
   };
