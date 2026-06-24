@@ -40,6 +40,28 @@
   --tab-inactive-bg: rgba(45,45,45,0.667);
   --tab-active-text: #111111;
   --tab-inactive-text: #F0F0F0;
+  /* Settings dialog (settings_dialog.py apply_dialog_theme — default theme) */
+  --accent: #2d6cdf;
+  --danger: #c0392b;
+  --set-btn-bg: #E8E8E8;
+  --set-btn-border: #CCCCCC;
+  --set-btn-hover: #DADADA;
+  --set-btn-pressed: #C8C8C8;
+  --set-list-bg: #F5F5F5;
+  --set-list-border: #CCCCCC;
+  --set-list-sel: #D0D0D0;
+  --set-list-hover: #E0E0E0;
+  --set-combo-bg: #F5F5F5;
+  --set-combo-border: #CCCCCC;
+  --set-swatch-bg: #E8E8E8;
+  --set-swatch-border: #CCCCCC;
+  --set-swatch-hover-bg: #DADADA;
+  --set-swatch-hover-border: #A8A8A8;
+  --set-swatch-pressed: #C8C8C8;
+  --set-check-border: #cccccc;
+  --set-check-bg: #ffffff;
+  --set-check-on: #28a745;
+  --set-check-on-hover: #218838;
 }
 
 .theme-light {
@@ -74,6 +96,28 @@
   --tab-inactive-bg: rgba(225,225,225,0.706);
   --tab-active-text: #111111;
   --tab-inactive-text: #333333;
+  /* Settings dialog (settings_dialog.py apply_dialog_theme — light theme) */
+  --accent: #2d6cdf;
+  --danger: #c0392b;
+  --set-btn-bg: #F0F0F0;
+  --set-btn-border: #CCCCCC;
+  --set-btn-hover: #E0E0E0;
+  --set-btn-pressed: #D0D0D0;
+  --set-list-bg: #FFFFFF;
+  --set-list-border: #CCCCCC;
+  --set-list-sel: #E0E0E0;
+  --set-list-hover: #F0F0F0;
+  --set-combo-bg: #FFFFFF;
+  --set-combo-border: #CCCCCC;
+  --set-swatch-bg: #F0F0F0;
+  --set-swatch-border: #CCCCCC;
+  --set-swatch-hover-bg: #E0E0E0;
+  --set-swatch-hover-border: #AFAFAF;
+  --set-swatch-pressed: #D0D0D0;
+  --set-check-border: #cccccc;
+  --set-check-bg: #ffffff;
+  --set-check-on: #28a745;
+  --set-check-on-hover: #218838;
 }
 
 .theme-dark {
@@ -108,4 +152,26 @@
   --tab-inactive-bg: rgba(35,35,35,0.706);
   --tab-active-text: #FFFFFF;
   --tab-inactive-text: #DADADA;
+  /* Settings dialog (settings_dialog.py apply_dialog_theme — dark theme) */
+  --accent: #2d6cdf;
+  --danger: #e06c5e;
+  --set-btn-bg: #3D3D3D;
+  --set-btn-border: #505050;
+  --set-btn-hover: #4D4D4D;
+  --set-btn-pressed: #2D2D2D;
+  --set-list-bg: #3D3D3D;
+  --set-list-border: #505050;
+  --set-list-sel: #505050;
+  --set-list-hover: #4D4D4D;
+  --set-combo-bg: #3D3D3D;
+  --set-combo-border: #505050;
+  --set-swatch-bg: #3D3D3D;
+  --set-swatch-border: #505050;
+  --set-swatch-hover-bg: #4D4D4D;
+  --set-swatch-hover-border: #7A7A7A;
+  --set-swatch-pressed: #2D2D2D;
+  --set-check-border: #666666;
+  --set-check-bg: #2d2d2d;
+  --set-check-on: #28a745;
+  --set-check-on-hover: #218838;
 }

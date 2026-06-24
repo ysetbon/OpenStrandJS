@@ -17,6 +17,7 @@ interface MakeStrandOpts {
   start: Point;
   end: Point;
   color?: RGBA;
+  stroke_color?: RGBA;
   width?: number;
   stroke_width?: number;
   is_first_strand?: boolean;
@@ -26,6 +27,7 @@ interface MakeStrandOpts {
 // onto the endpoints so the renderer draws a line).
 export function makeStrand(o: MakeStrandOpts): StrandRecord {
   const color = o.color ?? DEFAULT_STRAND_COLOR;
+  const stroke_color = o.stroke_color ?? DEFAULT_STROKE_COLOR;
   return {
     type: 'Strand',
     layer_name: o.layer_name,
@@ -38,11 +40,11 @@ export function makeStrand(o: MakeStrandOpts): StrandRecord {
     width: o.width ?? DEFAULT_STRAND_WIDTH,
     stroke_width: o.stroke_width ?? DEFAULT_STROKE_WIDTH,
     color: clone(color),
-    stroke_color: clone(DEFAULT_STROKE_COLOR),
+    stroke_color: clone(stroke_color),
     has_circles: [false, false],
     is_hidden: false,
     shadow_only: false,
-    circle_stroke_color: clone(DEFAULT_STROKE_COLOR),
+    circle_stroke_color: clone(stroke_color),
     knot_connections: {},
     triangle_has_moved: false,
     control_point2_shown: false,

@@ -37,17 +37,60 @@ export function emptyDocument(): EditorDocument {
   };
 }
 
+// Defaults mirror OpenStrand Studio's user_settings.txt (settings_dialog.py
+// __init__). loadSettings spreads stored values over these, so new keys backfill.
 const DEFAULT_SETTINGS: Settings = {
   curve_params: { base_fraction: 1.0, dist_multiplier: 2.0, exponent: 2.0 },
   grid_size: 28,
   show_grid: false,
-  snap_to_grid_enabled: true,   // OSS default (snap_to_grid_attach_enabled = True); new strands draw free-angle, endpoints quantized to grid_size
-  default_strand_color: DEFAULT_STRAND_COLOR,
-  default_stroke_color: DEFAULT_STROKE_COLOR,
-  default_strand_width: DEFAULT_STRAND_WIDTH,
-  default_stroke_width: DEFAULT_STROKE_WIDTH,
+  snap_to_grid_enabled: true,   // OSS default; new strands draw free-angle, endpoints quantized to grid_size
+  default_strand_color: DEFAULT_STRAND_COLOR,   // 200,170,230,255
+  default_stroke_color: DEFAULT_STROKE_COLOR,   // 0,0,0,255
+  default_strand_width: DEFAULT_STRAND_WIDTH,   // 46
+  default_stroke_width: DEFAULT_STROKE_WIDTH,   // 4
   theme: 'default',
   language: 'en',
+
+  // General
+  shadow_color: { r: 0, g: 0, b: 0, a: 150 },
+  draw_only_affected_strand: false,
+  enable_third_control_point: false,
+  enable_curvature_bias_control: false,
+  snap_to_grid_attach_enabled: true,
+  show_move_highlights: true,
+  show_hover_highlights: true,
+  skip_close_tab_warning: false,
+  skip_quit_warning: false,
+  num_steps: 2,
+  max_blur_radius: 29.99,
+
+  // Selected Strand
+  move_selected_only: false,
+  show_cp_selected_only: false,
+  shadow_selected_only: false,
+  view_hide_highlight: false,
+  highlight_color: { r: 255, g: 0, b: 0, a: 255 },
+
+  // Layer Panel — extension
+  extension_length: 100,
+  extension_dash_count: 10,
+  extension_dash_width: 2,
+  extension_dash_gap_length: 5.0,
+
+  // Layer Panel — arrow
+  arrow_head_length: 20,
+  arrow_head_width: 10,
+  arrow_head_stroke_width: 4,
+  arrow_gap_length: 10,
+  arrow_line_length: 20,
+  arrow_line_width: 10,
+  use_default_arrow_color: false,
+  default_arrow_fill_color: { r: 0, g: 0, b: 0, a: 255 },
+
+  // Layer Panel — width units + view toggles
+  default_width_grid_units: 2,
+  view_hide_control_points: false,
+  default_transparent_start_circle: false,
 };
 
 const SETTINGS_KEY = 'openstrandjs.settings';
@@ -145,6 +188,7 @@ export interface EditorState {
   mutateDoc: (fn: (draft: EditorDocument) => void) => void;
   beginGesture: () => void;
   commit: () => void;
+  cancelGesture: () => void;
   commitEdit: (fn: (draft: EditorDocument) => void) => void;
   undo: () => void;
   redo: () => void;
@@ -354,6 +398,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (past.length > HISTORY_CAP) past.shift();
     const tabs = s.tabs.map((t) => (t.id === s.activeTabId && !t.dirty ? { ...t, dirty: true } : t));
     return { past, future: [], gestureBase: null, tabs };
+  }),
+
+  // Abort a gesture: revert the live doc to the baseline and drop it WITHOUT pushing
+  // history (OSS cancel_movement makes no undo entry). Restores selection to the
+  // reverted doc. No-op when no gesture is in flight.
+  cancelGesture: () => set((s) => {
+    if (!s.gestureBase) return {};
+    const doc = s.gestureBase;
+    return {
+      doc,
+      docRevision: s.docRevision + 1,
+      gestureBase: null,
+      selection: { layerName: doc.selected_strand_name ?? null, handle: null },
+    };
   }),
 
   // Discrete edit = one undo step (begin + mutate + commit).

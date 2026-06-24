@@ -27,4 +27,7 @@ export interface Mode {
   onPointerDown(p: PointerInfo, ctx: ModeContext): void;
   onPointerMove(p: PointerInfo, ctx: ModeContext): void;
   onPointerUp(p: PointerInfo, ctx: ModeContext): void;
+  // Abort an in-progress gesture WITHOUT committing (pointercancel / ESC mid-drag).
+  // Optional: modes with no abortable gesture omit it.
+  onCancel?(ctx: ModeContext): void;
 }

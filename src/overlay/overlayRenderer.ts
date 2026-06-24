@@ -125,7 +125,9 @@ function drawConnectors(ctx: CanvasRenderingContext2D, st: OverlayState, s: Stra
   const z = st.view.zoom;
   const [cp1, cp2] = s.control_points;
   const center = s.control_point_center;
-  const showCenter = !!center && s.control_point_center_locked;
+  // Center is shown on the OSS gate (enable_third_control_point && triangle_has_moved),
+  // matching the grab gate so visible == grabbable — not on control_point_center_locked.
+  const showCenter = !!center && st.settings.enable_third_control_point && !!s.triangle_has_moved;
   const cp2NearStart = Math.abs(cp2.x - s.start.x) < 0.1 && Math.abs(cp2.y - s.start.y) < 0.1;
   const seg = (a: Point, b: Point) => {
     const pa = worldToScreen(a, st.view); const pb = worldToScreen(b, st.view);
@@ -148,7 +150,7 @@ function drawGlyphs(ctx: CanvasRenderingContext2D, st: OverlayState, s: StrandRe
   // Triangle (cp1) is always shown when control points are enabled.
   drawTriangleGlyph(ctx, worldToScreen(cp1, st.view), z, coreCss);
   if (curveShaped(s)) drawCircleGlyph(ctx, worldToScreen(cp2, st.view), z, coreCss);
-  if (s.control_point_center && s.control_point_center_locked) {
+  if (s.control_point_center && st.settings.enable_third_control_point && s.triangle_has_moved) {
     drawSquareGlyph(ctx, worldToScreen(s.control_point_center, st.view), z, coreCss);
   }
 }
@@ -186,13 +188,13 @@ function drawMoveOverlays(ctx: CanvasRenderingContext2D, st: OverlayState): void
     const s = doc.strands[name];
     if (!interactable(s, doc)) continue;
     if (affected && name !== affected) continue;
-    for (const h of strandHandles(s)) if (isEndpoint(h.handle)) draw(name, h);
+    for (const h of strandHandles(s, st.settings.enable_third_control_point)) if (isEndpoint(h.handle)) draw(name, h);
   }
   for (const name of doc.order) {
     const s = doc.strands[name];
     if (!interactable(s, doc)) continue;
     if (affected && name !== affected) continue;
-    for (const h of strandHandles(s)) if (!isEndpoint(h.handle)) draw(name, h);
+    for (const h of strandHandles(s, st.settings.enable_third_control_point)) if (!isEndpoint(h.handle)) draw(name, h);
   }
 }
 

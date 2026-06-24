@@ -30,7 +30,7 @@ export class InteractionHost {
     el.addEventListener('pointerdown', this.onPointerDown);
     el.addEventListener('pointermove', this.onPointerMove);
     el.addEventListener('pointerup', this.onPointerUp);
-    el.addEventListener('pointercancel', this.onPointerUp);
+    el.addEventListener('pointercancel', this.onPointerCancel);
     el.addEventListener('wheel', this.onWheel, { passive: false });
     el.addEventListener('contextmenu', this.onContextMenu);
     window.addEventListener('keydown', this.onKeyDown);
@@ -42,7 +42,7 @@ export class InteractionHost {
     el.removeEventListener('pointerdown', this.onPointerDown);
     el.removeEventListener('pointermove', this.onPointerMove);
     el.removeEventListener('pointerup', this.onPointerUp);
-    el.removeEventListener('pointercancel', this.onPointerUp);
+    el.removeEventListener('pointercancel', this.onPointerCancel);
     el.removeEventListener('wheel', this.onWheel);
     el.removeEventListener('contextmenu', this.onContextMenu);
     window.removeEventListener('keydown', this.onKeyDown);
@@ -156,6 +156,16 @@ export class InteractionHost {
     this.mode().onPointerUp(this.info(e), this.ctx());
   };
 
+  // Pointer interrupted (OS gesture, focus loss, touch-cancel). Abort any in-progress
+  // mode gesture WITHOUT committing — mirrors OSS cancel_movement (no undo entry). An
+  // in-flight Edit-Mask erase is dropped without appending its rectangle.
+  private onPointerCancel = (e: PointerEvent) => {
+    try { this.el.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+    if (this.panning) { this.panning = false; return; }
+    if (this.maskErase) { this.maskErase = null; useEditorStore.getState().setEraser(null); requestOverlay(); return; }
+    this.mode().onCancel?.(this.ctx());
+  };
+
   private onWheel = (e: WheelEvent) => {
     // Wheel zooms about the cursor, clamped to [0.1, 5]. The world point under the
     // pointer stays fixed: screen = world*zoom + pan  =>  pan = screen - world*zoom.
@@ -181,8 +191,11 @@ export class InteractionHost {
     const editing = this.editTarget();
     if (e.key === 'Escape') {
       // In an Edit Mask session ESC exits it (OSS mask_edit_mode_message: "Press
-      // ESC to exit"); otherwise ESC clears the selection.
+      // ESC to exit").
       if (editing) { st.exitMaskEdit(); this.maskErase = null; requestRender(); return; }
+      // Mid-drag ESC ABORTS the move (revert, no undo entry) — OSS cancel_movement.
+      if (st.dragging) { this.mode().onCancel?.(this.ctx()); return; }
+      // Otherwise ESC clears the selection.
       st.setSelection({ layerName: null, handle: null });
       requestOverlay();
       return;

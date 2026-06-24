@@ -4,7 +4,7 @@
 // rendering still comes from the verified renderer — this is just geometry the
 // pointer code needs and the renderer doesn't expose.
 
-import type { Point, Settings, StrandRecord } from '../model/types';
+import type { DeletionRect, Point, Settings, StrandRecord } from '../model/types';
 
 const sub = (a: Point, b: Point): Point => ({ x: a.x - b.x, y: a.y - b.y });
 const add = (a: Point, b: Point): Point => ({ x: a.x + b.x, y: a.y + b.y });
@@ -153,6 +153,68 @@ export function strandBodiesOverlap(a: StrandRecord, b: StrandRecord, curve: Cur
   for (const p of pa) if (distToPolyline(p, pb) <= reach) return true;
   for (const p of pb) if (distToPolyline(p, pa) <= reach) return true;
   return false;
+}
+
+// Axis-aligned bbox of a deletion rect (corner-array OR {x,y,width,height} form).
+function rectBounds(r: DeletionRect): { minX: number; minY: number; maxX: number; maxY: number } | null {
+  if (r.top_left && r.bottom_right) {
+    const xs = [r.top_left[0], r.top_right?.[0] ?? r.bottom_right[0], r.bottom_left?.[0] ?? r.top_left[0], r.bottom_right[0]];
+    const ys = [r.top_left[1], r.top_right?.[1] ?? r.top_left[1], r.bottom_left?.[1] ?? r.bottom_right[1], r.bottom_right[1]];
+    return { minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) };
+  }
+  if (r.x != null && r.y != null && r.width != null && r.height != null) {
+    return { minX: r.x, minY: r.y, maxX: r.x + r.width, maxY: r.y + r.height };
+  }
+  return null;
+}
+
+// 50x50-grid centroid of a mask's intersection region, a faithful port of OSS
+// MaskedStrand._calculate_center_from_path (masked_strand.py:1143-1170). The region is
+// the FILL geometry used by the renderer/get_mask_path: first stroked at its full width
+// ∩ second stroked at (width + 2*stroke + 4), minus the deletion rectangles. We sample
+// 50x50 cell centers over the region's bounding box and average the points inside —
+// NOT a true area centroid, deliberately, so the resulting rectangle drift matches OSS.
+// Returns null when the region is empty (no overlap). `deletions` omitted/[] gives the
+// "base" centroid; passing the rects gives the "edited" centroid.
+export function maskCentroid(
+  first: StrandRecord,
+  second: StrandRecord,
+  curve: Curve,
+  deletions: DeletionRect[] = [],
+): Point | null {
+  const reachA = first.width / 2;
+  const reachB = second.width / 2 + second.stroke_width + 2;   // (sw + 2*ssw + 4) / 2
+  const a = sampleCenterline(first, curve);
+  const b = sampleCenterline(second, curve);
+
+  // Bounding box of the region ⊆ (bbox(A)+reachA) ∩ (bbox(B)+reachB).
+  const bbox = (poly: Point[], pad: number) => {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const p of poly) { if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y; if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y; }
+    return { minX: minX - pad, minY: minY - pad, maxX: maxX + pad, maxY: maxY + pad };
+  };
+  const ba = bbox(a, reachA), bb = bbox(b, reachB);
+  const minX = Math.max(ba.minX, bb.minX), minY = Math.max(ba.minY, bb.minY);
+  const maxX = Math.min(ba.maxX, bb.maxX), maxY = Math.min(ba.maxY, bb.maxY);
+  const w = maxX - minX, h = maxY - minY;
+  if (w <= 0 || h <= 0) return null;
+
+  const rects = deletions.map(rectBounds).filter((r): r is NonNullable<typeof r> => r != null);
+  const inDeletion = (x: number, y: number) =>
+    rects.some((r) => x >= r.minX && x <= r.maxX && y >= r.minY && y <= r.maxY);
+
+  const N = 50;
+  let sumX = 0, sumY = 0, count = 0;
+  for (let i = 0; i < N; i++) {
+    const x = minX + (i + 0.5) * w / N;
+    for (let j = 0; j < N; j++) {
+      const y = minY + (j + 0.5) * h / N;
+      if (distToPolyline({ x, y }, a) <= reachA && distToPolyline({ x, y }, b) <= reachB && !inDeletion(x, y)) {
+        sumX += x; sumY += y; count++;
+      }
+    }
+  }
+  return count > 0 ? { x: sumX / count, y: sumY / count } : null;
 }
 
 // Minimum distance from p to the polyline (world space).

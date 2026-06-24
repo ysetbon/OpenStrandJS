@@ -90,7 +90,8 @@ export function GroupAngleEditorDialog(props: {
   // from the resulting doc (a welded sibling's angle can shift).
   const setAngle = (n: string, deg: number) => {
     const v = normalize180(deg);
-    useEditorStore.getState().mutateDoc((d) => setStrandAngle(d, n, v));
+    const curve = useEditorStore.getState().settings.curve_params;
+    useEditorStore.getState().mutateDoc((d) => setStrandAngle(d, n, v, curve));
     const doc = useEditorStore.getState().doc;
     const next: Record<string, number> = {};
     for (const r of rows) next[r.name] = r.name === n ? v : angleOf(doc, r.name);

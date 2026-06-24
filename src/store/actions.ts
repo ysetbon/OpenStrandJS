@@ -8,14 +8,41 @@ import { gestureConnTable, connectedMovers } from '../interaction/connections';
 import { makeAttachedStrand, makeStrand } from '../model/factory';
 import { formatLayerName, maskComponents, nextFreeSet, nextIndexInSet, parseLayerName } from '../model/layerName';
 import { resolveGroupMembers } from '../model/group';
-import { strandsCross, strandBodiesOverlap } from '../interaction/hitGeometry';
+import { strandsCross, strandBodiesOverlap, maskCentroid } from '../interaction/hitGeometry';
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 
+// Attach/create-mode grid snapping. Gated on snap_to_grid_attach_enabled (OSS
+// EnableSnapToGridAttach) — distinct from move-mode snap (snapMove, gated on
+// snap_to_grid_enabled). Both default true.
 export function snapPoint(p: Point, settings: Settings): Point {
-  if (!settings.snap_to_grid_enabled || settings.grid_size <= 0) return p;
+  if (!settings.snap_to_grid_attach_enabled || settings.grid_size <= 0) return p;
   const g = settings.grid_size;
   return { x: Math.round(p.x / g) * g, y: Math.round(p.y / g) * g };
+}
+
+// Move-mode grid snapping — a faithful port of OSS move_mode.mouseMoveEvent's
+// zoom/Ctrl-gated decision (move_mode.py:4036-4079). Four effective branches:
+//   * zoom < 0.35 and not Ctrl              -> no snap (too zoomed out)
+//   * (zoom >= 0.8 or Ctrl) and userSnap    -> full snap (round to grid)
+//   * 0.5 <= zoom < 0.8 and userSnap        -> gentle snap, only within (grid/8)*zoom
+//   * otherwise                              -> no snap
+// Ctrl forces full snap ONLY when snap is already enabled (it pushes the decision into
+// the full-snap branch at any zoom). When snap is DISABLED, Ctrl is a no-op: OSS's
+// `elif force_grid_snap` branch calls canvas.snap_to_grid, which early-returns the point
+// unchanged while snap_to_grid_enabled is False (strand_drawing_canvas.py:5177) — so
+// there is NO real "Ctrl override when off". `userSnap` excludes bias controls (none yet).
+export function snapMove(p: Point, settings: Settings, zoom: number, ctrl: boolean, isBias = false): Point {
+  const g = settings.grid_size;
+  const userSnap = settings.snap_to_grid_enabled && g > 0 && !isBias;
+  if (zoom < 0.35 && !ctrl) return p;
+  if ((zoom >= 0.8 || ctrl) && userSnap) return { x: Math.round(p.x / g) * g, y: Math.round(p.y / g) * g };
+  if (zoom >= 0.5 && userSnap) {
+    const gx = Math.round(p.x / g) * g, gy = Math.round(p.y / g) * g;
+    const thr = (g / 8) * zoom;
+    return Math.abs(p.x - gx) < thr && Math.abs(p.y - gy) < thr ? { x: gx, y: gy } : p;
+  }
+  return p;
 }
 
 // Move a handle to a new world position. Endpoints drag their welded peers (and
@@ -25,18 +52,24 @@ export function moveHandle(
   layerName: string,
   handle: HandleKind,
   pos: Point,
+  curve?: Settings['curve_params'],
 ): void {
   const s = draft.strands[layerName];
   if (!s) return;
 
-  // The center is the cp midpoint unless it has been pinned (locked).
+  // The center is the cp midpoint unless it has been pinned (locked). A LOCKED center
+  // that drifts back within 0.5px of the cp midpoint AUTO-UNLOCKS, exactly like OSS
+  // update_shape (strand.py:767-780) — then it resumes tracking the midpoint.
   const recenter = (t: StrandRecord) => {
-    if (!t.control_point_center_locked) {
-      t.control_point_center = {
-        x: (t.control_points[0].x + t.control_points[1].x) / 2,
-        y: (t.control_points[0].y + t.control_points[1].y) / 2,
-      };
+    const mid = {
+      x: (t.control_points[0].x + t.control_points[1].x) / 2,
+      y: (t.control_points[0].y + t.control_points[1].y) / 2,
+    };
+    if (t.control_point_center_locked && t.control_point_center
+        && Math.hypot(t.control_point_center.x - mid.x, t.control_point_center.y - mid.y) < 0.5) {
+      t.control_point_center_locked = false;
     }
+    if (!t.control_point_center_locked) t.control_point_center = mid;
   };
 
   if (handle === 'control_point1') {
@@ -48,47 +81,178 @@ export function moveHandle(
   }
   if (handle === 'control_point2') {
     s.control_points[1] = pos;
-    s.control_point2_activated = true;    // dragging cp2 makes it independent
+    // OSS move_mode.py:2821-2831: cp2 dragged back within 1px of the endpoint
+    // DEACTIVATES (returns to passive, where it tracks the endpoint); moving it away
+    // ACTIVATES it (independent). This FLAG — not cp2's position — gates end-follow below.
+    const atEnd = Math.abs(pos.x - s.end.x) < 1.0 && Math.abs(pos.y - s.end.y) < 1.0;
+    s.control_point2_activated = !atEnd;
     recenter(s);
     return;
   }
   if (handle === 'control_point_center') {
     // Dragging the third control point pins it; the renderer then uses the
-    // 3-point profile and the center no longer tracks the cp midpoint.
+    // 3-point profile and the center no longer tracks the cp midpoint. recenter()
+    // then applies OSS update_shape's 0.5px auto-unlock: if the user drags the center
+    // back onto the cp midpoint it un-pins and resumes tracking (strand.py:767-780).
     s.control_point_center = pos;
     s.control_point_center_locked = true;
+    recenter(s);
     return;
   }
 
   // Endpoint move (faithful to OSS move_mode.py:2925-2972). The grabbed endpoint and
   // every CONNECTED peer endpoint snap to the SAME absolute position -- where "peer"
   // is decided by the DIRECTED, first-claim-wins connection table + move-test
-  // (connections.ts), not a symmetric weld component. A control point that sits at
-  // its endpoint's old (coincident) position follows by that endpoint's own delta; a
-  // manually-placed one stays put so the curve reshapes. Center re-derives unless pinned.
+  // (connections.ts), not a symmetric weld component. Control points follow per the OSS
+  // setters: moving a START carries cp1 AND cp2 if EITHER coincided with the old start
+  // (strand.py:436-444); moving an END carries cp2 ONLY while it is passive
+  // (control_point2_activated == false — there is no cp1-on-end rule). Center
+  // re-derives unless pinned.
   const cur = handle === 'start' ? s.start : s.end;
   if (pos.x === cur.x && pos.y === cur.y) return;
-  const EPS = 1e-3;
+  const COINCIDE = 1e-6;
+  const at = (p: Point, q: { x: number; y: number }) =>
+    Math.abs(p.x - q.x) < COINCIDE && Math.abs(p.y - q.y) < COINCIDE;
 
   const moveEnd = (t: StrandRecord, end: 'start' | 'end') => {
-    const pt = end === 'start' ? t.start : t.end;
-    const oldx = pt.x, oldy = pt.y;
-    const dx = pos.x - oldx, dy = pos.y - oldy;
-    pt.x = pos.x; pt.y = pos.y;
-    const cp = t.control_points[end === 'start' ? 0 : 1];
-    if (Math.hypot(cp.x - oldx, cp.y - oldy) < EPS) { cp.x += dx; cp.y += dy; }
+    if (end === 'start') {
+      const old = { x: t.start.x, y: t.start.y };
+      const cp1WasAtStart = at(t.control_points[0], old);
+      const cp2WasAtStart = at(t.control_points[1], old);
+      t.start = { x: pos.x, y: pos.y };
+      if (cp1WasAtStart) t.control_points[0] = { x: pos.x, y: pos.y };
+      if (cp2WasAtStart) t.control_points[1] = { x: pos.x, y: pos.y };
+    } else {
+      t.end = { x: pos.x, y: pos.y };
+      if (!t.control_point2_activated) t.control_points[1] = { x: pos.x, y: pos.y };
+    }
     recenter(t);
   };
 
   // Grabbed endpoint moves directly; peers follow only when their slot points back at
   // it. Reuse the per-gesture cached connection table (topology is invariant across an
   // endpoint drag); falls back to a fresh build when no gesture is active.
+  const moved = new Set<string>([layerName]);
   moveEnd(s, handle);
   const side: 0 | 1 = handle === 'end' ? 1 : 0;
   const table = gestureConnTable(draft);
   for (const m of connectedMovers(table, draft, layerName, side)) {
     const t = draft.strands[m.name];
-    if (t) moveEnd(t, m.end);
+    if (t) { moveEnd(t, m.end); moved.add(m.name); }
+  }
+
+  // Any MaskedStrand built on a moved strand has its erase windows ride along by the
+  // shift of the intersection CENTROID — OSS move_mode.py:2978-3031.
+  trackMaskDeletionRects(draft, moved, curve);
+}
+
+// When a constituent strand of a MaskedStrand moves, the mask's intersection region
+// shifts; OSS keeps the erased windows pinned to the region by translating each
+// deletion rectangle by the CENTROID delta (move_mode.py:2978-3031). We replicate
+// exactly: snapshot the stored center, recompute the 50x50-grid centroid from the new
+// component geometry, and shift the rects by (new - old). Masks with no erasures are
+// skipped (nothing to translate). The first move of a freshly-loaded mask just seeds
+// the center (old == null) without translating — matching OSS's None-initial behaviour.
+function trackMaskDeletionRects(
+  draft: EditorDocument,
+  moved: Set<string>,
+  curve: Settings['curve_params'] = DEFAULT_CURVE,
+): void {
+  for (const name of draft.order) {
+    const m = draft.strands[name];
+    if (!m || m.type !== 'MaskedStrand') continue;
+    if (!m.deletion_rectangles || m.deletion_rectangles.length === 0) continue;
+    const comp = maskComponents(name);
+    if (!comp || (!moved.has(comp.first) && !moved.has(comp.second))) continue;
+    const first = draft.strands[comp.first], second = draft.strands[comp.second];
+    if (!first || !second) continue;
+
+    const oldCenter = m.edited_center_point ?? m.base_center_point ?? null;
+    // ONE centroid per frame on the hot path: the "edited" centroid (region minus
+    // deletion rects). seedMaskCenters grounds base/edited at grab, so the null-fallbacks
+    // here are cold paths (fully-erased region, or a mask reached outside MoveMode's seed
+    // e.g. via setStrandAngle) — only then do we touch base.
+    const editedCenter = maskCentroid(first, second, curve, m.deletion_rectangles);
+    const newCenter = editedCenter ?? m.base_center_point ?? null;
+    if (oldCenter && newCenter) {
+      const dx = newCenter.x - oldCenter.x, dy = newCenter.y - oldCenter.y;
+      if (dx !== 0 || dy !== 0) {
+        for (const r of m.deletion_rectangles) {
+          if (r.top_left) { r.top_left[0] += dx; r.top_left[1] += dy; }
+          if (r.top_right) { r.top_right[0] += dx; r.top_right[1] += dy; }
+          if (r.bottom_left) { r.bottom_left[0] += dx; r.bottom_left[1] += dy; }
+          if (r.bottom_right) { r.bottom_right[0] += dx; r.bottom_right[1] += dy; }
+          if (r.x != null) r.x += dx;
+          if (r.y != null) r.y += dy;
+        }
+      }
+    }
+    if (newCenter) m.edited_center_point = newCenter;
+    if (!m.base_center_point) m.base_center_point = maskCentroid(first, second, curve);
+  }
+}
+
+// Seed (overwrite) the stored centroid of every mask whose constituent is about to move,
+// using the CURRENT geometry, so the FIRST drag frame already has a valid `oldCenter` and
+// translates the deletion rectangles from frame 1 (OSS keeps base/edited_center_point live
+// at all times via calculate_center_point; we seed at grab to match without persisting).
+// Re-grounding on each grab also absorbs any geometry change since the last drag (undo,
+// group move, angle edit). Called once at pointer-down for the gesture's moving set.
+export function seedMaskCenters(
+  draft: EditorDocument,
+  moving: Set<string>,
+  curve: Settings['curve_params'] = DEFAULT_CURVE,
+): void {
+  for (const name of draft.order) {
+    const m = draft.strands[name];
+    if (!m || m.type !== 'MaskedStrand') continue;
+    if (!m.deletion_rectangles || m.deletion_rectangles.length === 0) continue;
+    const comp = maskComponents(name);
+    if (!comp || (!moving.has(comp.first) && !moving.has(comp.second))) continue;
+    const first = draft.strands[comp.first], second = draft.strands[comp.second];
+    if (!first || !second) continue;
+    m.base_center_point = maskCentroid(first, second, curve);
+    m.edited_center_point = maskCentroid(first, second, curve, m.deletion_rectangles) ?? m.base_center_point;
+  }
+}
+
+// Reset triangle_has_moved on release when the curve has returned to straight, so the
+// center / cp2-hover gating re-hides (OSS mouseReleaseEvent:1620-1637). OSS resets ONLY
+// triangle_has_moved here; control_point2_shown is an INDEPENDENT, sticky flag (it gates
+// cp2 GRAB, set once on the first cp1 move and never reset — move_mode.py:2061,2804), so
+// we must NOT clear it. Straight == cp2 within 1px of start AND, if the center is locked,
+// the center within 1px of start.
+export function resetStraightCurveFlags(draft: EditorDocument, layerName: string): void {
+  const s = draft.strands[layerName];
+  if (!s) return;
+  const d = (p: Point, q: Point) => Math.hypot(p.x - q.x, p.y - q.y);
+  const cp2Straight = d(s.control_points[1], s.start) <= 1.0;
+  const centerStraight = !s.control_point_center_locked || !s.control_point_center
+    || d(s.control_point_center, s.start) <= 1.0;
+  if (cp2Straight && centerStraight) {
+    s.triangle_has_moved = false;
+  }
+}
+
+// Press-time auto-adjust when grabbing cp1 on a collapsed triangle (cp1 AND cp2 both
+// within 1px of start): snap cp2 onto the end and mark it passive, so the first cp1
+// drag shapes a clean curve. Faithful to OSS start_movement's auto_adjust_control_points
+// (move_mode.py:2469-2524). When the third-CP feature is enabled, OSS also pins the center
+// to the cp1/cp2 midpoint (== start/end midpoint here, since cp1==start, cp2==end).
+export function autoAdjustCp1OnGrab(draft: EditorDocument, layerName: string, enableThird = false): void {
+  const s = draft.strands[layerName];
+  if (!s) return;
+  const atStart = (p: Point) => Math.abs(p.x - s.start.x) < 1.0 && Math.abs(p.y - s.start.y) < 1.0;
+  if (atStart(s.control_points[0]) && atStart(s.control_points[1])) {
+    s.control_points[1] = { x: s.end.x, y: s.end.y };
+    s.control_point2_activated = false;
+    if (enableThird) {
+      s.control_point_center = {
+        x: (s.control_points[0].x + s.control_points[1].x) / 2,
+        y: (s.control_points[0].y + s.control_points[1].y) / 2,
+      };
+      s.control_point_center_locked = true;
+    }
   }
 }
 
@@ -99,7 +263,12 @@ export function moveHandle(
 // rotation. Reuses moveHandle's endpoint-move weld propagation so any attached
 // children welded at this end (and their coincident control points) follow
 // rigidly -- identical to dragging the endpoint. JSON-serializable throughout.
-export function setStrandAngle(draft: EditorDocument, layerName: string, angleDeg: number): void {
+export function setStrandAngle(
+  draft: EditorDocument,
+  layerName: string,
+  angleDeg: number,
+  curve?: Settings['curve_params'],
+): void {
   const s = draft.strands[layerName];
   if (!s) return;
   const len = Math.hypot(s.end.x - s.start.x, s.end.y - s.start.y);
@@ -108,14 +277,21 @@ export function setStrandAngle(draft: EditorDocument, layerName: string, angleDe
     x: s.start.x + Math.cos(rad) * len,
     y: s.start.y + Math.sin(rad) * len,
   };
-  moveHandle(draft, layerName, 'end', newEnd);
+  moveHandle(draft, layerName, 'end', newEnd, curve);   // curve -> faithful mask-rect tracking
 }
 
 // Create a free first strand of a brand-new set. Returns the new layer_name.
-export function addNewStrand(draft: EditorDocument, start: Point, end: Point, color?: RGBA): string {
+// `defaults` threads the user's default strand colour/stroke/width settings (OSS
+// uses these for new strands); omitted fields fall back to the factory constants.
+export function addNewStrand(
+  draft: EditorDocument,
+  start: Point,
+  end: Point,
+  defaults?: { color?: RGBA; stroke_color?: RGBA; width?: number; stroke_width?: number },
+): string {
   const set = nextFreeSet(draft);
   const layer_name = `${set}_1`;
-  const s = makeStrand({ layer_name, set_number: set, start, end, color, is_first_strand: true });
+  const s = makeStrand({ layer_name, set_number: set, start, end, is_first_strand: true, ...defaults });
   draft.strands[layer_name] = s;
   draft.order.push(layer_name);
   return layer_name;

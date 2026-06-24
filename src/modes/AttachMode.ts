@@ -163,7 +163,12 @@ export const AttachMode: Mode = {
     let newName: string | null = null;
     st.mutateDoc((draft) => {
       newName = d.kind === 'new'
-        ? addNewStrand(draft, d.start, end)
+        ? addNewStrand(draft, d.start, end, {
+          color: st.settings.default_strand_color,
+          stroke_color: st.settings.default_stroke_color,
+          width: st.settings.default_strand_width,
+          stroke_width: st.settings.default_stroke_width,
+        })
         : attachChild(draft, d.parent!, d.side!, d.start, end);
     });
     st.commit();                 // one create = one undo step

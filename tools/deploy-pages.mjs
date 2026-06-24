@@ -17,8 +17,15 @@ import { fileURLToPath } from 'node:url';
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const distDir = resolve(repoRoot, 'dist-editor');
 
+// Only `npm` needs a shell on Windows (it resolves to npm.cmd). Running `git`
+// under a shell re-parses the argv we pass, so a commit message with spaces gets
+// split into separate pathspecs — hence the per-command shell decision here.
 const run = (cmd, args, cwd) =>
-  execFileSync(cmd, args, { cwd, stdio: 'inherit', shell: process.platform === 'win32' });
+  execFileSync(cmd, args, {
+    cwd,
+    stdio: 'inherit',
+    shell: process.platform === 'win32' && cmd === 'npm',
+  });
 
 // Resolve the push URL from the repo's existing `origin` remote so this keeps
 // working if the repo is renamed or moved.

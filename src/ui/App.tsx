@@ -6,6 +6,7 @@ import { TabEdge } from './TabEdge';
 import { CanvasStage } from './CanvasStage';
 import { LayerPanel } from './LayerPanel';
 import { Splitter } from './Splitter';
+import { startHistoryRecorder } from './settings/history';
 
 // OSS main-window shell: a horizontal splitter with `left_widget` (toolbar over
 // canvas) on one side and the layer panel on the other. Theme + RTL are applied
@@ -24,6 +25,9 @@ export function App() {
     root.classList.remove('theme-default', 'theme-light', 'theme-dark');
     root.classList.add(`theme-${theme}`);
   }, [theme, rtl]);
+
+  // Background session-history recorder (feeds the Settings → History page).
+  useEffect(() => startHistoryRecorder(), []);
 
   return (
     <div className="app">

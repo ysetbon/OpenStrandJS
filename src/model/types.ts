@@ -64,6 +64,11 @@ export interface StrandRecord {
   // MaskedStrand only
   deletion_rectangles?: DeletionRect[];
   using_absolute_coords?: boolean;
+  // Cached 50x50-grid centroid of the mask's intersection region (OSS MaskedStrand
+  // base/edited_center_point). Used to drift deletion_rectangles by the centroid delta
+  // when a constituent strand is dragged (move-mode fidelity). Recomputed during drags.
+  base_center_point?: Point | null;
+  edited_center_point?: Point | null;
 
   // visibility / control-point state flags carried through save/load
   triangle_has_moved?: boolean;
@@ -132,17 +137,63 @@ export interface ViewState {
 export type Theme = 'default' | 'light' | 'dark';
 export type Language = 'en' | 'fr' | 'de' | 'it' | 'es' | 'pt' | 'he';
 
+// Mirrors the OpenStrand Studio user_settings.txt keys (settings_dialog.py). The
+// field names are the JS-side snake_case; SETTINGS_TXT_MAP (settingsJson.ts) maps
+// each to its desktop PascalCase key for export/import. `loadSettings` spreads the
+// stored blob over DEFAULT_SETTINGS, so adding a field auto-migrates old blobs.
 export interface Settings {
+  // --- existing / shared ---
   curve_params: { base_fraction: number; dist_multiplier: number; exponent: number };
-  grid_size: number;
-  show_grid: boolean;
-  snap_to_grid_enabled: boolean;
-  default_strand_color: RGBA;
-  default_stroke_color: RGBA;
-  default_strand_width: number;
-  default_stroke_width: number;
+  grid_size: number;                 // JS-only (no OSS .txt equivalent)
+  show_grid: boolean;                // JS-only
+  snap_to_grid_enabled: boolean;     // OSS EnableSnapToGrid (move)
+  default_strand_color: RGBA;        // OSS DefaultStrandColor 200,170,230,255
+  default_stroke_color: RGBA;        // OSS DefaultStrokeColor 0,0,0,255
+  default_strand_width: number;      // OSS DefaultStrandWidth 46
+  default_stroke_width: number;      // OSS DefaultStrokeWidth 4
   theme: Theme;
   language: Language;
+
+  // --- General page ---
+  shadow_color: RGBA;                // 0,0,0,150
+  draw_only_affected_strand: boolean;
+  enable_third_control_point: boolean;
+  enable_curvature_bias_control: boolean;
+  snap_to_grid_attach_enabled: boolean;  // EnableSnapToGridAttach (attach/create)
+  show_move_highlights: boolean;     // default true
+  show_hover_highlights: boolean;    // default true
+  skip_close_tab_warning: boolean;
+  skip_quit_warning: boolean;
+  num_steps: number;                 // shadow blur steps, default 2
+  max_blur_radius: number;           // shadow blur radius, default 29.99
+
+  // --- Selected Strand page ---
+  move_selected_only: boolean;
+  show_cp_selected_only: boolean;
+  shadow_selected_only: boolean;
+  view_hide_highlight: boolean;
+  highlight_color: RGBA;             // 255,0,0,255
+
+  // --- Layer Panel page: extension lines ---
+  extension_length: number;          // 100
+  extension_dash_count: number;      // 10
+  extension_dash_width: number;      // 2
+  extension_dash_gap_length: number; // 5.0
+
+  // --- Layer Panel page: arrow head/line ---
+  arrow_head_length: number;         // 20
+  arrow_head_width: number;          // 10
+  arrow_head_stroke_width: number;   // 4
+  arrow_gap_length: number;          // 10
+  arrow_line_length: number;         // 20
+  arrow_line_width: number;          // 10
+  use_default_arrow_color: boolean;
+  default_arrow_fill_color: RGBA;    // 0,0,0,255
+
+  // --- Layer Panel page: width units + view toggles ---
+  default_width_grid_units: number;  // 2
+  view_hide_control_points: boolean;
+  default_transparent_start_circle: boolean;
 }
 
 // What the renderer (window.renderFixture) consumes.

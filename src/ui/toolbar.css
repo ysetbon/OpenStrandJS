@@ -5,27 +5,37 @@
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 5px;
-  height: 46px;
-  flex: 0 0 46px;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 4px 5px;            /* row-gap 4 (when wrapped), column-gap 5 */
+  min-height: 46px;
+  flex: 0 0 auto;          /* grow vertically when buttons wrap */
   padding: 3px 5px;
   box-sizing: border-box;
   background: var(--window-bg);
   border-bottom: 1px solid var(--panel-border);
   overflow: hidden;
+  /* Make the toolbar a query container so .tb-btn font-size can respond to the
+   * toolbar's own width (cqw). The mode buttons then shrink their text to stay
+   * on one row at any window size instead of truncating to "V…/M…", and only
+   * wrap to a second row as a last resort on very narrow / mobile widths. */
+  container-type: inline-size;
 }
 
 .tb-spacer { flex: 1 1 auto; }
 
 .tb-btn {
-  flex: 0 1 auto;
+  flex: 0 0 auto;             /* keep full label (no shrink → no ellipsis) */
   height: 38px;
-  max-width: 110px;
+  max-width: 140px;
   min-width: 0;
   padding: 0 4px;
   border-radius: 7px;
   border: 1px solid transparent;
-  font: 700 18px system-ui, -apple-system, sans-serif;
+  /* OSS uses 14px; clamp down toward 10px so all 14 buttons fit a narrow row. */
+  font-weight: 700;
+  font-size: clamp(10px, calc(2.63cqw - 9px), 14px);
+  font-family: system-ui, -apple-system, sans-serif;
   color: #000;                /* black text on the colored fills, like OSS */
   background: var(--bg);
   cursor: pointer;
@@ -46,7 +56,9 @@
   border-radius: 0;
   background: #FFD700;
   color: #000;
-  font: 700 18px system-ui, -apple-system, sans-serif;
+  font-weight: 700;
+  font-size: clamp(10px, calc(2.63cqw - 9px), 14px);
+  font-family: system-ui, -apple-system, sans-serif;
   cursor: pointer;
 }
 .tb-state:hover { background: #FFC200; }
