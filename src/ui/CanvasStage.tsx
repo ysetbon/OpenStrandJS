@@ -63,9 +63,13 @@ export function CanvasStage() {
     };
   }, [setView]);
 
+  // `mode` is a dependency because entering/leaving View mode changes what the
+  // renderer paints (view_hide_highlight gates is_selected; view_hide_control_points
+  // gates the overlay CPs). setMode bumps no docRevision, so without this a mode
+  // switch would not repaint and the view-mode gates would appear broken.
   useEffect(() => {
     requestRender();
-  }, [docRevision, view, settings]);
+  }, [docRevision, view, settings, mode]);
 
   useEffect(() => {
     const cCanvas = document.getElementById('c') as HTMLCanvasElement | null;

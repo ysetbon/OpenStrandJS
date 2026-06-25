@@ -36,6 +36,11 @@
 .tb-btn:hover { background: var(--bgh); }
 .tb-btn:active { background: var(--bgp); }
 .tb-btn.checked { border: 4px solid #000; }
+/* The active View button is disabled (OSS update_button_states) so the only exit is
+ * another tool. Keep its colored fill + checked border; just block the re-click and
+ * drop the pointer affordance — don't let the UA grey it out. */
+.tb-btn:disabled { background: var(--bg); color: #000; opacity: 1; cursor: default; }
+.tb-btn:disabled:hover { background: var(--bg); }
 
 /* State button: square (no radius), full toolbar height, gold. */
 .tb-state {

@@ -71,8 +71,9 @@ export function LayerPanelPage({ lang }: PageProps) {
       </div>
 
       {/* View toggles */}
+      {/* OSS sets setWordWrap(False) for this label (settings_dialog.py:2650), so no `wrap`. */}
       <CheckRow label={t('view_hide_control_points', lang)} checked={s.view_hide_control_points}
-        onChange={(v) => set({ view_hide_control_points: v })} wrap />
+        onChange={(v) => set({ view_hide_control_points: v })} />
       <CheckRow label={t('default_transparent_start_circle', lang)} checked={s.default_transparent_start_circle}
         onChange={(v) => set({ default_transparent_start_circle: v })} wrap />
 

@@ -106,6 +106,10 @@ export function Toolbar() {
           className={`tb-btn${checked(b) ? ' checked' : ''}`}
           style={btnVars(b.c)}
           onClick={() => onClick(b)}
+          // OSS disables the ACTIVE mode's own button in every mode
+          // (main_window.update_mode:2074-2137), so the only way to leave a mode is to
+          // pick another tool. The checked border still marks it active.
+          disabled={!!b.mode && mode === b.mode}
           title={b.label ?? t(b.key, lang)}
         >
           {b.label ?? t(b.key, lang)}
