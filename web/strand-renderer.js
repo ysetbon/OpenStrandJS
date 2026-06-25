@@ -1162,11 +1162,19 @@ window.renderFixture = function (strands, meta) {
   hi.height = H * ss;
   paper.setup(hi);
 
-  const bg = new paper.Path.Rectangle(new paper.Point(0, 0), new paper.Size(W * ss, H * ss));
-  // Theme canvas backdrop. LIVE EDITOR sets meta.canvas_bg (#ECECEC/#FFFFFF/#2C2C2C);
-  // the offline oracle / export omit it => 'white' (opaque, so the box-average
-  // downscale's fully-opaque-backdrop assumption holds and fixtures stay identical).
-  bg.fillColor = meta.canvas_bg || 'white';
+  // Transparent export (OSS save_canvas_as_image fills Qt.transparent). Gated on
+  // meta.transparent_bg, which ONLY exportPng sets; the live editor / offline oracle
+  // never set it, so they keep the opaque backdrop below. Export also forces
+  // supersample=1, so it never reaches the box-average downscale path that relies on
+  // a fully-opaque backdrop — skipping the fill leaves the offscreen canvas (and the
+  // copied-out #c pixels) transparent where no strand is drawn, exactly like Qt.
+  if (!meta.transparent_bg) {
+    const bg = new paper.Path.Rectangle(new paper.Point(0, 0), new paper.Size(W * ss, H * ss));
+    // Theme canvas backdrop. LIVE EDITOR sets meta.canvas_bg (#ECECEC/#FFFFFF/#2C2C2C);
+    // the offline oracle omits it => 'white' (opaque, so the box-average downscale's
+    // fully-opaque-backdrop assumption holds and fixtures stay identical).
+    bg.fillColor = meta.canvas_bg || 'white';
+  }
 
   const ox = meta.x_offset, oy = meta.y_offset;
   // world -> backing: position scaled by S (= ss*zoom), offset by ss. At zoom 1

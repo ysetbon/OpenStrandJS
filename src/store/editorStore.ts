@@ -22,6 +22,7 @@ import {
   DEFAULT_STRAND_WIDTH, DEFAULT_STROKE_WIDTH,
 } from '../model/factory';
 import { areVisuallyEqual } from './visualEqual';
+import { settingsToUserSettingsTxt } from '../io/userSettingsTxt';
 
 export function emptyDocument(): EditorDocument {
   return {
@@ -94,6 +95,12 @@ const DEFAULT_SETTINGS: Settings = {
 };
 
 const SETTINGS_KEY = 'openstrandjs.settings';
+// Human-readable mirror of the settings in OSS user_settings.txt flat format. JSON
+// (SETTINGS_KEY) stays the source of truth on load (it's complete — incl. JS-only
+// keys like grid_size — and needs no float re-formatting); this .txt mirror is kept
+// in sync purely so the exact desktop-interop snapshot is always available (e.g. for
+// the Settings "Save .txt" button and inspection). It is never read back on startup.
+const USER_SETTINGS_TXT_KEY = 'openstrandjs.userSettingsTxt';
 
 function loadSettings(): Settings {
   try {
@@ -103,8 +110,15 @@ function loadSettings(): Settings {
   return { ...DEFAULT_SETTINGS };
 }
 
-function saveSettings(s: Settings): void {
+// Refresh ONLY the human-readable .txt mirror (e.g. when just the tab-edge anchor
+// moved — no need to rewrite the settings JSON).
+function saveUserSettingsTxt(s: Settings, tabEdgeAnchor?: string): void {
+  try { localStorage.setItem(USER_SETTINGS_TXT_KEY, settingsToUserSettingsTxt(s, tabEdgeAnchor)); } catch { /* ignore */ }
+}
+
+function saveSettings(s: Settings, tabEdgeAnchor?: string): void {
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch { /* ignore */ }
+  saveUserSettingsTxt(s, tabEdgeAnchor);
 }
 
 // Floating tab-edge overlay position, persisted across sessions.
@@ -372,6 +386,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setTabEdgePosition: (pos) => set((s) => {
     const next = { anchor: pos.anchor, dx: pos.dx ?? s.tabEdgePosition.dx, dy: pos.dy ?? s.tabEdgePosition.dy };
     saveTabEdgePosition(next);
+    // Keep the user_settings.txt mirror's TabEdgePosition line current (OSS owns this
+    // key alongside the settings dialog's keys in the same file). Only the .txt mirror
+    // needs refreshing here — the settings JSON is unchanged by a tab-edge move.
+    saveUserSettingsTxt(s.settings, next.anchor);
     return { tabEdgePosition: next };
   }),
 
@@ -506,7 +524,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setView: (patch) => set((s) => ({ view: { ...s.view, ...patch } })),
   setSettings: (patch) => set((s) => {
     const settings = { ...s.settings, ...patch };
-    saveSettings(settings);
+    saveSettings(settings, s.tabEdgePosition?.anchor);
     let doc = s.doc;
     // OSS enable_third_control_point setter side-effect (strand_drawing_canvas.py:6432-6445):
     // turning the third CP OFF resets every non-masked strand's center to the cp1/cp2

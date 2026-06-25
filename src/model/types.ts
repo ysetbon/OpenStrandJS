@@ -145,9 +145,10 @@ export type Theme = 'default' | 'light' | 'dark';
 export type Language = 'en' | 'fr' | 'de' | 'it' | 'es' | 'pt' | 'he';
 
 // Mirrors the OpenStrand Studio user_settings.txt keys (settings_dialog.py). The
-// field names are the JS-side snake_case; SETTINGS_TXT_MAP (settingsJson.ts) maps
-// each to its desktop PascalCase key for export/import. `loadSettings` spreads the
-// stored blob over DEFAULT_SETTINGS, so adding a field auto-migrates old blobs.
+// field names are the JS-side snake_case; the desktop key mappings live in
+// userSettingsTxt.ts (flat PascalCase "Key: value" interop file, a superset) and
+// settingsJson.ts (the 36-key JSON export). `loadSettings` spreads the stored blob
+// over DEFAULT_SETTINGS, so adding a field auto-migrates old blobs.
 export interface Settings {
   // --- existing / shared ---
   curve_params: { base_fraction: number; dist_multiplier: number; exponent: number };
@@ -267,16 +268,19 @@ export interface RenderMeta {
   // oracle uses to byte-match Qt. Keeps full supersampled quality; ~5× faster
   // full render. Absent => exact box-average (byte-identical fidelity path).
   fast_downscale?: boolean;
-  // LIVE EDITOR ONLY (the offline oracle / PNG export never set this). The opaque
-  // canvas backdrop color (the active theme's window bg: #ECECEC default, #FFFFFF
-  // light, #2C2C2C dark), mirroring OSS where the canvas widget shows the parent
-  // window background behind the grid + strands. Absent => 'white' (byte-identical
-  // fidelity path; the box-average downscale still sees a fully opaque backdrop).
+  // Set by the LIVE editor AND PNG export (both via buildMeta). The opaque canvas
+  // backdrop color (the active theme's window bg: #ECECEC default, #FFFFFF light,
+  // #2C2C2C dark), mirroring OSS where the canvas widget shows the parent window
+  // background behind the grid + strands. The PNG export carries it but it is INERT
+  // there because transparent_bg skips the backdrop fill. Only the OFFLINE oracle
+  // omits it => 'white' (byte-identical fidelity path; the box-average downscale
+  // still sees a fully opaque backdrop).
   canvas_bg?: string;
-  // LIVE EDITOR ONLY (the offline oracle / PNG export never set this). When present,
-  // draw the OSS background grid (solid rgb(200,200,200) width-1 lines) BEHIND the
-  // strands, on world multiples of `size`. Absent => no grid (matches
-  // reference_render.py's canvas.show_grid=False, so fixtures stay grid-free).
+  // Set by the LIVE editor AND PNG export (both via buildMeta) when show_grid is on.
+  // Draw the OSS background grid (solid rgb(200,200,200) width-1 lines) BEHIND the
+  // strands, on world multiples of `size`; OSS draws the grid in its export too
+  // (main_window.py:1969). Absent => no grid — which is what the OFFLINE oracle does
+  // (reference_render.py's canvas.show_grid=False), so fixtures stay grid-free.
   grid?: { size: number };
   // Set by the LIVE editor (buildMeta) AND PNG export (exportMeta) as the effective
   // gate enable_third_control_point && enable_curvature_bias_control, so on-screen and
@@ -285,4 +289,10 @@ export interface RenderMeta {
   // bezier handle fractions; absent => bias fixed at 0.5 (unbiased), so fixtures with no
   // bias data render byte-identically.
   curvature_bias?: boolean;
+  // PNG EXPORT ONLY (the live editor / offline oracle never set this). When true, the
+  // renderer skips the opaque backdrop fill so empty areas stay transparent, matching
+  // OSS save_canvas_as_image (QImage filled with Qt.transparent). Export pairs this
+  // with supersample=1, so the box-average downscale path (which assumes an opaque bg)
+  // is never reached. Absent => opaque backdrop (byte-identical fidelity path).
+  transparent_bg?: boolean;
 }

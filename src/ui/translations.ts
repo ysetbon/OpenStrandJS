@@ -228,6 +228,8 @@ export const STRINGS: Record<string, Entry> = {
   language_settings_info: { en: 'Change the language of the application.', fr: `Changer la langue de l'application.`, de: 'Ändern Sie die Sprache der Anwendung.', it: `Cambia la lingua dell'applicazione.`, es: 'Cambiar el idioma de la aplicación.', pt: 'Mudar o idioma da aplicação.', he: 'שנה את שפת האפליקציה.' },
   save_settings_button: { en: 'Save Settings', fr: 'Enregistrer les paramètres', de: 'Einstellungen speichern', it: 'Salva Impostazioni', es: 'Guardar Configuración', pt: 'Guardar Configurações', he: 'שמור הגדרות' },
   load_settings_button: { en: 'Load Settings', fr: 'Charger les paramètres', de: 'Einstellungen laden', it: 'Carica Impostazioni', es: 'Cargar Configuración', pt: 'Carregar Configurações', he: 'טען הגדרות' },
+  save_settings_txt_button: { en: 'Save Settings (.txt)', fr: 'Enregistrer (.txt)', de: 'Speichern (.txt)', it: 'Salva (.txt)', es: 'Guardar (.txt)', pt: 'Guardar (.txt)', he: 'שמור (.txt)' },
+  load_settings_txt_button: { en: 'Load Settings (.txt)', fr: 'Charger (.txt)', de: 'Laden (.txt)', it: 'Carica (.txt)', es: 'Cargar (.txt)', pt: 'Carregar (.txt)', he: 'טען (.txt)' },
   tutorial_info: { en: `Press the "play video" button below each text
 to view the tutorial explaining:`, fr: `Appuyez sur le bouton "lire la vidéo" sous chaque texte
 pour voir le tutoriel explicatif :`, de: `Drücken Sie die Taste "Video abspielen" unter jedem Text,

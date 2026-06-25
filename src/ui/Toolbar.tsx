@@ -4,7 +4,7 @@ import { SettingsDialog } from './SettingsDialog';
 import { LayerStateDialog } from './LayerStateDialog';
 import { t } from './i18n';
 import { loadProject, serializeProject } from '../io/saveLoad';
-import { downloadJSON } from '../io/fileDialog';
+import { saveJSON } from '../io/fileDialog';
 import { exportPng } from '../io/exportPng';
 import { fitPan } from '../interaction/viewTransform';
 import type { ModeName } from '../model/types';
@@ -75,7 +75,12 @@ export function Toolbar() {
   }
 
   function onSave() {
-    downloadJSON('openstrand_project.json', serializeProject(useEditorStore.getState().doc));
+    // Seed the Save As name from the active tab (OSS uses the open file's name);
+    // saveJSON opens the native picker where available, else downloads.
+    const st = useEditorStore.getState();
+    const active = st.tabs.find((tb) => tb.id === st.activeTabId);
+    const base = (active?.name || 'openstrand_project').replace(/\.json$/i, '').trim() || 'openstrand_project';
+    void saveJSON(`${base}.json`, serializeProject(st.doc));
   }
 
   const checked = (b: Btn): boolean => {
@@ -95,7 +100,7 @@ export function Toolbar() {
     if (b.toggle === 'tabs') { toggleTabs(); return; }
     if (b.action === 'save') { onSave(); return; }
     if (b.action === 'load') { fileRef.current?.click(); return; }
-    if (b.action === 'image') { exportPng(); return; }
+    if (b.action === 'image') { void exportPng(); return; }
   };
 
   return (

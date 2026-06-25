@@ -100,11 +100,13 @@ export function buildMeta(doc: EditorDocument, view: ViewState, settings: Settin
     shadow_enabled: doc.shadow_enabled,
     shadow_overrides: doc.shadow_overrides,
     curve_params: settings.curve_params,
-    // Theme canvas backdrop + OSS grid. LIVE EDITOR ONLY: these two keys are set
-    // ONLY here (the single live-path meta builder). The offline fidelity oracle
-    // (reference_render.py meta) and PNG export (exportPng's own meta literal) never
-    // set them, so renderFixture falls back to a white opaque backdrop with no grid
-    // and stays byte-identical. Same absent-default gating as drag / fast_downscale.
+    // Theme canvas backdrop + OSS grid. Set on the LIVE path here AND carried into
+    // the PNG export, which now reuses buildMeta (exportMeta spreads it): export
+    // ignores canvas_bg (transparent_bg overrides the fill) but DOES draw the grid,
+    // matching OSS save_canvas_as_image. Only the offline fidelity oracle
+    // (reference_render.py meta) omits both, so renderFixture falls back to a white
+    // opaque backdrop with no grid and stays byte-identical. Same absent-default
+    // gating as drag / fast_downscale.
     canvas_bg: THEME_CANVAS_BG[settings.theme] ?? '#FFFFFF',
     grid: settings.show_grid && settings.grid_size > 0 ? { size: settings.grid_size } : undefined,
     // Effective bias gate (third CP must also be on). LIVE EDITOR ONLY — absent in the

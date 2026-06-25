@@ -311,6 +311,34 @@ function drawMoveOverlays(ctx: CanvasRenderingContext2D, st: OverlayState): void
       draw(name, h);
     }
   }
+  // Bias control highlight squares (OSS strand_drawing_canvas.py:2649 "Also draw bias
+  // control rectangles" + the bias_triangle/bias_circle yellow branches at :2275/:2585).
+  // Each bias control gets the SAME 50px square as a regular control point, drawn under
+  // the SAME gate as the bias glyphs (drawBiasControls / should_show_controls: both
+  // toggles on + center LOCKED + triangle moved) so the highlight square appears exactly
+  // where each bias glyph is. Green idle (FILL_CP_IDLE) / pale-yellow (FILL_HOT) when the
+  // control is hovered or being dragged — matching strand_drawing_canvas's green_color /
+  // hover_color. (Bias glyphs are drawn first in drawBiasControls; this translucent
+  // square sits on top, like the other move squares.)
+  if (st.settings.enable_third_control_point && st.settings.enable_curvature_bias_control) {
+    for (const name of doc.order) {
+      const s = doc.strands[name];
+      if (!overlayVisible(s)) continue;
+      if (affected && name !== affected) continue;
+      if (cpFilterHides(st, name)) continue;
+      if (!s.control_point_center_locked || !s.triangle_has_moved || !s.control_point_center) continue;
+      const bp = biasPositions(s);
+      if (!bp) continue;
+      const biasHandles: [HandleKind, Point][] = [['bias_triangle', bp.triangle], ['bias_circle', bp.circle]];
+      for (const [handle, pos] of biasHandles) {
+        // During any control-point/bias drag OSS draws only the grabbed control's square.
+        if (cpDrag && handle !== selection.handle) continue;
+        const moving = dragging && selection.layerName === name && selection.handle === handle;
+        const hovered = !dragging && hover.layerName === name && hover.handle === handle;
+        overlaySquare(ctx, worldToScreen(pos, view), CP_HALF, view.zoom, moving || hovered ? FILL_HOT : FILL_CP_IDLE);
+      }
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
