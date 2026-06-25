@@ -191,6 +191,8 @@ export interface EditorState {
   loadDocument: (doc: EditorDocument) => void;
   setDoc: (doc: EditorDocument) => void;
   mutateDoc: (fn: (draft: EditorDocument) => void) => void;
+  // Per-pointermove live edit: clones only the dragMoving strands (see impl).
+  mutateDocDuringDrag: (fn: (draft: EditorDocument) => void) => void;
   beginGesture: () => void;
   commit: () => void;
   cancelGesture: () => void;
@@ -388,6 +390,46 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   mutateDoc: (fn) => set((s) => {
     const draft = cloneDoc(s.doc);
     fn(draft);
+    return { doc: draft, docRevision: s.docRevision + 1 };
+  }),
+
+  // Live edit DURING an endpoint/CP/bias drag (the per-pointermove geometry update).
+  // Structurally SHARES every strand NOT in the current dragMoving set and deep-clones
+  // ONLY the moving strands, instead of cloneDoc's O(all strands) JSON round-trip — so
+  // per-frame state cost is O(moving), independent of scene size (the render fast-path is
+  // already O(moving), so the whole-doc clone was the residual O(all) cost per frame).
+  //
+  // SAFE because every strand the per-move actions write is a subset of dragMoving:
+  // moveHandle writes draft.strands[layer] + connectedMovers peers + trackMaskDeletionRects
+  // on masks whose component moved (actions.ts:137-148,183-219); setBias writes the layer
+  // alone (actions.ts:162-173); movingStrandSet (= dragMoving, set at grab MoveMode.ts:75)
+  // is a SUPERSET of all of these incl. dependent masks (connections.ts:193-208). StrandRecord
+  // holds no cross-references (see cloneDoc), so a per-strand structuredClone — which deep-copies
+  // the nested control_points / deletion_rectangles arrays of just the moving records — is
+  // value-equivalent to the JSON round-trip; in-place edits therefore never alias the prior doc.
+  // The DEV assertion enforces the write-set ⊆ dragMoving invariant against future drift in
+  // moveHandle's propagation. Only the PER-MOVE calls use this; once-per-gesture mutations
+  // (grab auto-adjust, seedMaskCenters, pointer-up resetStraightCurveFlags) and history
+  // snapshots (beginGesture/commit via cloneDoc) stay on the full path so undo is byte-unchanged.
+  mutateDocDuringDrag: (fn) => set((s) => {
+    const moving = s.dragMoving;
+    const strands = { ...s.doc.strands };
+    for (const n of moving) if (strands[n]) strands[n] = structuredClone(strands[n]);
+    const draft: EditorDocument = { ...s.doc, strands };
+    if (import.meta.env?.DEV) {
+      const movingSet = new Set(moving);
+      const before = new Map(
+        Object.keys(s.doc.strands).filter((k) => !movingSet.has(k)).map((k) => [k, s.doc.strands[k]] as const),
+      );
+      fn(draft);
+      for (const [k, ref] of before) {
+        if (draft.strands[k] !== ref) {
+          console.error('[OpenStrandJS] mutateDocDuringDrag wrote strand outside dragMoving:', k);
+        }
+      }
+    } else {
+      fn(draft);
+    }
     return { doc: draft, docRevision: s.docRevision + 1 };
   }),
 

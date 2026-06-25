@@ -64,6 +64,32 @@ function syncOverlay(): void {
 // moved it). The CanvasStage docRevision effect was only an intermittent backstop
 // (it raced the same flag), which is why the strand vanished only "sometimes".
 let pendingFull = false;
+// R3 release-settle payload: the moving-set names captured at pointer-up. The scheduler
+// reuses the still-live drag bake for one cheap settle frame and defers the full render
+// one rAF. NOT read from the store, because MoveMode clears dragging/dragMoving on
+// pointer-up BEFORE the deferred render runs. null when no release is pending.
+let settle: { names: string[] } | null = null;
+
+// R2 view gestures (wheel-zoom + hand-pan): while one is in flight we render DRAFT quality —
+// shadows OFF at the editor supersample — on every event, then do ONE full shadowed render
+// when the gesture settles. Shadows are the dominant render cost (~6-9x; see tools/bench_drag),
+// so dropping them keeps zoom/pan smooth while the frame still fills the WHOLE viewport
+// correctly (grid + strands edge-to-edge). (An earlier CSS-transform approach was faster still
+// but left un-rendered margins on zoom-out/pan when a viewport-sized bitmap was scaled/shifted.)
+let viewGesturing = false;
+export function isViewGesturing(): boolean { return viewGesturing; }
+export function setViewGesturing(b: boolean): void { viewGesturing = b; }
+
+// Dev-only render timer: surfaces what each #c paint actually costs so smoothness work is
+// driven by numbers, not guesses. Stripped from production builds.
+function devTime<T>(label: string, fn: () => T): T {
+  if (!import.meta.env?.DEV) return fn();
+  const t0 = performance.now();
+  const r = fn();
+  // eslint-disable-next-line no-console
+  console.log(`[OpenStrandJS perf] ${label}: ${(performance.now() - t0).toFixed(1)}ms`);
+  return r;
+}
 
 function schedule(): void {
   if (scheduled) return;
@@ -73,33 +99,77 @@ function schedule(): void {
     if (!pendingFull) { syncOverlay(); return; }  // overlay-only frame
     pendingFull = false;
     const { doc, view, settings, dragging, dragMoving, selection, mode } = useEditorStore.getState();
+    // OSS View mode: when view_hide_highlight is on, suppress the red selection highlight
+    // while in View mode (strand.py::_suppress_highlight_in_view) by zeroing is_selected at
+    // the payload source. The renderer (#c) needs no change, and the offline oracle / PNG
+    // export — which never set this — stay byte-identical. Hoisted out of the try so the
+    // release-settle path below can reuse it.
+    const viewHideHighlight = mode === 'view' && settings.view_hide_highlight;
+
+    // RELEASE SETTLE FAST-PATH (R3): pointer-up asked for a deferred full render. If the
+    // drag bake for this exact moving set is still live and no new gesture has started,
+    // paint ONE more cheap moving frame over that bake THIS frame (the released strand
+    // lands instantly), then defer the expensive from-scratch full render (true z-order +
+    // O(n^2) shadow) to the NEXT frame — mirroring OSS deferring its second full repaint
+    // via QTimer.singleShot(0, update) (move_mode.py:1681). The whole moving set is
+    // highlighted for this one frame (like the drag frames); phase 2 collapses it to the
+    // selected strand. If the bake is gone / keys mismatch / a drag is active, fall through
+    // to the normal full render below (graceful degrade — no harm, just no deferral).
+    if (settle) {
+      const names = settle.names;
+      settle = null;
+      if (dragBaked && bakedKey === names.join('|') && !dragging) {
+        try {
+          const arr = toRenderArray(doc, selection.layerName, new Set(names), viewHideHighlight);
+          // Shadow-free like the drag frames (phase 2 restores shadows next frame) so the
+          // instant settle frame stays cheap even when zoomed in.
+          callRenderDragFrame(arr, { ...buildMeta(doc, view, settings), supersample: 1, shadow_enabled: false, drag: { moving: names } });
+        } catch (err) {
+          console.error('[OpenStrandJS] release settle (phase 1) failed:', err);
+        }
+        syncOverlay();
+        requestAnimationFrame(() => {
+          // A new drag started inside the one-frame window — it now owns the bake (the
+          // bakedKey re-bake guard keeps it correct), so leave the bake live and bail.
+          if (useEditorStore.getState().dragging) return;
+          if (dragBaked) { callEndDrag(); dragBaked = false; bakedKey = null; }
+          const s = useEditorStore.getState();
+          try {
+            const arr2 = toRenderArray(s.doc, s.selection.layerName, undefined,
+              s.mode === 'view' && s.settings.view_hide_highlight);
+            devTime(`release full render (${arr2.length} strands @ zoom ${s.view.zoom.toFixed(2)})`,
+              () => callRender(arr2, { ...buildMeta(s.doc, s.view, s.settings), supersample: EDITOR_SUPERSAMPLE }));
+          } catch (err) {
+            console.error('[OpenStrandJS] release settle (phase 2) failed:', err);
+          }
+          syncOverlay();
+        });
+        return;
+      }
+    }
+
     try {
       // During an endpoint drag, highlight every strand that moves with the
       // grabbed handle (weld group + attached/mask peers from movingStrandSet),
       // so a moving junction reddens on both sides like OSS — not just the
       // grabbed strand. At rest only the selected strand is highlighted.
       const highlightSet = dragging && dragMoving.length ? new Set(dragMoving) : undefined;
-      // OSS View mode: when view_hide_highlight is on, suppress the red selection
-      // highlight while in View mode (strand.py::_suppress_highlight_in_view) by
-      // zeroing is_selected at the payload source. The renderer (#c) needs no change,
-      // and the offline oracle / PNG export — which never set this — stay byte-identical.
-      const viewHideHighlight = mode === 'view' && settings.view_hide_highlight;
       const arr = toRenderArray(doc, selection.layerName, highlightSet, viewHideHighlight);
       if (dragging && dragMoving.length) {
         // DRAG FAST-PATH (mirrors the original's draw-only-affected-strand path).
-        // Render at native resolution: bake every STATIC strand once into a cached
-        // bitmap (shadows off — the bake's concern is cheap resting geometry), then
-        // each frame draw ONLY the moving strands over that cache. Per-frame work is
-        // O(moving strands), not O(all strands), so dragging stays smooth regardless of
-        // scene size. shadow_enabled flows through from settings (NOT forced off) so the
-        // live moving band can redraw a moving MASK's own crossing shadow each frame like
-        // OSS; the bake stays shadow-free and a moving strand's cast shadow onto lower
-        // layers is the documented per-frame residual, restored by the pointer-up full
-        // render. The fidelity harness calls renderFixture directly and never sets
-        // meta.drag, so the oracle's default output is unchanged.
+        // Bake every STATIC strand once into a cached bitmap (shadows off), then each frame
+        // draw ONLY the moving strands over that cache — per-frame work is O(moving), not
+        // O(all). Shadows are ALSO off on the moving strand (shadow_enabled:false): they are
+        // the dominant render cost and, zoomed in, the blur covers a large pixel area, so
+        // recomputing the moving strand's shadow every frame was the residual drag jank
+        // (worse the more you zoom in). The whole drag is therefore shadow-free, exactly like
+        // zoom/pan; the pointer-up render (R3) restores correct shadows + z-order one frame
+        // later. The fidelity harness calls renderFixture directly and never sets meta.drag /
+        // this shadow_enabled, so the oracle's default output is unchanged.
         const meta = {
           ...buildMeta(doc, view, settings),
           supersample: 1,
+          shadow_enabled: false,
           drag: { moving: dragMoving },
         };
         // Bake the static background when none is live OR when a prior gesture's
@@ -120,7 +190,13 @@ function schedule(): void {
         // ~30ms instead of the ~260ms a full ss2 render costs, so pointer-up no
         // longer hangs. Drop any drag background first so the next gesture re-bakes.
         if (dragBaked) { callEndDrag(); dragBaked = false; bakedKey = null; }
-        callRender(arr, { ...buildMeta(doc, view, settings), supersample: EDITOR_SUPERSAMPLE });
+        // During a view gesture (zoom/pan) render DRAFT — shadows OFF — so it stays smooth even
+        // on dense scenes; the settle render restores shadows. shadow_enabled is editor-path
+        // meta only (the oracle passes its own meta), so byte-identical output is unaffected.
+        const meta = { ...buildMeta(doc, view, settings), supersample: EDITOR_SUPERSAMPLE };
+        if (viewGesturing) meta.shadow_enabled = false;
+        devTime(`${viewGesturing ? 'view-gesture draft' : 'full render'} (${arr.length} strands @ zoom ${view.zoom.toFixed(2)})`,
+          () => callRender(arr, meta));
       }
     } catch (err) {
       // Surface renderer errors without killing the rAF loop.
@@ -139,6 +215,16 @@ export function requestOverlay(): void {
 // Full #c re-render (renderFixture). Coalesced into the shared frame and flagged so
 // it can never be swallowed by a pending overlay-only frame.
 export function requestRender(): void {
+  pendingFull = true;
+  schedule();
+}
+
+// R3: pointer-up's deferred render. Captures the just-ended gesture's moving set and
+// schedules a full frame; the scheduler settles the released strand over the still-live
+// bake this frame and runs the from-scratch full render on the next. Degrades to a plain
+// full render if the bake is no longer valid (see schedule()).
+export function requestReleaseSettle(movingNames: string[]): void {
+  settle = { names: movingNames };
   pendingFull = true;
   schedule();
 }

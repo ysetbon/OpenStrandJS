@@ -68,6 +68,9 @@ export function CanvasStage() {
   // gates the overlay CPs). setMode bumps no docRevision, so without this a mode
   // switch would not repaint and the view-mode gates would appear broken.
   useEffect(() => {
+    // A view change during a zoom/pan gesture renders DRAFT (shadows off) here for a fast,
+    // full-viewport-correct frame; the gesture's settle (InteractionHost) does the crisp
+    // shadowed render. The draft/full choice lives in the scheduler (isViewGesturing).
     requestRender();
   }, [docRevision, view, settings, mode]);
 

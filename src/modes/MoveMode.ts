@@ -90,7 +90,8 @@ export const MoveMode: Mode = {
       if (drag.handle === 'bias_triangle' || drag.handle === 'bias_circle') {
         const which = drag.handle === 'bias_triangle' ? 'triangle' : 'circle';
         const d = drag;
-        st.mutateDoc((draft) => setBias(draft, d.layer, which, p.world));
+        // Per-move: clone only the dragMoving strands, not the whole doc (O(moving)).
+        st.mutateDocDuringDrag((draft) => setBias(draft, d.layer, which, p.world));
         return;
       }
       const raw = { x: p.world.x + drag.offset.x, y: p.world.y + drag.offset.y };
@@ -100,8 +101,9 @@ export const MoveMode: Mode = {
       if (drag.lastSnap && drag.lastSnap.x === pos.x && drag.lastSnap.y === pos.y) return;
       drag.lastSnap = pos;
       const d = drag;
-      st.mutateDoc((draft) => moveHandle(draft, d.layer, d.handle, pos, st.settings.curve_params));
-      // mutateDoc bumps docRevision -> CanvasStage re-renders #c + overlay.
+      // Per-move: clone only the dragMoving strands, not the whole doc (O(moving)).
+      st.mutateDocDuringDrag((draft) => moveHandle(draft, d.layer, d.handle, pos, st.settings.curve_params));
+      // mutateDocDuringDrag bumps docRevision -> CanvasStage re-renders #c + overlay.
     } else {
       const hit = moveGrab(p.world, st.doc, st.settings);   // hover mirrors what a press would grab
       const next = hit
@@ -119,13 +121,20 @@ export const MoveMode: Mode = {
       const layer = drag.layer;
       drag = null;
       const st = useEditorStore.getState();
+      // Snapshot the moving set BEFORE clearing it: the release-settle fast path reuses the
+      // still-live drag bake keyed on this set, and the scheduler can't read it from the
+      // store because we clear dragging/dragMoving here, before the deferred render runs.
+      const movingSnapshot = st.dragMoving.slice();
       st.setDragging(false);
       st.setDragMoving([]);      // end the gesture's moving set
       endWeldGesture();          // drop the per-gesture connection-table cache
       // Re-hide cp2/center if the curve returned to straight (OSS mouseReleaseEvent:1620).
       st.mutateDoc((draft) => resetStraightCurveFlags(draft, layer));
       st.commit();               // one drag = one undo step (no-op if nothing changed)
-      ctx.requestRender();       // dragging=false -> one full-quality render (shadows + supersample)
+      // Defer the full-quality render one rAF: settle the released strand over the still-
+      // live bake THIS frame (no hitch), then drop the bake + full render (shadows, true
+      // z-order) NEXT frame. Degrades to a plain full render if the bake is invalid.
+      ctx.requestReleaseSettle(movingSnapshot);
     }
   },
 

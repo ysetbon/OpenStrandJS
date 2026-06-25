@@ -9,6 +9,9 @@ export interface ModeContext {
   worldToScreen(p: Point): Point;
   requestRender(): void;   // full re-render (#c) + overlay
   requestOverlay(): void;  // overlay only
+  // Deferred pointer-up render (R3): settle the released drag over the live bake this
+  // frame, run the full render next frame. `movingNames` = the gesture's moving set.
+  requestReleaseSettle(movingNames: string[]): void;
 }
 
 export interface PointerInfo {

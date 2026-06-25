@@ -5,7 +5,10 @@
 
 import { useEditorStore } from '../store/editorStore';
 import { screenToWorld, worldToScreen } from './viewTransform';
-import { requestOverlay, requestRender } from '../renderer/renderScheduler';
+import {
+  requestOverlay, requestRender, requestReleaseSettle,
+  isViewGesturing, setViewGesturing,
+} from '../renderer/renderScheduler';
 import { modes } from '../modes';
 import { SelectMode } from '../modes/SelectMode';
 import { addDeletionRect } from '../store/actions';
@@ -17,6 +20,12 @@ function rectOf(a: Point, b: Point) {
   return { minX: Math.min(a.x, b.x), minY: Math.min(a.y, b.y), maxX: Math.max(a.x, b.x), maxY: Math.max(a.y, b.y) };
 }
 
+// R2 view-gesture tuning. During a wheel-zoom / hand-pan we render DRAFT (shadows off) per
+// event for a fast, full-viewport-correct frame, then do ONE crisp shadowed render when the
+// gesture settles. VIEW_SETTLE_MS = idle gap after the last wheel notch before that crisp
+// render (a hand-pan settles on pointer-up, so it needs no timer).
+const VIEW_SETTLE_MS = 60;
+
 export class InteractionHost {
   private panning = false;
   private panStart: Point = { x: 0, y: 0 };
@@ -25,6 +34,8 @@ export class InteractionHost {
   // Active per-mask "Edit Mask" eraser drag (OSS mask_edit_mode erase_start_pos /
   // current_erase_rect). Set on pointer-down while store.maskEditTarget is active.
   private maskErase: { start: Point } | null = null;
+  // R2: idle timer that fires the crisp settle render after the last wheel notch.
+  private viewSettleTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private el: HTMLCanvasElement) {
     el.addEventListener('pointerdown', this.onPointerDown);
@@ -38,6 +49,8 @@ export class InteractionHost {
   }
 
   detach(): void {
+    if (this.viewSettleTimer) { clearTimeout(this.viewSettleTimer); this.viewSettleTimer = null; }
+    setViewGesturing(false);
     const el = this.el;
     el.removeEventListener('pointerdown', this.onPointerDown);
     el.removeEventListener('pointermove', this.onPointerMove);
@@ -69,6 +82,7 @@ export class InteractionHost {
       worldToScreen: (p) => worldToScreen(p, view),
       requestRender,
       requestOverlay,
+      requestReleaseSettle,
     };
   }
 
@@ -87,6 +101,11 @@ export class InteractionHost {
 
   private onPointerDown = (e: PointerEvent) => {
     try { this.el.setPointerCapture(e.pointerId); } catch { /* synthetic/no-op */ }
+    // Settle any in-flight view gesture (wheel-zoom) before a press interaction begins:
+    // exits the gesture (overlay/effect resume, timer cleared) and re-strokes crisp at the
+    // live view. The crisp render clears the CSS transform in the same rAF, so the press
+    // never operates against a stale transform (e.g. a drag bake painted on a scaled canvas).
+    if (isViewGesturing() || this.viewSettleTimer) this.settleView();
     const panTool = useEditorStore.getState().panMode;   // hand tool active
     const isPan = e.button === 1 || e.button === 2 || (e.button === 0 && (this.spaceHeld || panTool));
     if (isPan) {
@@ -114,6 +133,10 @@ export class InteractionHost {
   private onPointerMove = (e: PointerEvent) => {
     if (this.panning) {
       const screen = this.toScreen(e);
+      // R2: mark the view gesture so the per-move render is DRAFT (shadows off) — fast and
+      // full-viewport correct; shadows return on the settle render at pointer-up. Without
+      // this, every pan move re-stroked the whole scene WITH shadows (the dominant cost).
+      setViewGesturing(true);
       useEditorStore.getState().setView({
         panX: this.panOrigin.x + (screen.x - this.panStart.x),
         panY: this.panOrigin.y + (screen.y - this.panStart.y),
@@ -136,7 +159,7 @@ export class InteractionHost {
 
   private onPointerUp = (e: PointerEvent) => {
     try { this.el.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
-    if (this.panning) { this.panning = false; return; }
+    if (this.panning) { this.panning = false; this.settleView(); return; }
     // Finalize an Edit Mask erase: commit one deletion rectangle (one undo step),
     // OSS mouseReleaseEvent appends to deletion_rectangles + subtracts the path.
     if (this.maskErase) {
@@ -161,7 +184,7 @@ export class InteractionHost {
   // in-flight Edit-Mask erase is dropped without appending its rectangle.
   private onPointerCancel = (e: PointerEvent) => {
     try { this.el.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
-    if (this.panning) { this.panning = false; return; }
+    if (this.panning) { this.panning = false; this.settleView(); return; }
     if (this.maskErase) { this.maskErase = null; useEditorStore.getState().setEraser(null); requestOverlay(); return; }
     this.mode().onCancel?.(this.ctx());
   };
@@ -176,8 +199,24 @@ export class InteractionHost {
     const world = screenToWorld(screen, view);
     const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
     const zoom = Math.max(0.1, Math.min(5, view.zoom * factor));
-    st.setView({ zoom, panX: screen.x - world.x * zoom, panY: screen.y - world.y * zoom });
+    const panX = screen.x - world.x * zoom;
+    const panY = screen.y - world.y * zoom;
+    // R2: mark the view gesture so the per-notch render (requested by CanvasStage's view
+    // effect) is DRAFT (shadows off) — fast and full-viewport correct — then do one crisp
+    // shadowed render VIEW_SETTLE_MS after the last notch.
+    setViewGesturing(true);
+    st.setView({ zoom, panX, panY });
+    if (this.viewSettleTimer) clearTimeout(this.viewSettleTimer);
+    this.viewSettleTimer = setTimeout(() => this.settleView(), VIEW_SETTLE_MS);
   };
+
+  // Exit a view gesture and do the crisp, shadowed re-stroke at the final view. Called on the
+  // wheel idle settle and on hand-pan pointer-up.
+  private settleView(): void {
+    if (this.viewSettleTimer) { clearTimeout(this.viewSettleTimer); this.viewSettleTimer = null; }
+    setViewGesturing(false);
+    requestRender();
+  }
 
   private onContextMenu = (e: MouseEvent) => { e.preventDefault(); };
 
