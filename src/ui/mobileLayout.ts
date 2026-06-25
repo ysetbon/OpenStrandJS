@@ -27,18 +27,25 @@
 // divides by the canvas's getBoundingClientRect (which already reflects the live
 // transform), and the rotation is handled explicitly via getAppRotationDeg().
 
-// Desktop design space, in *layout* px. This is the 1440×900 "great" desktop
-// window divided back out of its 0.65 page zoom (1440/0.65, 900/0.65): the exact
-// layout box the chrome was authored for. Width grows to match the phone's aspect
-// ratio so the canvas fills the screen (just like widening a desktop window);
-// height is fixed so the chrome scales identically to desktop.
-const REF_H = 1385;
-const MIN_REF_W = 2215;
+// Desktop design space, in *layout* px. The base 2215×1385 box is the 1440×900
+// "great" desktop window divided back out of its 0.65 page zoom (1440/0.65,
+// 900/0.65): the exact layout box the chrome was authored for.
+//
+// On a phone that whole box is scaled to FIT the screen, which makes the chrome
+// tiny. UI_SCALE shrinks the design box so the same fit fills the screen with the
+// chrome UI_SCALE× bigger — the desktop UI lays out in less room (the canvas
+// gives up the slack) and everything still fits with NO panning. 1.5 ≈ "the whole
+// UI 150% bigger" while staying fully visible. Width grows to the phone's aspect
+// ratio so the canvas fills the screen; height is fixed.
+const UI_SCALE = 1.5;
+const REF_H = Math.round(1385 / UI_SCALE);
+const MIN_REF_W = Math.round(2215 / UI_SCALE);
 
-// User zoom multiplied on top of the fit-to-screen scale. 1 = full overview
-// (fit), DEFAULT_ZOOM = the "open at 150%" default, MAX_ZOOM = closest you can
-// pinch in. The floor is 1 so you can always pinch back out to the whole UI.
-const DEFAULT_ZOOM = 1.5;
+// Extra user zoom on top of the fit scale, for pinching in CLOSER than the
+// default fit. 1 = the default full-fit view (everything visible, UI_SCALE×
+// bigger); MAX_ZOOM = closest pinch-in. Floor 1 so pinch-out always returns to
+// the full UI — never smaller.
+const DEFAULT_ZOOM = 1;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 4;
 
