@@ -9,6 +9,7 @@ import { requestOverlay, requestRender } from '../renderer/renderScheduler';
 import { modes } from '../modes';
 import { SelectMode } from '../modes/SelectMode';
 import { addDeletionRect } from '../store/actions';
+import { getAppRotationDeg } from '../ui/mobileLayout';
 import type { Mode, ModeContext, PointerInfo } from '../modes/Mode';
 import type { Point } from '../model/types';
 
@@ -74,8 +75,22 @@ export class InteractionHost {
 
   private toScreen(e: PointerEvent | WheelEvent): Point {
     const rect = this.el.getBoundingClientRect();
-    const sx = (e.clientX - rect.left) * (this.el.width / Math.max(1, rect.width));
-    const sy = (e.clientY - rect.top) * (this.el.height / Math.max(1, rect.height));
+    const W = this.el.width;
+    const H = this.el.height;
+    // On a portrait phone the whole app is rotated 90° clockwise (mobileLayout.ts)
+    // to force a horizontal layout. getBoundingClientRect then reports the rotated
+    // bounding box, so map the client point through the inverse rotation: the
+    // canvas's +x runs down the screen (from rect.top) and +y runs left (from
+    // rect.right). The scale factor cancels with W/H, so this also covers the
+    // uniform scale-to-fit on landscape phones.
+    if (getAppRotationDeg() === 90) {
+      return {
+        x: (e.clientY - rect.top) * (W / Math.max(1, rect.height)),
+        y: (rect.right - e.clientX) * (H / Math.max(1, rect.width)),
+      };
+    }
+    const sx = (e.clientX - rect.left) * (W / Math.max(1, rect.width));
+    const sy = (e.clientY - rect.top) * (H / Math.max(1, rect.height));
     return { x: sx, y: sy };
   }
 
