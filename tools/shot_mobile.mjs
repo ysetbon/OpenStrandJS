@@ -1,6 +1,6 @@
-// Screenshots the mobile view at several ?uiscale= values to find the biggest UI
-// that still fits without the toolbar wrapping. Reports toolbar row height (a
-// jump = wrapped to a second row) and whether the app fits the viewport.
+// Loads a multi-strand fixture into the live dev editor (via the Vite module
+// graph + the DEV __store) then screenshots the mobile layer/group panels to
+// confirm they're compact (no big empty gap). Usage: node tools/shot_mobile.mjs
 import { chromium } from 'playwright';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -10,43 +10,48 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = path.join(root, 'artifacts');
 fs.mkdirSync(outDir, { recursive: true });
 const log = (...a) => process.stderr.write(a.join(' ') + '\n');
-
-// Their phone ≈ 787×382 CSS (1574×764 @ DPR2). Also a common 844×390.
-const VP = { width: 787, height: 382 };
-const SCALES = [1.5, 2, 2.5, 3];
+const fixture = JSON.parse(fs.readFileSync(path.join(root, 'fixtures', 'box_stitch.json'), 'utf8'));
 
 let browser;
 try {
   browser = await chromium.launch();
-  const out = [];
-  for (const us of SCALES) {
-    const ctx = await browser.newContext({ viewport: VP, hasTouch: true });
-    const page = await ctx.newPage();
-    const errs = [];
-    page.on('pageerror', (e) => errs.push(String(e)));
-    await page.goto(`http://localhost:5173/?mobile=1&uiscale=${us}`, { waitUntil: 'domcontentloaded', timeout: 15000 });
-    await page.waitForSelector('.app', { timeout: 10000 });
-    await page.waitForTimeout(500);
-    const info = await page.evaluate(() => {
-      const app = document.querySelector('.app');
-      const r = app.getBoundingClientRect();
-      // Toolbar = the row holding the mode buttons. Find the button labeled "View"
-      // and report its toolbar container's design height (wrap → taller).
-      const btns = [...app.querySelectorAll('button')];
-      const view = btns.find((b) => b.textContent.trim() === 'View');
-      const bar = view ? view.parentElement : null;
-      return {
-        appW: Math.round(r.width), appH: Math.round(r.height),
-        designW: app.offsetWidth, designH: app.offsetHeight,
-        toolbarDesignH: bar ? bar.offsetHeight : null,
-        viewBtnDesignH: view ? view.offsetHeight : null,
-      };
-    });
-    await page.screenshot({ path: path.join(outDir, `mobile_uiscale_${us}.png`) });
-    out.push({ uiscale: us, ...info, fits: info.appW <= VP.width + 1 && info.appH <= VP.height + 1, errs });
-    await ctx.close();
-  }
-  console.log(JSON.stringify(out, null, 2));
+  const ctx = await browser.newContext({ viewport: { width: 787, height: 382 }, hasTouch: true });
+  const page = await ctx.newPage();
+  const errs = [];
+  page.on('pageerror', (e) => errs.push(String(e)));
+  page.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
+
+  await page.goto('http://localhost:5173/?mobile=1', { waitUntil: 'domcontentloaded', timeout: 15000 });
+  await page.waitForSelector('.app', { timeout: 10000 });
+
+  const loaded = await page.evaluate(async (fx) => {
+    const mod = await import('/src/io/saveLoad.ts');
+    const doc = mod.loadProject(fx);
+    window.__store.getState().loadDocument(doc);
+    return { order: window.__store.getState().doc.order };
+  }, fixture);
+  log('loaded layers:', JSON.stringify(loaded.order));
+  await page.waitForTimeout(500);
+
+  // Measure the empty gap between the control column and the first layer button.
+  const gaps = await page.evaluate(() => {
+    const cc = document.querySelector('.layer-panel .control-column, .layer-panel [class*="control"]');
+    const firstItem = document.querySelector('.lp-list .lp-item');
+    const list = document.querySelector('.lp-list');
+    const gp = document.querySelector('.gp-tree');
+    const r = (el) => el ? el.getBoundingClientRect() : null;
+    return {
+      listRect: r(list), firstItemRect: r(firstItem),
+      gpRect: r(gp),
+      // gap from list top to first item top (design px under the app transform are
+      // screen px here; small gap == compact/top-aligned).
+      listTopToFirstItem: list && firstItem ? Math.round(r(firstItem).top - r(list).top) : null,
+    };
+  });
+  log('gap list-top → first layer (px):', gaps.listTopToFirstItem);
+  await page.screenshot({ path: path.join(outDir, 'mobile_panels_compact.png') });
+
+  console.log(JSON.stringify({ layers: loaded.order, gaps, errs }, null, 2));
 } catch (e) {
   log('ERROR:', String(e));
 } finally {

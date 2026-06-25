@@ -62,3 +62,17 @@ html.mobile .tb-btn {
 html.mobile .tb-spacer {
   display: none;
 }
+
+/* Compact the layer + group panels on mobile. The desktop layout GROWS the layer
+ * list (bottom-aligned) and the group tree to fill the tall panel, which leaves a
+ * big empty band when there are only a few layers/groups. On a phone, size both
+ * to their content and pack from the top so there's no useless gap — any leftover
+ * height falls harmlessly to the bottom of the panel. Both still scroll when the
+ * content outgrows the available space (flex-shrink + min-height:0 + overflow). */
+html.mobile .lp-list {
+  flex: 0 1 auto;
+  justify-content: flex-start;
+}
+html.mobile .lp-right .gp-tree {
+  flex: 0 1 auto;
+}
