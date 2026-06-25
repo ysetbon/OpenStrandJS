@@ -36,6 +36,9 @@ export class InteractionHost {
   private maskErase: { start: Point } | null = null;
   // R2: idle timer that fires the crisp settle render after the last wheel notch.
   private viewSettleTimer: ReturnType<typeof setTimeout> | null = null;
+  // R4 diagnostic (dev-only): pointermove dispatches counted in the current frame.
+  private moveCountThisFrame = 0;
+  private moveCountRaf: number | null = null;
 
   constructor(private el: HTMLCanvasElement) {
     el.addEventListener('pointerdown', this.onPointerDown);
@@ -50,6 +53,7 @@ export class InteractionHost {
 
   detach(): void {
     if (this.viewSettleTimer) { clearTimeout(this.viewSettleTimer); this.viewSettleTimer = null; }
+    if (this.moveCountRaf != null) { cancelAnimationFrame(this.moveCountRaf); this.moveCountRaf = null; }
     setViewGesturing(false);
     const el = this.el;
     el.removeEventListener('pointerdown', this.onPointerDown);
@@ -150,6 +154,20 @@ export class InteractionHost {
       if (target) useEditorStore.getState().setEraser({ layerName: target, rect: rectOf(this.maskErase.start, world) });
       requestOverlay();
       return;
+    }
+    // R4 diagnostic (dev-only, no behavior change): count move dispatches per animation
+    // frame while dragging. If this is consistently 1, the browser already coalesces moves
+    // to one-per-frame and R4 (rAF-coalescing) would only add latency; if it's >1, R4 helps.
+    if (import.meta.env?.DEV && useEditorStore.getState().dragging) {
+      this.moveCountThisFrame++;
+      if (this.moveCountRaf == null) {
+        this.moveCountRaf = requestAnimationFrame(() => {
+          // eslint-disable-next-line no-console
+          console.log(`[OpenStrandJS perf] pointermove dispatches this frame: ${this.moveCountThisFrame}`);
+          this.moveCountThisFrame = 0;
+          this.moveCountRaf = null;
+        });
+      }
     }
     this.mode().onPointerMove(this.info(e), this.ctx());
     // Cursor feedback: crosshair during an Edit Mask session, grab over a handle.
