@@ -319,30 +319,10 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
       items.push({ label: '', rowLabel: t('line', lang), buttons });
     }
 
-    // ---- Circle group (start/end circle visibility) ----
-    // OSS compound row: "Circle" label (no padding) + inline Start/End buttons.
-    // Gating: a child attached at side 0 -> start; side 1 -> end. AttachedStrand
-    // always allows its start toggle.
-    // TODO(oss-fidelity): child-scan gating approximated; renderer parity unverified.
-    const sides = childSides();
-    const showStart = isAttached || sides.start;
-    const showEnd = sides.end;
-    if (showStart || showEnd) {
-      const hc = strand?.has_circles ?? [false, false];
-      const buttons: MenuRowButton[] = [];
-      if (showStart) buttons.push({
-        label: hc[0] ? t('hide_start_circle', lang) : t('show_start_circle', lang),
-        onClick: () => commitEdit((d) => toggleCircleVisible(d, name, 0)),
-      });
-      if (showEnd) buttons.push({
-        label: hc[1] ? t('hide_end_circle', lang) : t('show_end_circle', lang),
-        onClick: () => commitEdit((d) => toggleCircleVisible(d, name, 1)),
-      });
-      items.push({ label: '', separator: true });
-      items.push({ label: '', rowLabel: t('circle', lang), buttons, noPad: true });
-    }
-
     // ---- Close the Knot (exactly one free end) ----
+    // OSS emits Close-the-Knot BEFORE the Circle row (numbered_layer_button.py:771
+    // adds close_knot_action; the Circle QWidgetAction is added later at :945), so
+    // it precedes the Circle group here. `hc` is reused by the Circle block below.
     const hc = strand?.has_circles ?? [false, false];
     let freeCount = 0;
     let freeEndType: 'start' | 'end' = 'end';
@@ -361,6 +341,29 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
           onClick: () => commitEdit((d) => closeKnot(d, name, freeEndType)),
         },
       );
+    }
+
+    // ---- Circle group (start/end circle visibility) ----
+    // OSS compound row: "Circle" label (no padding) + inline Start/End buttons,
+    // emitted LAST (after Close-the-Knot, per OSS ordering). Gating: a child
+    // attached at side 0 -> start; side 1 -> end. AttachedStrand always allows its
+    // start toggle.
+    // TODO(oss-fidelity): child-scan gating approximated; renderer parity unverified.
+    const sides = childSides();
+    const showStart = isAttached || sides.start;
+    const showEnd = sides.end;
+    if (showStart || showEnd) {
+      const buttons: MenuRowButton[] = [];
+      if (showStart) buttons.push({
+        label: hc[0] ? t('hide_start_circle', lang) : t('show_start_circle', lang),
+        onClick: () => commitEdit((d) => toggleCircleVisible(d, name, 0)),
+      });
+      if (showEnd) buttons.push({
+        label: hc[1] ? t('hide_end_circle', lang) : t('show_end_circle', lang),
+        onClick: () => commitEdit((d) => toggleCircleVisible(d, name, 1)),
+      });
+      items.push({ label: '', separator: true });
+      items.push({ label: '', rowLabel: t('circle', lang), buttons, noPad: true });
     }
 
     return items;

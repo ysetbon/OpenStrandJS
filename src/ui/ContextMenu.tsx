@@ -65,7 +65,18 @@ export function ContextMenu(props: {
 }): JSX.Element {
   const { items, x, y, onClose } = props;
   const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; top: number }>({ left: x, top: y });
+  // styles.css applies a global `html { zoom: 0.65 }`. Under that zoom, e.clientX/
+  // clientY AND el.getBoundingClientRect() AND document.documentElement.clientWidth
+  // are all in VISUAL (post-zoom screen) px — but a position:fixed element's inline
+  // left/top are LAYOUT px, painted on screen at left*zoom. So we do ALL placement +
+  // clamp math in visual px (the space clientX lives in), then divide the final
+  // result by `zoom` ONCE to get the layout px the inline style needs. No-op at
+  // zoom === 1. (`zoom` reads as a string like '0.65', or 'normal'/'' when unset;
+  // coerce to 1.) NOTE: documentElement.clientWidth is the VISUAL viewport here
+  // (the zoomed root reports the visual size, not layout) — do not treat it as
+  // layout px, and do not mix layout-px offsetWidth into this visual-px clamp.
+  const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+  const [pos, setPos] = useState<{ left: number; top: number }>({ left: x / zoom, top: y / zoom });
 
   const lang = useEditorStore((s) => s.settings.language);
   const theme = useEditorStore((s) => s.settings.theme);
@@ -74,22 +85,25 @@ export function ContextMenu(props: {
 
   const minWidth = useMemo(() => computeMenuWidth(items), [items]);
 
-  // Clamp to viewport once the menu has been measured.
+  // Clamp to the viewport once the menu has been measured — ALL in VISUAL px
+  // (the space clientX, getBoundingClientRect and documentElement.clientWidth
+  // share under html{zoom}), then convert to layout px once via `/ zoom`.
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
+    const rect = el.getBoundingClientRect();          // visual px (post-zoom)
+    const vw = document.documentElement.clientWidth;  // visual viewport px
+    const vh = document.documentElement.clientHeight;
     const margin = 4;
-    let left = x;
+    let left = x;                                     // clientX, visual px
     let top = y;
     if (left + rect.width > vw - margin) left = Math.max(margin, vw - rect.width - margin);
     if (top + rect.height > vh - margin) top = Math.max(margin, vh - rect.height - margin);
     if (left < margin) left = margin;
     if (top < margin) top = margin;
-    setPos({ left, top });
-  }, [x, y, items]);
+    // visual px -> layout px for the position:fixed inline style.
+    setPos({ left: left / zoom, top: top / zoom });
+  }, [x, y, items, zoom]);
 
   // Close on outside-click / Escape.
   useEffect(() => {
