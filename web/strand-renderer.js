@@ -1362,31 +1362,34 @@ let DRAG_BG = null; // { bands, W, H, ox, oy, zoom, topo }
 // position-INDEPENDENT and so identical on every frame of an endpoint/CP drag
 // (welded children move rigidly with their parent endpoint, so the attachment a
 // child registers at its parent's endpoint never changes within the gesture).
-// byLayer / enableThird are likewise topology, not position. Computing them ONCE
-// at bake — instead of re-running the O(N^2) computeHasCircles pass every frame —
-// is the per-frame win. Returns { hasCircles: Map<layer_name,[bool,bool]>,
-// byLayer, enableThird }; has_circles is stored in the Map, NOT mutated onto s,
-// so the bake/frame callers apply it only to the strands they actually draw.
+// enableThird (does ANY strand carry a third control point) is likewise topology,
+// not position. Computing these ONCE at bake — instead of re-running the O(N^2)
+// computeHasCircles pass every frame — is the per-frame win. byLayer is deliberately
+// NOT cached here: it maps layer_name -> the strand OBJECT, whose coordinates change
+// every frame, so caching it would freeze a mask's crossing at the bake position;
+// _dragPaint rebuilds it from the live per-frame strands instead. Returns
+// { hasCircles: Map<layer_name,[bool,bool]>, enableThird }; has_circles is stored in
+// the Map, NOT mutated onto s, so the bake/frame callers apply it only to the strands
+// they actually draw.
 function computeDragTopology(strands) {
   const enableThird = strands.some((s) => s.control_point_center != null);
-  const byLayer = {};
-  for (const s of strands) byLayer[s.layer_name] = s;
   const hasCircles = new Map();
   for (const s of strands) {
     if (s.type === 'MaskedStrand') continue;
     hasCircles.set(s.layer_name, computeHasCircles(s, strands));
   }
-  return { hasCircles, byLayer, enableThird };
+  return { hasCircles, enableThird };
 }
 
 // Paint the strands for which shouldDraw(layer_name) is true into targetCanvas at
-// native (supersample-1) scale, no shadows. Shared by the bake and per-frame paths.
-// `topo` (from computeDragTopology) carries the gesture-invariant has_circles /
-// byLayer / enableThird so the per-frame path skips the O(N^2) topology pass; when
-// absent (defensive fallback) the per-frame topology is recomputed here so the
-// function stays self-contained. Leaves the Paper project active for the caller to
-// read / composite, then remove.
-function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg, topo) {
+// native (supersample-1) scale. Shared by the bake and per-frame paths. `topo` (from
+// computeDragTopology) carries the gesture-invariant has_circles / enableThird so the
+// per-frame path skips the O(N^2) topology pass; when absent (defensive fallback) the
+// per-frame topology is recomputed here. byLayer is rebuilt from the live `strands`
+// below (mask crossings need the CURRENT component geometry). `shadows` turns on the
+// moving MASK's own crossing shadow (the static bake passes false). Leaves the Paper
+// project active for the caller to read / composite, then remove.
+function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg, topo, shadows) {
   if (meta.curve_params) CURVE = meta.curve_params;
   BIAS_ENABLED = !!meta.curvature_bias;
   SAMPLE_STEP = DRAG_SAMPLE_STEP; // coarse sampling keeps per-frame stroking cheap
@@ -1405,16 +1408,45 @@ function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg, topo) {
   // Matches renderFixture's P at ss=1: P(pt) = pt*S + offset.
   const P = (pt) => new paper.Point(pt.x * S + ox, pt.y * S + oy);
   if (!topo) topo = computeDragTopology(strands); // defensive self-contained fallback
-  const { hasCircles, byLayer, enableThird } = topo;
-  SHADOW_ENABLED = false; // no shadows while dragging (restored by renderFixture on release)
+  const { hasCircles, enableThird } = topo;
+  // byLayer MUST be rebuilt from the LIVE per-frame `strands`, not reused from `topo`.
+  // A MaskedStrand re-derives its crossing from its two component strands' geometry, so
+  // it has to read the CURRENT (moved) component objects. `topo` is baked ONCE at gesture
+  // start (renderDragBackground), and immer hands the renderer brand-new strand objects
+  // every frame — so topo.byLayer holds STALE bake-time positions and would freeze the
+  // mask crossing at the start-of-drag overlap while the components visibly move (the
+  // erase windows, which ride the live centroid, would then drift off the frozen patch).
+  // OSS recomputes get_mask_path() from the live first/second_selected_strand every frame
+  // (masked_strand.py:235-278). Only byLayer's KEYS are gesture-invariant; the mapped
+  // objects carry positions — so cache hasCircles/enableThird (true topology) but rebuild
+  // byLayer here. O(N) name->object pass, negligible vs stroking. On the bake path
+  // `strands` IS the bake-time array, so this reproduces the old topo.byLayer exactly.
+  const byLayer = {};
+  for (const s of strands) byLayer[s.layer_name] = s;
+  // Shadows are OFF for the static bake (cheap, and the cache holds resting geometry),
+  // but the live moving band passes shadows=true so a moving MASK still draws its own
+  // crossing shadow every frame — OSS draws draw_mask_strand_shadow inside MaskedStrand.draw
+  // unless canvas.shadow_enabled is false (masked_strand.py:490-552). Regular strands never
+  // cast here (the drag path has no castStrandShadow call), so a moving strand's shadow ONTO
+  // lower layers stays a per-frame perf residual, restored by the full renderFixture on
+  // pointer-up. drawMaskShadow needs SHADOW_PAINT (the solid-core paint), so set it here.
+  SHADOW_ENABLED = !!shadows;
+  if (SHADOW_ENABLED) SHADOW_PAINT = toColor(SHADOW_COLOR);
   for (let i = 0; i < strands.length; i++) {
     const s = strands[i];
     if (!shouldDraw(s.layer_name)) continue;
-    if (s.type === 'MaskedStrand') { drawMasked(s, byLayer, P, enableThird, S); continue; }
+    // shadow_only mask: drawMasked still owns its crossing shadow (drawn when shadows are
+    // on) but the early-return paints NO body (matches renderFixture:1261 + OSS
+    // masked_strand.py:561-568 — a shadow_only mask shows only its shadow, no body).
+    if (s.type === 'MaskedStrand') { drawMasked(s, byLayer, P, enableThird, S, s.shadow_only === true); continue; }
     // Apply the cached topology to the strand we are about to draw (the Map holds
     // every non-masked strand's value, computed once per gesture at bake).
     const hc = hasCircles.get(s.layer_name);
     if (hc) s.has_circles = hc;
+    // shadow_only regular strand: body suppressed (renderFixture:1271). It would only
+    // contribute a cast shadow, which the drag path doesn't draw — so it is body-less,
+    // matching the release frame.
+    if (s.shadow_only) continue;
     drawStrand(s, strands, P, enableThird, S);
   }
   paper.view.update();
@@ -1422,49 +1454,54 @@ function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg, topo) {
 
 // Bake the STATIC strands into per-band offscreen bitmaps, split by the moving
 // set so true z-order is preserved during the gesture. Call once at the start of
-// a drag. The strands array is already z-ordered (doc order); we walk it and let
-// any moving-set layer act as a SEPARATOR. Each maximal run of consecutive static
-// strands becomes its own band bitmap; the moving set's z-slot becomes a 'move'
-// placeholder stroked live each frame. In the common case (moving set contiguous)
-// this yields BELOW band, move, ABOVE band. Computes the gesture-invariant
-// topology ONCE here and stashes it (with the bands) on DRAG_BG so every
-// renderDragFrame reuses it instead of recomputing.
+// a drag. The strands array is already z-ordered (doc order); we walk it and split
+// it into MAXIMAL runs: a run of consecutive static strands becomes a baked 'band'
+// bitmap, a run of consecutive MOVING strands becomes a 'move' slot stroked live
+// each frame (carrying that run's layer names). Crucially, moving runs are NOT
+// collapsed across an intervening static strand: order [A(move), X(static), mask(move)]
+// yields move[A], band[X], move[mask] so X keeps its true depth between them — OSS
+// redraws every strand in doc order over the static cache (move_mode.py:803), so a
+// static strand z-between two moving ones must stay between them. Computes the
+// gesture-invariant topology ONCE here and stashes it (with the bands) on DRAG_BG so
+// every renderDragFrame reuses it instead of recomputing.
 window.renderDragBackground = function (strands, meta) {
   const W = meta.image_width, H = meta.image_height;
   const moving = new Set((meta.drag && meta.drag.moving) || []);
   const topo = computeDragTopology(strands);
   // Partition strands into ordered segments: maximal runs of static strands
-  // alternating with the moving-set slots. A MaskedStrand whose components move is
-  // already in the moving set (movingStrandSet), so testing layer membership is
-  // enough to keep masks that straddle a boundary out of a static band.
+  // alternating with maximal runs of moving strands. A MaskedStrand whose components
+  // move is already in the moving set (movingStrandSet), so testing layer membership
+  // is enough to keep masks that straddle a boundary out of a static band.
   const bands = [];
-  let run = null; // current static layer-name run, or null
-  let inMove = false; // last separator slot already recorded as 'move'?
+  let run = null;     // current STATIC layer-name run, or null
+  let moveRun = null; // current MOVING layer-name run, or null
   for (let i = 0; i < strands.length; i++) {
     const name = strands[i].layer_name;
     if (moving.has(name)) {
       if (run) { bands.push({ kind: 'band', names: run }); run = null; }
-      // Collapse a contiguous cluster of moving strands into a single 'move' slot.
-      if (!inMove) { bands.push({ kind: 'move' }); inMove = true; }
+      if (!moveRun) moveRun = new Set();
+      moveRun.add(name);
     } else {
+      if (moveRun) { bands.push({ kind: 'move', names: moveRun }); moveRun = null; }
       if (!run) run = new Set();
       run.add(name);
-      inMove = false;
     }
   }
   if (run) bands.push({ kind: 'band', names: run });
-  // Bake each static run into its own TRANSPARENT bitmap. The white backdrop is
-  // painted once on the visible canvas in renderDragFrame (not baked into any
-  // band) so the bands composite cleanly in any order regardless of which one is
-  // first — including the case where the moving set is at the very bottom and no
-  // BELOW band exists.
+  if (moveRun) bands.push({ kind: 'move', names: moveRun });
+  // Bake each static run into its own TRANSPARENT bitmap (shadows OFF — the cache holds
+  // resting geometry; the live moving band restores the mask's own crossing shadow). The
+  // white backdrop is painted once on the visible canvas in renderDragFrame (not baked
+  // into any band) so the bands composite cleanly in any order regardless of which one is
+  // first — including the case where the moving set is at the very bottom and no BELOW
+  // band exists. 'move' slots keep their `names` for renderDragFrame to stroke live.
   for (const b of bands) {
     if (b.kind !== 'band') continue;
     const c = document.createElement('canvas');
-    _dragPaint(c, strands, meta, (name) => b.names.has(name), false, topo);
+    _dragPaint(c, strands, meta, (name) => b.names.has(name), false, topo, false);
     paper.project.remove();
     b.canvas = c;
-    delete b.names; // names only needed during bake
+    delete b.names; // band names only needed during bake; move-slot names are kept
   }
   DRAG_BG = {
     bands, W, H, ox: meta.x_offset, oy: meta.y_offset, zoom: meta.zoom || 1, topo,
@@ -1484,12 +1521,6 @@ window.renderDragFrame = function (strands, meta) {
       DRAG_BG.zoom !== (meta.zoom || 1)) {
     return window.renderFixture(strands, meta);
   }
-  const moving = new Set((meta.drag && meta.drag.moving) || []);
-  // Stroke the moving strands once into a transparent offscreen bitmap; it gets
-  // blitted at every 'move' slot in the band order (normally exactly one slot).
-  const mv = document.createElement('canvas');
-  _dragPaint(mv, strands, meta, (name) => moving.has(name), false, DRAG_BG.topo);
-  paper.project.remove();
   const vis = document.getElementById('c');
   vis.width = W;
   vis.height = H;
@@ -1523,13 +1554,27 @@ window.renderDragFrame = function (strands, meta) {
     }
     ctx.restore();
   }
-  // Composite bands bottom-to-top in document z-order, dropping in the moving
-  // strokes at their z-slot. Per-frame work = k band blits + the one mv blit.
+  // Composite bands bottom-to-top in document z-order. Each 'move' slot strokes ONLY its
+  // own contiguous moving run live (so a static band z-between two moving runs keeps its
+  // true depth), with shadows on so a moving mask draws its own crossing shadow. Per-frame
+  // work = k band blits + one live stroke per move slot — normally exactly one slot
+  // stroking the whole moving set (same cost as before); extra slots appear only when a
+  // static strand is interleaved, and the slots partition the moving set so total stroke
+  // work is unchanged.
+  const shadows = meta.shadow_enabled !== false;
+  let drawn = 0;
   for (const b of DRAG_BG.bands) {
-    if (b.kind === 'move') ctx.drawImage(mv, 0, 0);
-    else ctx.drawImage(b.canvas, 0, 0);
+    if (b.kind === 'move') {
+      const mv = document.createElement('canvas');
+      _dragPaint(mv, strands, meta, (name) => b.names.has(name), false, DRAG_BG.topo, shadows);
+      paper.project.remove();
+      ctx.drawImage(mv, 0, 0);
+      drawn += b.names.size;
+    } else {
+      ctx.drawImage(b.canvas, 0, 0);
+    }
   }
-  return { drawn: moving.size, mode: 'dragframe', bands: DRAG_BG.bands.length };
+  return { drawn, mode: 'dragframe', bands: DRAG_BG.bands.length };
 };
 
 // Drop the cached background at the end of a gesture (or before any full render).

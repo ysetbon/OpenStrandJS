@@ -87,16 +87,19 @@ function schedule(): void {
       const arr = toRenderArray(doc, selection.layerName, highlightSet, viewHideHighlight);
       if (dragging && dragMoving.length) {
         // DRAG FAST-PATH (mirrors the original's draw-only-affected-strand path).
-        // Render at native resolution with shadows off: bake every STATIC strand
-        // once into a cached bitmap, then each frame draw ONLY the moving strands
-        // over that cache. Per-frame work is O(moving strands), not O(all strands),
-        // so dragging stays smooth regardless of scene size. The fidelity harness
-        // calls renderFixture directly and never sets meta.drag, so the oracle's
-        // default output is unchanged.
+        // Render at native resolution: bake every STATIC strand once into a cached
+        // bitmap (shadows off — the bake's concern is cheap resting geometry), then
+        // each frame draw ONLY the moving strands over that cache. Per-frame work is
+        // O(moving strands), not O(all strands), so dragging stays smooth regardless of
+        // scene size. shadow_enabled flows through from settings (NOT forced off) so the
+        // live moving band can redraw a moving MASK's own crossing shadow each frame like
+        // OSS; the bake stays shadow-free and a moving strand's cast shadow onto lower
+        // layers is the documented per-frame residual, restored by the pointer-up full
+        // render. The fidelity harness calls renderFixture directly and never sets
+        // meta.drag, so the oracle's default output is unchanged.
         const meta = {
           ...buildMeta(doc, view, settings),
           supersample: 1,
-          shadow_enabled: false,
           drag: { moving: dragMoving },
         };
         // Bake the static background when none is live OR when a prior gesture's
