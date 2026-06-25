@@ -37,7 +37,11 @@
 // gives up the slack) and everything still fits with NO panning. 1.5 ≈ "the whole
 // UI 150% bigger" while staying fully visible. Width grows to the phone's aspect
 // ratio so the canvas fills the screen; height is fixed.
-const UI_SCALE = 1.5;
+const UI_SCALE = (() => {
+  // ?uiscale=N overrides for quick on-device tuning (clamped to a sane range).
+  const q = parseFloat(new URLSearchParams(window.location.search).get('uiscale') || '');
+  return Number.isFinite(q) && q >= 1 && q <= 4 ? q : 2.5;
+})();
 const REF_H = Math.round(1385 / UI_SCALE);
 const MIN_REF_W = Math.round(2215 / UI_SCALE);
 

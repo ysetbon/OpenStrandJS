@@ -40,3 +40,25 @@ html.mobile select,
 html.mobile textarea {
   font-size: 16px;
 }
+
+/* The desktop toolbar is one fixed-height row that shrinks its buttons (and
+ * ellipsises their labels) when narrow. On a phone the design box is small
+ * (UI_SCALE), so instead let the toolbar WRAP to as many rows as needed and let
+ * each button keep its full natural width — buttons render big and labels stay
+ * readable, at the cost of a taller toolbar (the canvas gives up the room). */
+html.mobile .toolbar {
+  flex: 0 0 auto;
+  height: auto;
+  flex-wrap: wrap;
+  overflow: visible;
+  row-gap: 6px;
+}
+html.mobile .tb-btn {
+  flex: 0 0 auto;
+  max-width: none;
+}
+/* The flex spacer would eat a whole wrap row and strand State/gear; drop it so
+ * every button packs together and flows naturally onto the next row. */
+html.mobile .tb-spacer {
+  display: none;
+}
