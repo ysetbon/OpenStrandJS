@@ -159,10 +159,18 @@ export type MoveGrab = { layerName: string; handle: HandleKind } | null;
 export function moveGrab(world: Point, doc: EditorDocument, settings: Settings): MoveGrab {
   const enableThird = settings.enable_third_control_point;
   const enableBias = enableThird && settings.enable_curvature_bias_control;
+  // OSS _is_strand_allowed_by_selection (move_mode.py:1797-1801): when the family
+  // filter (show_cp_selected_only / move_selected_only) is on, ONLY the selected
+  // strand is grabbable/hoverable at EVERY pass — CPs (1817), endpoints + joint
+  // neighbours (1831/1845/1860), and the reverse fallback (1892). Default off ->
+  // everything grabbable, so the common path is unchanged.
+  const filterActive = settings.show_cp_selected_only || settings.move_selected_only;
+  const allowed = (name: string) => !filterActive || name === doc.selected_strand_name;
   // Pass 1 — control points, ALL strands, FORWARD. First hit wins over any endpoint.
   for (const name of doc.order) {
     const s = doc.strands[name];
     if (!moveGrabbable(s)) continue;
+    if (!allowed(name)) continue;
     if (doc.lock_mode && doc.locked_layers.includes(name)) continue;  // locked: no CP grab
     for (const h of moveCpHandles(s, enableThird, enableBias)) {
       if (inSquare(world, h.pos, CP_HALF)) return { layerName: name, handle: h.handle };
@@ -177,6 +185,7 @@ export function moveGrab(world: Point, doc: EditorDocument, settings: Settings):
   for (const name of doc.order) {
     const s = doc.strands[name];
     if (!moveGrabbable(s)) continue;
+    if (!allowed(name)) continue;
     for (const side of [0, 1] as const) {
       const pt = side === 0 ? s.start : s.end;
       if (inSquare(world, pt, ENDPOINT_HALF) && canMoveSide(doc, s, side)) direct.push({ name, side });
@@ -194,8 +203,9 @@ export function moveGrab(world: Point, doc: EditorDocument, settings: Settings):
       // when it is HIDDEN (get_connected_strands has no is_hidden filter — only the
       // DIRECT hits above are visibility-gated), so a hidden parent can still become the
       // preferred grab root. MaskedStrands never appear in the table, so existence is enough.
+      // The family filter still applies to a joint neighbour (OSS move_mode.py:1845/1860).
       const nb = table.get(name, side);
-      if (nb && doc.strands[nb.name]) addJoint(nb.name, nb.point);
+      if (nb && doc.strands[nb.name] && allowed(nb.name)) addJoint(nb.name, nb.point);
     }
     const pick = joint.find((e) => doc.strands[e.name].type !== 'AttachedStrand') ?? joint[0];
     return { layerName: pick.name, handle: pick.side === 0 ? 'start' : 'end' };
@@ -205,6 +215,7 @@ export function moveGrab(world: Point, doc: EditorDocument, settings: Settings):
   for (const name of [...doc.order].reverse()) {
     const s = doc.strands[name];
     if (!moveGrabbable(s)) continue;
+    if (!allowed(name)) continue;
     if (inSquare(world, s.start, ENDPOINT_HALF) && canMoveSide(doc, s, 0)) return { layerName: name, handle: 'start' };
     if (inSquare(world, s.end, ENDPOINT_HALF) && canMoveSide(doc, s, 1)) return { layerName: name, handle: 'end' };
   }

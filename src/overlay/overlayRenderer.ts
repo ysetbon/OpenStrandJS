@@ -52,8 +52,9 @@ const TRI_ANGLES = [270, 30, 150].map((d) => (d * Math.PI) / 180); // apex up (+
 const GREEN = 'rgb(0,128,0)';                  // QColor('green')
 const BLACK = 'rgb(0,0,0)';
 
-// Per-state overlay fills (alpha bytes from OSS converted to 0..1).
-const FILL_ENDPOINT_IDLE = 'rgba(255,0,0,0.149)';   // red alpha 38
+// Per-state overlay fills (alpha bytes from OSS converted to 0..1). The idle
+// endpoint fill is derived from the configurable highlight_color at draw time
+// (drawMoveOverlays), so only the hardcoded-in-OSS fills are constants here.
 const FILL_CP_IDLE = 'rgba(0,100,0,0.149)';         // dark green alpha 38
 const FILL_HOT = 'rgba(255,230,160,0.275)';         // pale yellow alpha 70
 const FILL_ATTACH_START = 'rgba(255,0,0,0.235)';    // red alpha 60
@@ -61,19 +62,42 @@ const FILL_ATTACH_END = 'rgba(0,0,255,0.235)';      // blue alpha 60
 const FILL_ATTACH_HOT = 'rgba(255,230,160,0.549)';  // pale yellow alpha 140
 
 const css = (c: RGBA): string => `rgba(${c.r},${c.g},${c.b},${(c.a ?? 255) / 255})`;
-const CP_SEP = 6;                              // matches hitTest.sep threshold
-const sepFromEnds = (cp: Point, a: Point, b: Point): boolean =>
-  Math.hypot(cp.x - a.x, cp.y - a.y) > CP_SEP && Math.hypot(cp.x - b.x, cp.y - b.y) > CP_SEP;
 
 function interactable(s: StrandRecord | undefined, doc: EditorDocument): s is StrandRecord {
   return !!s && s.type !== 'MaskedStrand' && !s.is_hidden && !doc.locked_layers.includes(s.layer_name);
 }
 
-// cp2 (the circle glyph + connector lines) appears once the curve has been
-// shaped — i.e. cp1/cp2 have moved off the start, mirroring OSS's
-// `triangle_has_moved && show_small_cps` gate.
-function curveShaped(s: StrandRecord): boolean {
-  return !!s.control_point2_shown || sepFromEnds(s.control_points[1], s.start, s.end);
+// OSS draws the control-point glyphs AND the move-mode squares for every real,
+// visible strand — masked + hidden are skipped, but LOCKED strands are NOT
+// (strand_drawing_canvas.py:5995-6004 and 2327-2336 carry no lock check). Lock is
+// enforced only in the grab path (hitTest.ts canMoveSide / the CP-pass lock skip),
+// so the overlay must still SHOW a locked strand's handles, just not let you grab them.
+function overlayVisible(s: StrandRecord | undefined): s is StrandRecord {
+  return !!s && s.type !== 'MaskedStrand' && !s.is_hidden;
+}
+
+// OSS family filter (strand_drawing_canvas.py:2334-2336 + 6006-6009, resolved by
+// is_strand_in_selected_family 5915-5927): when show_cp_selected_only (any mode) or
+// move_selected_only (move mode only) is on, control points / move squares are shown
+// ONLY for the currently selected strand — and nothing at all if nothing is selected.
+function cpFilterHides(st: OverlayState, name: string): boolean {
+  const active = st.settings.show_cp_selected_only
+    || (st.settings.move_selected_only && st.mode === 'move');
+  return active && name !== st.selection.layerName;
+}
+
+// cp2 (the circle glyph) + the dashed connector lines appear on OSS's
+// `show_circle_cp = triangle_has_moved && show_small_cps` gate
+// (strand_drawing_canvas.py:6249-6255): show_small_cps is always true when the third
+// CP is enabled, else it needs at least one of cp1/cp2 OFF the START (per-axis |Δ|>=1px).
+// This is the VISUAL gate only; the sticky control_point2_shown flag still drives cp2
+// GRAB in hitTest.ts (so loaded curves stay editable) — keep the two decoupled.
+function curveShaped(s: StrandRecord, enableThird: boolean): boolean {
+  if (!s.triangle_has_moved) return false;
+  if (enableThird) return true;
+  const atStart = (cp: Point) =>
+    Math.abs(cp.x - s.start.x) < 1.0 && Math.abs(cp.y - s.start.y) < 1.0;
+  return !(atStart(s.control_points[0]) && atStart(s.control_points[1]));
 }
 
 // ---------------------------------------------------------------------------
@@ -121,7 +145,7 @@ function drawSquareGlyph(ctx: CanvasRenderingContext2D, c: Point, z: number, cor
 }
 
 function drawConnectors(ctx: CanvasRenderingContext2D, st: OverlayState, s: StrandRecord): void {
-  if (!curveShaped(s)) return;
+  if (!curveShaped(s, st.settings.enable_third_control_point)) return;
   const z = st.view.zoom;
   const [cp1, cp2] = s.control_points;
   const center = s.control_point_center;
@@ -134,7 +158,7 @@ function drawConnectors(ctx: CanvasRenderingContext2D, st: OverlayState, s: Stra
     ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.stroke();
   };
   ctx.save();
-  ctx.setLineDash([4 * z, 3 * z]);
+  ctx.setLineDash([4 * z, 2 * z]);               // Qt.DashLine pattern (width 1 -> [4,2])
   ctx.lineWidth = GLYPH_FILL_W * z;
   ctx.strokeStyle = GREEN;
   seg(s.start, cp1);
@@ -149,7 +173,7 @@ function drawGlyphs(ctx: CanvasRenderingContext2D, st: OverlayState, s: StrandRe
   const [cp1, cp2] = s.control_points;
   // Triangle (cp1) is always shown when control points are enabled.
   drawTriangleGlyph(ctx, worldToScreen(cp1, st.view), z, coreCss);
-  if (curveShaped(s)) drawCircleGlyph(ctx, worldToScreen(cp2, st.view), z, coreCss);
+  if (curveShaped(s, st.settings.enable_third_control_point)) drawCircleGlyph(ctx, worldToScreen(cp2, st.view), z, coreCss);
   if (s.control_point_center && st.settings.enable_third_control_point && s.triangle_has_moved) {
     drawSquareGlyph(ctx, worldToScreen(s.control_point_center, st.view), z, coreCss);
   }
@@ -174,13 +198,15 @@ function drawBiasSquare(ctx: CanvasRenderingContext2D, c: Point, z: number, core
   ctx.fillStyle = GREEN; ctx.fill();
   ctx.lineWidth = 1.5 * z; ctx.strokeStyle = GREEN; ctx.stroke();
   const ic = BIAS_ICON * 0.5 * z;
-  ctx.fillStyle = coreCss;
+  // OSS draws the icon with BOTH a strand-color brush AND a 1.5px strand-color pen
+  // (curvature_bias_control.py:159-161), so fill then stroke the same path.
+  ctx.fillStyle = coreCss; ctx.strokeStyle = coreCss; ctx.lineWidth = 1.5 * z;
   if (isTriangle) {
     ctx.beginPath();
     ctx.moveTo(c.x, c.y - ic); ctx.lineTo(c.x - ic, c.y + ic); ctx.lineTo(c.x + ic, c.y + ic);
-    ctx.closePath(); ctx.fill();
+    ctx.closePath(); ctx.fill(); ctx.stroke();
   } else {
-    ctx.beginPath(); ctx.arc(c.x, c.y, ic, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(c.x, c.y, ic, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
   }
 }
 
@@ -194,21 +220,26 @@ function drawBiasControls(ctx: CanvasRenderingContext2D, st: OverlayState, s: St
   const coreCss = css(s.color);
   const center = worldToScreen(s.control_point_center, st.view);
   const bt = s.bias_triangle ?? 0.5, bc = s.bias_circle ?? 0.5;
-  // Influence lines (drawn first, under the squares). alpha = round(100*|bias-0.5|*2).
+  // OSS draws the squares FIRST, then the influence lines ON TOP
+  // (curvature_bias_control.py: draw_control_square :114/:117, then
+  // draw_bias_influence_lines :121) — so the dashed line is visible across the square.
+  drawBiasSquare(ctx, worldToScreen(bp.triangle, st.view), z, coreCss, true);
+  drawBiasSquare(ctx, worldToScreen(bp.circle, st.view), z, coreCss, false);
+  // Influence line center->cp, only when bias != 0.5. alpha = int(100*|bias-0.5|*2)
+  // (OSS uses Python int() truncation, NOT round — curvature_bias_control.py:187/193);
+  // Qt.DashLine pattern [4,2].
   const influence = (cpWorld: Point, rgb: string, bias: number) => {
     if (Math.abs(bias - 0.5) < 1e-6) return;
-    const alpha = Math.max(0, Math.min(255, Math.round(100 * Math.abs(bias - 0.5) * 2))) / 255;
+    const alpha = Math.max(0, Math.min(255, Math.floor(100 * Math.abs(bias - 0.5) * 2))) / 255;
     const cp = worldToScreen(cpWorld, st.view);
     ctx.save();
-    ctx.setLineDash([4 * z, 3 * z]); ctx.lineWidth = GLYPH_FILL_W * z;
+    ctx.setLineDash([4 * z, 2 * z]); ctx.lineWidth = GLYPH_FILL_W * z;
     ctx.strokeStyle = `rgba(${rgb},${alpha})`;
     ctx.beginPath(); ctx.moveTo(center.x, center.y); ctx.lineTo(cp.x, cp.y); ctx.stroke();
     ctx.restore();
   };
   influence(s.control_points[0], '255,0,0', bt);
   influence(s.control_points[1], '0,0,255', bc);
-  drawBiasSquare(ctx, worldToScreen(bp.triangle, st.view), z, coreCss, true);
-  drawBiasSquare(ctx, worldToScreen(bp.circle, st.view), z, coreCss, false);
 }
 
 // ---------------------------------------------------------------------------
@@ -225,32 +256,60 @@ function overlaySquare(ctx: CanvasRenderingContext2D, c: Point, halfWorld: numbe
 function drawMoveOverlays(ctx: CanvasRenderingContext2D, st: OverlayState): void {
   const { doc, view, selection, hover, dragging } = st;
   const isEndpoint = (h: HandleKind) => h === 'start' || h === 'end';
+  const hoverIsEnd = hover.handle ? isEndpoint(hover.handle) : false;
+  // World position of the hovered handle, for OSS's skip_for_hover joint dedup: a
+  // non-hovered idle square of the SAME kind sitting on the hovered one (<=5px/axis,
+  // OSS points_are_close tolerance) is suppressed, so a welded joint reads as one
+  // clean yellow square instead of idle-red bleeding out from under the hover.
+  let hoveredPos: Point | null = null;
+  if (!dragging && hover.layerName && hover.handle) {
+    const hs = doc.strands[hover.layerName];
+    const hh = hs && strandHandles(hs, st.settings.enable_third_control_point).find((x) => x.handle === hover.handle);
+    if (hh) hoveredPos = hh.pos;
+  }
+  const near5 = (a: Point, b: Point) => Math.abs(a.x - b.x) <= 5 && Math.abs(a.y - b.y) <= 5;
+  // Idle endpoint squares use the configurable highlight_color (OSS
+  // QColor(highlight_color); setAlpha(38) — strand_drawing_canvas.py:2435-2436);
+  // default red so the out-of-the-box look is unchanged. The dark-green CP idle
+  // fill is hardcoded in OSS too, so it stays a constant.
+  const endpointIdle = css({ ...st.settings.highlight_color, a: 38 });
   const draw = (name: string, h: { handle: HandleKind; pos: Point }) => {
-    const p = worldToScreen(h.pos, view);
     const isEnd = isEndpoint(h.handle);
     const moving = dragging && selection.layerName === name && selection.handle === h.handle;
     const hovered = !dragging && hover.layerName === name && hover.handle === h.handle;
-    const fill = moving || hovered ? FILL_HOT : isEnd ? FILL_ENDPOINT_IDLE : FILL_CP_IDLE;
+    if (!moving && !hovered && hoveredPos && isEnd === hoverIsEnd && near5(h.pos, hoveredPos)) return;
+    const p = worldToScreen(h.pos, view);
+    const fill = moving || hovered ? FILL_HOT : isEnd ? endpointIdle : FILL_CP_IDLE;
     overlaySquare(ctx, p, isEnd ? ENDPOINT_HALF : CP_HALF, view.zoom, fill);
   };
   // During a move drag OSS suppresses every OTHER strand's handle squares (the
   // per-strand `continue` in strand_drawing_canvas.py), showing only the affected
-  // strand's squares (its grabbed handle pale-yellow, its other handles idle). At
-  // rest/hover we still show every strand's squares.
+  // strand's squares. At rest/hover we still show every strand's squares.
   const affected = dragging ? selection.layerName : null;
   // Endpoint (120px) squares first, then control-point (50px) squares on top, so
   // a cp1 square sitting on a fresh strand's start isn't hidden by the big square.
   for (const name of doc.order) {
     const s = doc.strands[name];
-    if (!interactable(s, doc)) continue;
+    if (!overlayVisible(s)) continue;
     if (affected && name !== affected) continue;
+    if (cpFilterHides(st, name)) continue;
     for (const h of strandHandles(s, st.settings.enable_third_control_point)) if (isEndpoint(h.handle)) draw(name, h);
   }
+  // OSS draws the affected strand's endpoints during a CP drag but only the ONE
+  // moving CP square (the `if is_moving_control_point` branch is an if/elif on
+  // selected_side with no else — strand_drawing_canvas.py:2547); the other CPs are
+  // not drawn. So while dragging a control point, skip every CP but the grabbed one.
+  const cpDrag = dragging && !!selection.handle && !isEndpoint(selection.handle);
   for (const name of doc.order) {
     const s = doc.strands[name];
-    if (!interactable(s, doc)) continue;
+    if (!overlayVisible(s)) continue;
     if (affected && name !== affected) continue;
-    for (const h of strandHandles(s, st.settings.enable_third_control_point)) if (!isEndpoint(h.handle)) draw(name, h);
+    if (cpFilterHides(st, name)) continue;
+    for (const h of strandHandles(s, st.settings.enable_third_control_point)) {
+      if (isEndpoint(h.handle)) continue;
+      if (cpDrag && h.handle !== selection.handle) continue;
+      draw(name, h);
+    }
   }
 }
 
@@ -470,8 +529,11 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, st: OverlayState): vo
     const affected = st.dragging && mode === 'move' && selection.handle ? selection.layerName : null;
     for (const name of doc.order) {
       const s = doc.strands[name];
-      if (!interactable(s, doc)) continue;
+      // OSS draw_control_points skips only masked/hidden + the family filter — NOT
+      // locked strands (they still show glyphs, just aren't grabbable).
+      if (!overlayVisible(s)) continue;
       if (affected && name !== affected) continue;
+      if (cpFilterHides(st, name)) continue;
       drawConnectors(ctx, st, s);
       drawGlyphs(ctx, st, s);
       drawBiasControls(ctx, st, s);

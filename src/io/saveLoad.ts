@@ -113,7 +113,10 @@ function loadStrand(raw: any): StrandRecord {
     shadow_only: !!raw.shadow_only,
     circle_stroke_color: raw.circle_stroke_color != null ? asColor(raw.circle_stroke_color, BLACK) : null,
     knot_connections: knot,
-    triangle_has_moved: (raw.triangle_has_moved ?? undefined) || (biasMoved || undefined),
+    // OSS derives triangle_has_moved = distance(cp1, start) > 1.0 when the key is
+    // absent (save_load_manager.py:502-510), so older / non-OSS saves of an already
+    // curved strand still show its cp2/center/connectors. Bias deviation also marks it.
+    triangle_has_moved: (raw.triangle_has_moved ?? (Math.hypot(cp1.x - start.x, cp1.y - start.y) > 1.0)) || biasMoved || undefined,
     control_point2_shown: raw.control_point2_shown ?? undefined,
     control_point2_activated: raw.control_point2_activated ?? undefined,
     extra,
