@@ -63,16 +63,25 @@ html.mobile .tb-spacer {
   display: none;
 }
 
-/* Compact the layer + group panels on mobile. The desktop layout GROWS the layer
- * list (bottom-aligned) and the group tree to fill the tall panel, which leaves a
- * big empty band when there are only a few layers/groups. On a phone, size both
- * to their content and pack from the top so there's no useless gap — any leftover
- * height falls harmlessly to the bottom of the panel. Both still scroll when the
- * content outgrows the available space (flex-shrink + min-height:0 + overflow). */
-html.mobile .lp-list {
-  flex: 0 1 auto;
-  justify-content: flex-start;
+/* Horizontally the layer panel is a fixed 490px: the control column and 146px
+ * layer buttons sit centered (big side gaps) and the 270px group column's Create
+ * Group button + tree only fill ~140px, leaving a wide empty area to its right
+ * (to its LEFT in RTL/Hebrew). On a phone, let the whole panel and both sub-
+ * columns HUG their content so that wasted width collapses and the canvas keeps
+ * it. Logical properties (border-inline-start, etc.) mirror this for RTL. */
+html.mobile .layer-panel {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 0;
 }
-html.mobile .lp-right .gp-tree {
-  flex: 0 1 auto;
+html.mobile .lp-left {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+html.mobile .lp-right {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+html.mobile .gp-panel {
+  min-width: 0;
 }
