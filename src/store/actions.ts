@@ -280,6 +280,136 @@ export function setStrandAngle(
   moveHandle(draft, layerName, 'end', newEnd, curve);   // curve -> faithful mask-rect tracking
 }
 
+// Rotate strand `layerName`'s grabbed endpoint (side: 0=start, 1=end) about the
+// OPPOSITE (fixed) endpoint so it lands on the ray from that pivot toward `target`,
+// at distance `radius` (the grab-time length, held constant). Faithful port of OSS
+// rotate_mode.py update_strand_position: length is preserved exactly, the strand's
+// control points (cp1/cp2/center) rotate about the pivot by the same angular delta,
+// the fixed endpoint never moves, and attached children whose start sits on the
+// moved joint translate RIGIDLY by the joint delta (OSS update_attached_strands —
+// children shift, they are not re-angled). JSON-serializable throughout.
+export function rotateStrandEndpoint(
+  draft: EditorDocument,
+  layerName: string,
+  side: 0 | 1,
+  target: Point,
+  radius: number,
+): void {
+  const s = draft.strands[layerName];
+  if (!s) return;
+  const pivot = side === 0 ? s.end : s.start;          // opposite endpoint (fixed)
+  const moving = side === 0 ? s.start : s.end;
+  const oldMoving = { x: moving.x, y: moving.y };
+  const newAng = Math.atan2(target.y - pivot.y, target.x - pivot.x);
+  const newPt: Point = { x: pivot.x + radius * Math.cos(newAng), y: pivot.y + radius * Math.sin(newAng) };
+  // Per-frame rotation delta = angle(new) - angle(old) about the pivot (OSS
+  // rotation_angle from old_vector vs new_vector). Both points sit at `radius`, so
+  // this is purely the swept angle; control points rotate by it about the pivot.
+  const oldAng = Math.atan2(oldMoving.y - pivot.y, oldMoving.x - pivot.x);
+  const delta = newAng - oldAng;
+  const cos = Math.cos(delta), sin = Math.sin(delta);
+  const rot = (p: Point | null): void => {
+    if (!p) return;
+    const tx = p.x - pivot.x, ty = p.y - pivot.y;
+    p.x = pivot.x + tx * cos - ty * sin;
+    p.y = pivot.y + tx * sin + ty * cos;
+  };
+  rot(s.control_points[0]);
+  rot(s.control_points[1]);
+  rot(s.control_point_center);
+  if (side === 0) s.start = newPt; else s.end = newPt;
+
+  // Attached children at the moved joint translate rigidly by the endpoint delta.
+  const dx = newPt.x - oldMoving.x, dy = newPt.y - oldMoving.y;
+  for (const k of Object.keys(draft.strands)) {
+    const c = draft.strands[k];
+    if (c.type !== 'AttachedStrand' || c.attached_to !== layerName) continue;
+    if (Math.abs(c.start.x - oldMoving.x) + Math.abs(c.start.y - oldMoving.y) >= 0.5) continue;
+    c.start = { x: c.start.x + dx, y: c.start.y + dy };
+    c.end = { x: c.end.x + dx, y: c.end.y + dy };
+    c.control_points[0] = { x: c.control_points[0].x + dx, y: c.control_points[0].y + dy };
+    c.control_points[1] = { x: c.control_points[1].x + dx, y: c.control_points[1].y + dy };
+    if (c.control_point_center) c.control_point_center = { x: c.control_point_center.x + dx, y: c.control_point_center.y + dy };
+  }
+}
+
+// Session state captured when angle-adjust mode activates on a strand (OSS
+// angle_adjust_mode.py activate). Held by the dialog and threaded into
+// applyStrandAngleLength so control points are recomputed from their ORIGINAL
+// activation vectors (scaled + rotated about start) rather than incrementally,
+// matching OSS rotate_control_points_to_new_angle (no per-tick float drift).
+export interface AngleSession {
+  start: Point;               // pivot: the strand start at activation (never moves)
+  angle0: number;             // initial angle in degrees, atan2(end-start)
+  length0: number;            // initial length
+  cp1Vec: Point;              // control_point1 - start at activation
+  cp2Vec: Point;              // control_point2 - start at activation
+  cpCenterVec: Point | null;  // control_point_center - start (null if absent)
+}
+
+// Snapshot a strand's geometry for an angle-adjust session (OSS activate()).
+export function makeAngleSession(s: StrandRecord): AngleSession {
+  const dx = s.end.x - s.start.x, dy = s.end.y - s.start.y;
+  return {
+    start: { x: s.start.x, y: s.start.y },
+    angle0: (Math.atan2(dy, dx) * 180) / Math.PI,
+    length0: Math.hypot(dx, dy),
+    cp1Vec: { x: s.control_points[0].x - s.start.x, y: s.control_points[0].y - s.start.y },
+    cp2Vec: { x: s.control_points[1].x - s.start.x, y: s.control_points[1].y - s.start.y },
+    cpCenterVec: s.control_point_center
+      ? { x: s.control_point_center.x - s.start.x, y: s.control_point_center.y - s.start.y }
+      : null,
+  };
+}
+
+// Apply an absolute angle (deg) + length to a strand, pivoting on its START.
+// Faithful port of OSS angle_adjust_mode.py rotate_strand + set_strand_length +
+// rotate_control_points_to_new_angle: the end is recomputed from angle+length;
+// control points are placed by rotating their ORIGINAL (activation) vectors about
+// start by (angle - angle0) and scaling by (length / length0); attached children
+// whose start sits on the OLD end follow (start -> new end, end fixed, cps shifted
+// by the end delta). The strand's length is set exactly to `length`.
+export function applyStrandAngleLength(
+  draft: EditorDocument,
+  layerName: string,
+  angleDeg: number,
+  length: number,
+  session: AngleSession,
+): void {
+  const s = draft.strands[layerName];
+  if (!s) return;
+  const start = session.start;                          // pivot (pinned)
+  const oldEnd = { x: s.end.x, y: s.end.y };
+  const rad = (angleDeg * Math.PI) / 180;
+  const newEnd: Point = { x: start.x + Math.cos(rad) * length, y: start.y + Math.sin(rad) * length };
+  s.start = { x: start.x, y: start.y };
+  s.end = newEnd;
+
+  const diff = ((angleDeg - session.angle0) * Math.PI) / 180;
+  const scale = session.length0 > 0 ? length / session.length0 : 1;
+  const cos = Math.cos(diff), sin = Math.sin(diff);
+  const place = (v: Point): Point => {
+    const vx = v.x * scale, vy = v.y * scale;
+    return { x: start.x + vx * cos - vy * sin, y: start.y + vx * sin + vy * cos };
+  };
+  s.control_points[0] = place(session.cp1Vec);
+  s.control_points[1] = place(session.cp2Vec);
+  if (s.control_point_center && session.cpCenterVec) s.control_point_center = place(session.cpCenterVec);
+
+  // Children attached at the moved end follow (OSS update_attached_strands): start
+  // snaps to the new end, their own end stays fixed, control points shift by delta.
+  const dx = newEnd.x - oldEnd.x, dy = newEnd.y - oldEnd.y;
+  if (dx === 0 && dy === 0) return;
+  for (const k of Object.keys(draft.strands)) {
+    const c = draft.strands[k];
+    if (c.type !== 'AttachedStrand' || c.attached_to !== layerName) continue;
+    if (Math.abs(c.start.x - oldEnd.x) + Math.abs(c.start.y - oldEnd.y) >= 1) continue; // OSS manhattan < 1
+    c.start = { x: newEnd.x, y: newEnd.y };
+    c.control_points[0] = { x: c.control_points[0].x + dx, y: c.control_points[0].y + dy };
+    c.control_points[1] = { x: c.control_points[1].x + dx, y: c.control_points[1].y + dy };
+  }
+}
+
 // Create a free first strand of a brand-new set. Returns the new layer_name.
 // `defaults` threads the user's default strand colour/stroke/width settings (OSS
 // uses these for new strands); omitted fields fall back to the factory constants.
@@ -989,7 +1119,8 @@ export function createMaskGrid(
 // Dev-only debug handle for testing actions directly.
 if (import.meta.env?.DEV) {
   (globalThis as Record<string, unknown>).__actions = {
-    moveHandle, setStrandAngle, addNewStrand, attachChild, createMask, addDeletionRect, resetMask,
+    moveHandle, setStrandAngle, rotateStrandEndpoint, makeAngleSession, applyStrandAngleLength,
+    addNewStrand, attachChild, createMask, addDeletionRect, resetMask,
     deleteStrand, deleteAllStrands, reorderLayer, toggleHidden, toggleLock,
     setColor, setWidth, setWidthGridUnits, setShadowOnly, isStrandDeletable,
     setCircleStrokeColor, toggleCircleVisible, toggleLineVisible, closeKnot,

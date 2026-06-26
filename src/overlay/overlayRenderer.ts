@@ -15,12 +15,14 @@ import type {
   EditorDocument, HandleKind, ModeName, Point, RGBA, Selection, Settings, StrandRecord, ViewState,
 } from '../model/types';
 import type { PendingStrand } from '../store/editorStore';
+import type { AngleSession } from '../store/actions';
 import {
   DEFAULT_STRAND_COLOR, DEFAULT_STRAND_WIDTH, DEFAULT_STROKE_COLOR, DEFAULT_STROKE_WIDTH,
 } from '../model/factory';
 import { screenToWorld, worldToScreen } from '../interaction/viewTransform';
 import { strandHandles } from '../interaction/hitTest';
-import { sampleCenterline } from '../interaction/hitGeometry';
+import { sampleCenterline, maskCentroid } from '../interaction/hitGeometry';
+import { maskComponents } from '../model/layerName';
 
 export interface OverlayState {
   doc: EditorDocument;
@@ -33,6 +35,12 @@ export interface OverlayState {
   eraser: { layerName: string; rect: { minX: number; minY: number; maxX: number; maxY: number } } | null;
   mode: ModeName;
   dragging: boolean;
+  // OSS should_draw_names: label every strand with its layer_name on the canvas.
+  drawNames: boolean;
+  // OSS AngleAdjustMode: the strand under live angle edit (dialog open) + the
+  // geometry snapshot taken at activation (for the faded-original line + arc span).
+  angleEditTarget: string | null;
+  angleEditInitial: AngleSession | null;
 }
 
 // --- OSS glyph/handle constants (canvas/world units; * zoom -> screen px) ---
@@ -379,6 +387,97 @@ const MASK_HOVER_OUTLINE = 'rgba(0,0,0,1)';
 const MASK_PICK_FILL = 'rgba(255,0,0,0.5)';
 const MASK_PICK_OUTLINE = 'rgba(0,0,0,0.5)';
 
+// ---------------------------------------------------------------------------
+// Strand name labels (OSS should_draw_names / draw_strand_label).
+// ---------------------------------------------------------------------------
+
+// OSS _calculate_strand_curve_center: the point ON the curve where the label sits.
+//   * locked 3rd control point  -> the center control point IS the curve midpoint;
+//   * straight (cp1 & cp2 on start) -> the linear midpoint;
+//   * otherwise the "virtual center" = midpoint of cp1 and cp2.
+function strandLabelCenter(s: StrandRecord): Point {
+  if (s.control_point_center_locked && s.control_point_center) return s.control_point_center;
+  const [cp1, cp2] = s.control_points;
+  const onStart = (p: Point) => Math.abs(p.x - s.start.x) < 1 && Math.abs(p.y - s.start.y) < 1;
+  if (onStart(cp1) && onStart(cp2)) return { x: (s.start.x + s.end.x) / 2, y: (s.start.y + s.end.y) / 2 };
+  return { x: (cp1.x + cp2.x) / 2, y: (cp1.y + cp2.y) / 2 };
+}
+
+// OSS draw_strand_label: layer_name centered on the curve center, font size 12,
+// drawn as a white outline (pen width 6) under solid black fill text. Scales with
+// zoom (the OSS font lives under the canvas zoom transform).
+function drawStrandNames(ctx: CanvasRenderingContext2D, st: OverlayState): void {
+  const z = st.view.zoom;
+  ctx.save();
+  ctx.font = `${12 * z}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round';
+  for (const name of st.doc.order) {
+    const s = st.doc.strands[name];
+    if (!s || s.is_hidden) continue;
+    let center: Point | null;
+    if (s.type === 'MaskedStrand') {
+      const comp = maskComponents(name);
+      const a = comp && st.doc.strands[comp.first];
+      const b = comp && st.doc.strands[comp.second];
+      center = a && b ? maskCentroid(a, b, st.settings.curve_params, s.deletion_rectangles) : null;
+    } else {
+      center = strandLabelCenter(s);
+    }
+    if (!center) continue;
+    const p = worldToScreen(center, st.view);
+    ctx.strokeStyle = 'rgb(255,255,255)';
+    ctx.lineWidth = 6 * z;
+    ctx.strokeText(name, p.x, p.y);
+    ctx.fillStyle = 'rgb(0,0,0)';
+    ctx.fillText(name, p.x, p.y);
+  }
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
+// Angle-adjust overlay (OSS AngleAdjustMode.draw): a faded line at the strand's
+// ORIGINAL orientation, an arc at the pivot (start) spanning the rotation, and the
+// adjusted strand drawn as a green line.
+// ---------------------------------------------------------------------------
+
+function drawAngleOverlay(ctx: CanvasRenderingContext2D, st: OverlayState): void {
+  const sess = st.angleEditInitial;
+  const s = st.angleEditTarget ? st.doc.strands[st.angleEditTarget] : undefined;
+  if (!sess || !s) return;
+  const z = st.view.zoom;
+  const startS = worldToScreen(s.start, st.view);
+  const endS = worldToScreen(s.end, st.view);
+  const init0 = (sess.angle0 * Math.PI) / 180;
+  const initEnd = worldToScreen(
+    { x: sess.start.x + Math.cos(init0) * sess.length0, y: sess.start.y + Math.sin(init0) * sess.length0 },
+    st.view,
+  );
+  ctx.save();
+  // Faded original orientation (OSS draws the original strand at 0.5 opacity; we
+  // approximate with a translucent gray line — the overlay can't cheaply re-draw
+  // the full body that lives in #c).
+  ctx.strokeStyle = 'rgba(120,120,120,0.5)';
+  ctx.lineWidth = 2 * z;
+  ctx.beginPath(); ctx.moveTo(startS.x, startS.y); ctx.lineTo(initEnd.x, initEnd.y); ctx.stroke();
+  // Angle arc at the pivot, radius min(50, width*2), highlight color, spanning the
+  // swept rotation (initial -> current, minor direction).
+  const r = Math.min(50, s.width * 2) * z;
+  const cur = Math.atan2(s.end.y - s.start.y, s.end.x - s.start.x);
+  let span = cur - init0;
+  while (span > Math.PI) span -= 2 * Math.PI;
+  while (span < -Math.PI) span += 2 * Math.PI;
+  ctx.strokeStyle = css(st.settings.highlight_color);
+  ctx.lineWidth = 2 * z;
+  ctx.beginPath(); ctx.arc(startS.x, startS.y, r, init0, init0 + span, span < 0); ctx.stroke();
+  // Adjusted strand: green line start -> current end.
+  ctx.strokeStyle = 'rgb(0,255,0)';
+  ctx.lineWidth = 2 * z;
+  ctx.beginPath(); ctx.moveTo(startS.x, startS.y); ctx.lineTo(endS.x, endS.y); ctx.stroke();
+  ctx.restore();
+}
+
 export function drawOverlay(ctx: CanvasRenderingContext2D, st: OverlayState): void {
   const { doc, selection, mode } = st;
 
@@ -438,4 +537,8 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, st: OverlayState): vo
   // Mode-specific endpoint/CP handles, drawn last (on top, translucent).
   if (mode === 'move') drawMoveOverlays(ctx, st);
   else if (mode === 'attach') drawAttachOverlays(ctx, st);
+  else if (mode === 'angle' && st.angleEditTarget) drawAngleOverlay(ctx, st);
+
+  // Strand name labels on top of everything (OSS draws them after control points).
+  if (st.drawNames) drawStrandNames(ctx, st);
 }

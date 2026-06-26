@@ -4,6 +4,7 @@ import { requestRender, setOverlay } from '../renderer/renderScheduler';
 import { InteractionHost } from '../interaction/InteractionHost';
 import { drawOverlay } from '../overlay/overlayRenderer';
 import { modes } from '../modes';
+import { AngleAdjustDialog } from './dialogs/AngleAdjustDialog';
 import { t } from './i18n';
 
 // The only component that touches <canvas>. Owns #c (renderer output) and
@@ -23,6 +24,7 @@ export function CanvasStage() {
   const maskEditTarget = useEditorStore((s) =>
     (s.maskEditTarget && s.doc.strands[s.maskEditTarget]?.type === 'MaskedStrand') ? s.maskEditTarget : null);
   const lang = useEditorStore((s) => s.settings.language);
+  const angleEditTarget = useEditorStore((s) => s.angleEditTarget);
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -36,6 +38,8 @@ export function CanvasStage() {
         doc: s.doc, view: s.view, selection: s.selection, settings: s.settings,
         hover: s.hover, pending: s.pending, maskPending: s.maskPending, eraser: s.eraser,
         mode: s.mode, dragging: s.dragging,
+        drawNames: s.drawNames,
+        angleEditTarget: s.angleEditTarget, angleEditInitial: s.angleEditInitial,
       });
     });
 
@@ -85,6 +89,9 @@ export function CanvasStage() {
           ))}
         </div>
       )}
+      {/* OSS AngleAdjustMode "Adjust Angle and Length" dialog (mounted while a
+          strand is under angle edit). Modeless, so the canvas preview stays live. */}
+      {angleEditTarget && <AngleAdjustDialog />}
     </div>
   );
 }

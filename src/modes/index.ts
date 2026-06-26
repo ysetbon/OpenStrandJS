@@ -4,6 +4,8 @@ import { SelectMode } from './SelectMode';
 import { MoveMode } from './MoveMode';
 import { AttachMode } from './AttachMode';
 import { MaskMode } from './MaskMode';
+import { RotateMode } from './RotateMode';
+import { AngleMode } from './AngleMode';
 import { passiveMode } from './PassiveMode';
 
 export const modes: Record<ModeName, Mode> = {
@@ -12,6 +14,6 @@ export const modes: Record<ModeName, Mode> = {
   attach: AttachMode,
   mask: MaskMode,
   view: passiveMode('view'),       // read-only inspect
-  rotate: passiveMode('rotate'),   // stub (OSS rotate gesture not yet ported)
-  angle: passiveMode('angle'),     // stub (OSS angle-adjust not yet ported)
+  rotate: RotateMode,              // drag a free endpoint about the opposite end
+  angle: AngleMode,                // click a strand -> Adjust Angle and Length dialog
 };

@@ -21,6 +21,7 @@ import {
   DEFAULT_STRAND_COLOR, DEFAULT_STROKE_COLOR,
   DEFAULT_STRAND_WIDTH, DEFAULT_STROKE_WIDTH,
 } from '../model/factory';
+import { makeAngleSession, type AngleSession } from './actions';
 import { areVisuallyEqual } from './visualEqual';
 
 export function emptyDocument(): EditorDocument {
@@ -216,6 +217,16 @@ export interface EditorState {
   exitMaskCreate: () => void;
   setFirstMaskedLayer: (name: string | null) => void;
 
+  // Angle-adjust session (OSS AngleAdjustMode). angleEditTarget == the strand whose
+  // "Adjust Angle and Length" dialog is open; angleEditInitial holds its geometry at
+  // activation so the dialog can recompute end+control-points faithfully. enter opens
+  // a single undo gesture; confirm commits it; cancel reverts it.
+  angleEditTarget: string | null;
+  angleEditInitial: AngleSession | null;
+  enterAngleEdit: (name: string) => void;
+  confirmAngleEdit: () => void;
+  cancelAngleEdit: () => void;
+
   // chrome UI flags (OSS main window). Not part of the document / undo history.
   panMode: boolean;            // hand tool: left-drag pans the canvas
   // OSS canvas.is_drawing_new_strand: armed by the "New Strand" button / 'N' key.
@@ -274,6 +285,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   maskEditTarget: null,
   maskCreateMode: false,
   firstMaskedLayer: null,
+  angleEditTarget: null,
+  angleEditInitial: null,
   docRevision: 0,
   past: [],
   future: [],
@@ -522,6 +535,36 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   exitMaskCreate: () => set((s) => (!s.maskCreateMode ? {} : { maskCreateMode: false, firstMaskedLayer: null })),
   setFirstMaskedLayer: (firstMaskedLayer) => set({ firstMaskedLayer }),
 
+  // OSS AngleAdjustMode.activate: snapshot the strand's geometry, select it, and open
+  // ONE undo gesture; every slider tick mutates live and the session commits as a
+  // single undo step on confirm. Refuses masked / missing strands (OSS guard).
+  enterAngleEdit: (name) => {
+    const t = get().doc.strands[name];
+    if (!t || t.type === 'MaskedStrand') return;
+    const session = makeAngleSession(t);
+    set((s) => ({
+      angleEditTarget: name, angleEditInitial: session,
+      selection: { layerName: name, handle: null },
+      doc: s.doc.selected_strand_name === name ? s.doc : { ...s.doc, selected_strand_name: name },
+      docRevision: s.docRevision + 1,
+    }));
+    get().beginGesture();
+  },
+  // OSS confirm_adjustment: commit the live geometry as one undo step (no-op if
+  // nothing changed), then close the dialog.
+  confirmAngleEdit: () => {
+    if (get().angleEditTarget == null) return;
+    get().commit();
+    set((s) => ({ angleEditTarget: null, angleEditInitial: null, docRevision: s.docRevision + 1 }));
+  },
+  // OSS cancel_adjustment: revert. We drop the whole gesture (restores every field,
+  // which is strictly safer than OSS's start/end-only restore), making no undo entry.
+  cancelAngleEdit: () => {
+    if (get().angleEditTarget == null) return;
+    get().cancelGesture();
+    set((s) => ({ angleEditTarget: null, angleEditInitial: null, docRevision: s.docRevision + 1 }));
+  },
+
   panMode: false,
   newStrandArmed: false,
   multiSelectMode: false,
@@ -563,7 +606,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   toggleTabs: () => set((s) => ({ showTabs: !s.showTabs })),
-  toggleDrawNames: () => set((s) => ({ drawNames: !s.drawNames })),
+  // Bump docRevision so CanvasStage re-renders (which redraws the overlay where the
+  // labels live). Runtime toggle, not persisted — matching OSS should_draw_names.
+  toggleDrawNames: () => set((s) => ({ drawNames: !s.drawNames, docRevision: s.docRevision + 1 })),
 
   deselectAll: () => set((s) => {
     const doc = cloneDoc(s.doc);

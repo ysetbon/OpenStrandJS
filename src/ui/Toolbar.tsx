@@ -88,6 +88,16 @@ export function Toolbar() {
   };
 
   const onClick = (b: Btn) => {
+    // Angle mode: enter the mode and, if a non-masked strand is already selected,
+    // open its Adjust Angle and Length dialog immediately (OSS activate-on-select).
+    if (b.mode === 'angle') {
+      setMode('angle');
+      const st = useEditorStore.getState();
+      const sel = st.selection.layerName;
+      const s = sel ? st.doc.strands[sel] : null;
+      if (sel && s && s.type !== 'MaskedStrand') st.enterAngleEdit(sel);
+      return;
+    }
     if (b.mode) { setMode(b.mode); return; }
     if (b.toggle === 'grid') { setSettings({ show_grid: !showGrid }); return; }
     if (b.toggle === 'points') { mutateDoc((d) => { d.show_control_points = !d.show_control_points; }); return; }

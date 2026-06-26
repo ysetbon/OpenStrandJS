@@ -77,6 +77,7 @@ export const STRINGS: Record<string, Entry> = {
   cancel: { en: 'Cancel', fr: 'Annuler', de: 'Abbrechen', it: 'Annulla', es: 'Cancelar', pt: 'Cancelar', he: 'ביטול' },
   x_movement: { en: 'X Movement', fr: 'Mouvement X', de: 'X-Bewegung', it: 'Movimento X', es: 'Movimiento X', pt: 'Movimento X', he: 'תנועת X' },
   y_movement: { en: 'Y Movement', fr: 'Mouvement Y', de: 'Y-Bewegung', it: 'Movimento Y', es: 'Movimiento Y', pt: 'Movimento Y', he: 'תנועת Y' },
+  adjust_angle_and_length: { en: 'Adjust Angle and Length', fr: 'Ajuster l’angle et la longueur', de: 'Winkel und Länge anpassen', it: 'Regola angolo e lunghezza', es: 'Ajustar ángulo y longitud', pt: 'Ajustar ângulo e comprimento', he: 'התאם זווית ואורך' },
   angle_label: { en: 'Angle:', fr: 'Angle :', de: 'Winkel:', it: 'Angolo:', es: 'Ángulo:', pt: 'Ângulo:', he: 'זווית:' },
   length_label: { en: 'Length:', fr: 'Longueur :', de: 'Länge:', it: 'Lunghezza:', es: 'Longitud:', pt: 'Comprimento:', he: 'אורך:' },
   snap_to_grid: { en: 'Snap to grid', fr: 'Aligner sur la grille', de: 'Am Raster ausrichten', it: 'Aggancia alla griglia', es: 'Ajustar a la cuadrícula', pt: 'Ajustar à grade', he: 'הצמד לרשת' },
