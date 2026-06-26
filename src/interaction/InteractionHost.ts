@@ -9,6 +9,7 @@ import { requestOverlay, requestRender } from '../renderer/renderScheduler';
 import { modes } from '../modes';
 import { SelectMode } from '../modes/SelectMode';
 import { addDeletionRect } from '../store/actions';
+import { getAppRotationDeg, isAppGestureActive } from '../ui/mobileLayout';
 import type { Mode, ModeContext, PointerInfo } from '../modes/Mode';
 import type { Point } from '../model/types';
 
@@ -25,6 +26,13 @@ export class InteractionHost {
   // Active per-mask "Edit Mask" eraser drag (OSS mask_edit_mode erase_start_pos /
   // current_erase_rect). Set on pointer-down while store.maskEditTarget is active.
   private maskErase: { start: Point } | null = null;
+  // Multi-touch tracking: a two-finger gesture (mobile pinch-zoom / pan, handled
+  // in mobileLayout) must not draw. We track active touch pointers, and once a
+  // second touch lands we abort the in-progress one-finger action and swallow
+  // every event until all fingers lift (`multiTouched`).
+  private touchPointers = new Set<number>();
+  private multiTouched = false;
+  private gestureAborting = false;
 
   constructor(private el: HTMLCanvasElement) {
     el.addEventListener('pointerdown', this.onPointerDown);
@@ -74,8 +82,22 @@ export class InteractionHost {
 
   private toScreen(e: PointerEvent | WheelEvent): Point {
     const rect = this.el.getBoundingClientRect();
-    const sx = (e.clientX - rect.left) * (this.el.width / Math.max(1, rect.width));
-    const sy = (e.clientY - rect.top) * (this.el.height / Math.max(1, rect.height));
+    const W = this.el.width;
+    const H = this.el.height;
+    // On a portrait phone the whole app is rotated 90° clockwise (mobileLayout.ts)
+    // to force a horizontal layout. getBoundingClientRect then reports the rotated
+    // bounding box, so map the client point through the inverse rotation: the
+    // canvas's +x runs down the screen (from rect.top) and +y runs left (from
+    // rect.right). The scale factor cancels with W/H, so this also covers the
+    // uniform scale-to-fit on landscape phones.
+    if (getAppRotationDeg() === 90) {
+      return {
+        x: (e.clientY - rect.top) * (W / Math.max(1, rect.height)),
+        y: (rect.right - e.clientX) * (H / Math.max(1, rect.width)),
+      };
+    }
+    const sx = (e.clientX - rect.left) * (W / Math.max(1, rect.width));
+    const sy = (e.clientY - rect.top) * (H / Math.max(1, rect.height));
     return { x: sx, y: sy };
   }
 
@@ -85,7 +107,27 @@ export class InteractionHost {
     return { world, screen, button: e.button, buttons: e.buttons, ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey };
   }
 
+  // Abort whatever single-finger action is in flight (pan / mask erase / mode
+  // gesture) WITHOUT committing, so a starting two-finger gesture leaves no trace.
+  private abortForGesture = () => {
+    if (this.panning) { this.panning = false; return; }
+    if (this.maskErase) { this.maskErase = null; useEditorStore.getState().setEraser(null); requestOverlay(); return; }
+    this.mode().onCancel?.(this.ctx());
+  };
+
   private onPointerDown = (e: PointerEvent) => {
+    if (e.pointerType === 'touch') {
+      this.touchPointers.add(e.pointerId);
+      if (this.touchPointers.size >= 2) {
+        // Second finger down → a pinch/pan, not a draw. Abort the first finger's
+        // action once and let mobileLayout own the gesture from here.
+        this.multiTouched = true;
+        if (!this.gestureAborting) { this.gestureAborting = true; this.abortForGesture(); }
+        return;
+      }
+    }
+    if (isAppGestureActive()) return; // gesture started off-canvas; don't draw
+    this.gestureAborting = false;
     try { this.el.setPointerCapture(e.pointerId); } catch { /* synthetic/no-op */ }
     const panTool = useEditorStore.getState().panMode;   // hand tool active
     const isPan = e.button === 1 || e.button === 2 || (e.button === 0 && (this.spaceHeld || panTool));
@@ -112,6 +154,10 @@ export class InteractionHost {
   };
 
   private onPointerMove = (e: PointerEvent) => {
+    if (this.multiTouched || isAppGestureActive()) {
+      if (!this.gestureAborting) { this.gestureAborting = true; this.abortForGesture(); }
+      return;
+    }
     if (this.panning) {
       const screen = this.toScreen(e);
       useEditorStore.getState().setView({
@@ -136,6 +182,13 @@ export class InteractionHost {
 
   private onPointerUp = (e: PointerEvent) => {
     try { this.el.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+    if (e.pointerType === 'touch') this.touchPointers.delete(e.pointerId);
+    // Swallow the up-events of every finger that took part in a multi-touch
+    // gesture; the action was already aborted, so committing here would be wrong.
+    if (this.multiTouched) {
+      if (this.touchPointers.size === 0) { this.multiTouched = false; this.gestureAborting = false; }
+      return;
+    }
     if (this.panning) { this.panning = false; return; }
     // Finalize an Edit Mask erase: commit one deletion rectangle (one undo step),
     // OSS mouseReleaseEvent appends to deletion_rectangles + subtracts the path.
@@ -161,6 +214,11 @@ export class InteractionHost {
   // in-flight Edit-Mask erase is dropped without appending its rectangle.
   private onPointerCancel = (e: PointerEvent) => {
     try { this.el.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+    if (e.pointerType === 'touch') this.touchPointers.delete(e.pointerId);
+    if (this.multiTouched) {
+      if (this.touchPointers.size === 0) { this.multiTouched = false; this.gestureAborting = false; }
+      return;
+    }
     if (this.panning) { this.panning = false; return; }
     if (this.maskErase) { this.maskErase = null; useEditorStore.getState().setEraser(null); requestOverlay(); return; }
     this.mode().onCancel?.(this.ctx());

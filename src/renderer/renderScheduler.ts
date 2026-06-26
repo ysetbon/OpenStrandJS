@@ -88,14 +88,19 @@ function runFrame(): void {
   const full = pendingFull;
   pendingFull = false;
   if (full) {
-    const { doc, view, settings, dragging, dragMoving, selection } = useEditorStore.getState();
+    const { doc, view, settings, dragging, dragMoving, selection, mode } = useEditorStore.getState();
     try {
       // During an endpoint drag, highlight every strand that moves with the
       // grabbed handle (weld group + attached/mask peers from movingStrandSet),
       // so a moving junction reddens on both sides like OSS — not just the
       // grabbed strand. At rest only the selected strand is highlighted.
       const highlightSet = dragging && dragMoving.length ? new Set(dragMoving) : undefined;
-      const arr = toRenderArray(doc, selection.layerName, highlightSet);
+      // OSS View mode: when view_hide_highlight is on, suppress the red selection
+      // highlight while in View mode (strand.py::_suppress_highlight_in_view) by
+      // zeroing is_selected at the payload source. The renderer (#c) needs no change,
+      // and the offline oracle / PNG export — which never set this — stay byte-identical.
+      const viewHideHighlight = mode === 'view' && settings.view_hide_highlight;
+      const arr = toRenderArray(doc, selection.layerName, highlightSet, viewHideHighlight);
       if (dragging && dragMoving.length) {
         // DRAG FAST-PATH (mirrors the original's draw-only-affected-strand path).
         // Render at native resolution with shadows off: bake every STATIC strand

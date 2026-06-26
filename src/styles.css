@@ -7,6 +7,7 @@
 @import './ui/contextMenu.css';
 @import './ui/dialogs.css';
 @import './ui/tabEdge.css';
+@import './ui/mobile.css';
 
 * { box-sizing: border-box; }
 /* Default the whole app to 65% — a uniform page zoom so the chrome (toolbar,

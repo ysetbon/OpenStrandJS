@@ -13,7 +13,7 @@ export const modes: Record<ModeName, Mode> = {
   move: MoveMode,
   attach: AttachMode,
   mask: MaskMode,
-  view: passiveMode('view'),       // read-only inspect
+  view: passiveMode('view', 'grab'), // read-only inspect; OSS open-hand cursor (view_mode.py activate)
   rotate: RotateMode,              // drag a free endpoint about the opposite end
   angle: AngleMode,                // click a strand -> Adjust Angle and Length dialog
 };

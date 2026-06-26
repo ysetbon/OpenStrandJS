@@ -1,0 +1,87 @@
+/* Mobile (small-touch) presentation. Activated by `html.mobile`, added at runtime
+ * by mobileLayout.ts only on phones. The desktop path is never affected. */
+
+/* Drop the global page zoom on mobile — the `.app` is instead sized to the
+ * desktop design box and scaled with a single transform (see mobileLayout.ts). */
+html.mobile {
+  zoom: 1;
+}
+
+/* Full-bleed, non-scrolling shell so the editor owns the whole screen and the
+ * browser's pull-to-refresh / overscroll / pinch-zoom can't disturb it. The
+ * letterbox area around the scaled app shows the window background colour. */
+html.mobile,
+html.mobile body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--window-bg);
+  overscroll-behavior: none;
+  touch-action: none;
+  -webkit-text-size-adjust: 100%;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* The whole editor is positioned + transformed inline by mobileLayout.ts
+ * (position/size/transform). It must clip to its design box and a transformed
+ * ancestor makes descendant position:fixed dialogs scale WITH the app, so the
+ * settings/group dialogs stay consistent with the rest of the UI. */
+html.mobile .app {
+  overflow: hidden;
+}
+
+/* Inputs ≥16px avoid iOS Safari's focus auto-zoom; the app's own transform keeps
+ * them visually matching the desktop size. */
+html.mobile input,
+html.mobile select,
+html.mobile textarea {
+  font-size: 16px;
+}
+
+/* The desktop toolbar is one fixed-height row that shrinks its buttons (and
+ * ellipsises their labels) when narrow. On a phone the design box is small
+ * (UI_SCALE), so instead let the toolbar WRAP to as many rows as needed and let
+ * each button keep its full natural width — buttons render big and labels stay
+ * readable, at the cost of a taller toolbar (the canvas gives up the room). */
+html.mobile .toolbar {
+  flex: 0 0 auto;
+  height: auto;
+  flex-wrap: wrap;
+  overflow: visible;
+  row-gap: 6px;
+}
+html.mobile .tb-btn {
+  flex: 0 0 auto;
+  max-width: none;
+}
+/* The flex spacer would eat a whole wrap row and strand State/gear; drop it so
+ * every button packs together and flows naturally onto the next row. */
+html.mobile .tb-spacer {
+  display: none;
+}
+
+/* Horizontally the layer panel is a fixed 490px: the control column and 146px
+ * layer buttons sit centered (big side gaps) and the 270px group column's Create
+ * Group button + tree only fill ~140px, leaving a wide empty area to its right
+ * (to its LEFT in RTL/Hebrew). On a phone, let the whole panel and both sub-
+ * columns HUG their content so that wasted width collapses and the canvas keeps
+ * it. Logical properties (border-inline-start, etc.) mirror this for RTL. */
+html.mobile .layer-panel {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 0;
+}
+html.mobile .lp-left {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+html.mobile .lp-right {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+html.mobile .gp-panel {
+  min-width: 0;
+}

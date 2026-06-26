@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useEditorStore } from '../store/editorStore';
-import { requestRender, setOverlay } from '../renderer/renderScheduler';
+import { requestRender, requestOverlay, setOverlay } from '../renderer/renderScheduler';
 import { InteractionHost } from '../interaction/InteractionHost';
 import { drawOverlay } from '../overlay/overlayRenderer';
 import { modes } from '../modes';
@@ -67,15 +67,31 @@ export function CanvasStage() {
     };
   }, [setView]);
 
+  // `mode` is a dependency because entering/leaving View mode changes what the #c
+  // renderer paints: view_hide_highlight gates is_selected in toRenderArray (a FULL
+  // render, not just the overlay). setMode bumps no docRevision, so without this a
+  // mode switch would not repaint #c and the view-mode highlight gate would appear
+  // dead. (The overlay-only requestOverlay() below also fires on mode, covering the
+  // view_hide_control_points glyph gate; requestRender resyncs the overlay too.)
   useEffect(() => {
     requestRender();
-  }, [docRevision, view, settings]);
+  }, [docRevision, view, settings, mode]);
 
   useEffect(() => {
     const cCanvas = document.getElementById('c') as HTMLCanvasElement | null;
     // An active Edit Mask session forces the crosshair (OSS enter_mask_edit_mode).
     if (cCanvas) cCanvas.style.cursor = maskEditTarget ? 'crosshair' : (modes[mode]?.cursor ?? 'default');
   }, [mode, maskEditTarget]);
+
+  // Repaint the overlay whenever the interaction mode changes. The overlay is the
+  // only mode-dependent layer (move squares vs attach circles vs select/mask
+  // highlights — overlayRenderer branches on `mode`), and the main render effect
+  // above intentionally doesn't depend on `mode`. On desktop the mode switch is
+  // still visible via the cursor change + the next mouse-move (hover) redrawing
+  // the overlay; but on a touch device there is no cursor and no hover, so without
+  // an explicit repaint the canvas keeps showing the PREVIOUS mode's overlays
+  // until the user touches it. Overlay-only — the base strand render is unaffected.
+  useEffect(() => { requestOverlay(); }, [mode]);
 
   return (
     <div className="stage" ref={wrapRef}>

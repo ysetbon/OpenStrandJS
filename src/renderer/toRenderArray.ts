@@ -14,10 +14,19 @@ import type {
 // purposes — used during an endpoint drag so welded/attached peers that move
 // rigidly with the grabbed endpoint get the same red halo + C-shapes as the
 // grabbed strand (OSS reddens both sides of a moving junction).
+//
+// `viewHideHighlight` (optional, default false) ports OSS view-mode
+// `view_hide_highlight` (strand.py::_suppress_highlight_in_view, :1970-1981):
+// when true it zeroes every strand's is_selected so the renderer (#c
+// drawHighlight / drawMasked, both gated on is_selected) paints NO selection
+// highlight — without touching the actual selection. The live scheduler computes
+// it from (mode==='view' && setting); the offline oracle and PNG export never
+// pass it (default false), so their output stays byte-identical.
 export function toRenderArray(
   doc: EditorDocument,
   selectedLayer?: string | null,
   highlightSet?: Set<string>,
+  viewHideHighlight = false,
 ): RenderStrand[] {
   const out: RenderStrand[] = [];
   for (const name of doc.order) {
@@ -52,8 +61,10 @@ export function toRenderArray(
       is_setting_staring_circle: ex.is_setting_staring_circle as boolean | undefined,
       // Selected strand draws its unified highlight in the renderer (under the
       // body), exactly like OSS — so the black stroke stays on top. Welded peers
-      // moving with a dragged endpoint are highlighted too (highlightSet).
-      is_selected: name === selectedLayer || (!!highlightSet && highlightSet.has(name)),
+      // moving with a dragged endpoint are highlighted too (highlightSet). In View
+      // mode with view_hide_highlight on, suppress the highlight entirely (selection
+      // is preserved; only the painting is skipped — OSS _suppress_highlight_in_view).
+      is_selected: !viewHideHighlight && (name === selectedLayer || (!!highlightSet && highlightSet.has(name))),
       // OSS shadow_only: keep the strand in the array (so it still casts/receives
       // shadow) but flag the renderer to suppress its body paint.
       shadow_only: s.shadow_only,

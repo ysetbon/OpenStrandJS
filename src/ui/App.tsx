@@ -7,6 +7,7 @@ import { CanvasStage } from './CanvasStage';
 import { LayerPanel } from './LayerPanel';
 import { Splitter } from './Splitter';
 import { startHistoryRecorder } from './settings/history';
+import { initMobileLayout } from './mobileLayout';
 
 // OSS main-window shell: a horizontal splitter with `left_widget` (toolbar over
 // canvas) on one side and the layer panel on the other. Theme + RTL are applied
@@ -28,6 +29,10 @@ export function App() {
 
   // Background session-history recorder (feeds the Settings → History page).
   useEffect(() => startHistoryRecorder(), []);
+
+  // On phones: present the desktop UI scaled-to-fit and always horizontal, with
+  // the browser chrome hidden. No-op on desktop.
+  useEffect(() => initMobileLayout(), []);
 
   return (
     <div className="app">
