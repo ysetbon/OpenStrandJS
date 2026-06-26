@@ -21,6 +21,30 @@ export function snapPoint(p: Point, settings: Settings): Point {
   return { x: Math.round(p.x / g) * g, y: Math.round(p.y / g) * g };
 }
 
+// Snap an *attach* endpoint to the grid while never collapsing back onto the parent
+// endpoint (`start`) — a port of attach_mode.py _get_snapped_attachment_position
+// (931-977). When snap is disabled this is just snapPoint (returns raw unchanged). If
+// the snapped point lands exactly on `start`, nudge one grid cell along the drag's
+// dominant axis (then the off-axis, then the diagonal) so a short drag still yields a
+// real, on-grid child instead of a zero-length strand.
+export function snapAttachPoint(start: Point, raw: Point, settings: Settings): Point {
+  const snapped = snapPoint(raw, settings);
+  if (!settings.snap_to_grid_attach_enabled || settings.grid_size <= 0) return snapped;
+  if (snapped.x !== start.x || snapped.y !== start.y) return snapped;
+  const g = settings.grid_size;
+  let dx = raw.x - start.x, dy = raw.y - start.y;
+  if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) { dx = g; dy = 0; }
+  const sx = dx >= 0 ? g : -g, sy = dy >= 0 ? g : -g;
+  const offsets: Point[] = Math.abs(dx) >= Math.abs(dy)
+    ? [{ x: sx, y: 0 }, { x: 0, y: sy }, { x: sx, y: sy }]
+    : [{ x: 0, y: sy }, { x: sx, y: 0 }, { x: sx, y: sy }];
+  for (const o of offsets) {
+    const cand = snapPoint({ x: start.x + o.x, y: start.y + o.y }, settings);
+    if (cand.x !== start.x || cand.y !== start.y) return cand;
+  }
+  return snapPoint({ x: start.x + g, y: start.y }, settings);
+}
+
 // Move-mode grid snapping — a faithful port of OSS move_mode.mouseMoveEvent's
 // zoom/Ctrl-gated decision (move_mode.py:4036-4079). Four effective branches:
 //   * zoom < 0.35 and not Ctrl              -> no snap (too zoomed out)

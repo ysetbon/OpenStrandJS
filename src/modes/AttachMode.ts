@@ -4,7 +4,7 @@
 // circle. The strand is created on pointer-up so a zero-length drag cancels cleanly.
 
 import { useEditorStore } from '../store/editorStore';
-import { addNewStrand, attachChild, snapPoint } from '../store/actions';
+import { addNewStrand, attachChild, snapPoint, snapAttachPoint } from '../store/actions';
 import { screenToWorld } from '../interaction/viewTransform';
 import type { EditorDocument, HandleKind, Point, ViewState } from '../model/types';
 import type { Mode, ModeContext, PointerInfo } from './Mode';
@@ -118,7 +118,7 @@ export const AttachMode: Mode = {
       const world = constrainToViewport(p.world, st.view);
       const end = drag.kind === 'new'
         ? snapPoint(world, st.settings)
-        : clampMinLen(drag.start, world, MIN_ATTACH_LEN);
+        : clampMinLen(drag.start, snapAttachPoint(drag.start, world, st.settings), MIN_ATTACH_LEN);
       st.setPending({ kind: drag.kind, start: drag.start, end, parent: drag.parent, side: drag.side });
       ctx.requestOverlay();
       return;
@@ -143,7 +143,7 @@ export const AttachMode: Mode = {
     const world = constrainToViewport(p.world, st.view);
     const end = d.kind === 'new'
       ? snapPoint(world, st.settings)        // free angle, grid-snapped when enabled
-      : clampMinLen(d.start, world, MIN_ATTACH_LEN);
+      : clampMinLen(d.start, snapAttachPoint(d.start, world, st.settings), MIN_ATTACH_LEN);
     drag = null;
     st.setPending(null);
     st.setDragging(false);
