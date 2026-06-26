@@ -8,6 +8,13 @@ import { callRender, callRenderDragBackground, callRenderDragFrame, callEndDrag 
 import { buildMeta, toRenderArray } from './toRenderArray';
 
 let scheduled = false;
+// True when the queued frame must do a FULL render (#c via renderFixture), not just
+// an overlay redraw. requestRender sets this; if an overlay frame is already queued
+// it UPGRADES that frame to a full render instead of being dropped. This is the
+// invariant that keeps a quick create/attach pointer-up from being swallowed by the
+// prior pointer-move's overlay-only frame (the "new strand invisible until moved"
+// bug): requestRender must ALWAYS win over a pending overlay frame.
+let pendingFull = false;
 // True once the current drag gesture's static background has been baked.
 let dragBaked = false;
 // The moving-set signature (dragMoving.join('|')) the cached DRAG_BG was baked
@@ -55,7 +62,7 @@ function syncOverlay(): void {
 export function requestOverlay(): void {
   if (scheduled) return;
   scheduled = true;
-  requestAnimationFrame(() => { scheduled = false; syncOverlay(); });
+  requestAnimationFrame(runFrame);
 }
 
 if (import.meta.env?.DEV) {
@@ -64,10 +71,23 @@ if (import.meta.env?.DEV) {
 }
 
 export function requestRender(): void {
+  // Always mark the queued frame as full. If an overlay-only frame is already
+  // scheduled this UPGRADES it (instead of being dropped by the old `if (scheduled)
+  // return`), so a quick create/attach pointer-up can never be swallowed.
+  pendingFull = true;
   if (scheduled) return;
   scheduled = true;
-  requestAnimationFrame(() => {
-    scheduled = false;
+  requestAnimationFrame(runFrame);
+}
+
+// One coalesced rAF frame shared by both requestOverlay and requestRender. Does a
+// full #c render when any caller this frame asked for one (pendingFull), then always
+// resyncs the overlay so the two layers stay aligned.
+function runFrame(): void {
+  scheduled = false;
+  const full = pendingFull;
+  pendingFull = false;
+  if (full) {
     const { doc, view, settings, dragging, dragMoving, selection } = useEditorStore.getState();
     try {
       // During an endpoint drag, highlight every strand that moves with the
@@ -114,6 +134,6 @@ export function requestRender(): void {
       // Surface renderer errors without killing the rAF loop.
       console.error('[OpenStrandJS] render failed:', err);
     }
-    syncOverlay();
-  });
+  }
+  syncOverlay();
 }
