@@ -143,6 +143,19 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
   const colorInputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
+  // Long-press = the mobile "right click". A ~500ms touch-hold with no significant
+  // finger movement opens the same context menu at the touch point; the tap that
+  // follows the release is suppressed (longPressFired) so it doesn't also select the
+  // layer. A drag past LP_MOVE_PX cancels it (the user is scrolling, not holding).
+  const LP_DELAY_MS = 500;
+  const LP_MOVE_PX = 12;
+  const longPress = useRef<{ x: number; y: number; timer: number | null }>({ x: 0, y: 0, timer: null });
+  const longPressFired = useRef(false);
+  const cancelLongPress = () => {
+    if (longPress.current.timer !== null) { clearTimeout(longPress.current.timer); longPress.current.timer = null; }
+  };
+  useEffect(() => cancelLongPress, []); // clear any pending timer on unmount
+
   // Scroll the selected button into view when selection moves to this layer
   // (e.g. selecting a strand on the canvas, or undo/redo) — OSS scrolls the
   // selected layer button into the panel viewport. `nearest` avoids gratuitous
@@ -406,7 +419,12 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
         aria-pressed={selected}
         tabIndex={0}
         draggable={draggable}
-        onClick={() => { if (!editActive) onSelect(name); }}
+        onClick={() => {
+          // A long-press already opened the menu — swallow the trailing tap so it
+          // doesn't also select the layer, then re-arm for the next gesture.
+          if (longPressFired.current) { longPressFired.current = false; return; }
+          if (!editActive) onSelect(name);
+        }}
         onContextMenu={(e) => {
           e.preventDefault();
           // During an Edit Mask session every button's context menu is disabled
@@ -416,6 +434,29 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
           // shows the 2-item multi menu instead (built in menuItems()).
           setMenu({ x: e.clientX, y: e.clientY });
         }}
+        onTouchStart={(e) => {
+          // One-finger hold opens the menu; ignore multi-touch (that's a pinch/pan).
+          if (editActive || e.touches.length !== 1) { cancelLongPress(); return; }
+          const tt = e.touches[0];
+          longPress.current.x = tt.clientX;
+          longPress.current.y = tt.clientY;
+          longPressFired.current = false;
+          cancelLongPress();
+          longPress.current.timer = window.setTimeout(() => {
+            longPress.current.timer = null;
+            longPressFired.current = true;
+            setMenu({ x: longPress.current.x, y: longPress.current.y });
+          }, LP_DELAY_MS);
+        }}
+        onTouchMove={(e) => {
+          if (longPress.current.timer === null) return;
+          const tt = e.touches[0];
+          if (tt && Math.hypot(tt.clientX - longPress.current.x, tt.clientY - longPress.current.y) > LP_MOVE_PX) {
+            cancelLongPress();
+          }
+        }}
+        onTouchEnd={cancelLongPress}
+        onTouchCancel={cancelLongPress}
         onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; onDragStart?.(orderIdx, e); }}
         onDragOver={(e) => { if (onDragOver) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; onDragOver(orderIdx, e); } }}
         onDrop={(e) => { if (onDrop) { e.preventDefault(); onDrop(orderIdx, e); } }}

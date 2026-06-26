@@ -85,3 +85,14 @@ html.mobile .lp-right {
 html.mobile .gp-panel {
   min-width: 0;
 }
+
+/* The long-press context menu (portaled to <body>) can have more rows than fit a
+ * forced-landscape phone (~390px tall): cap it to the viewport and let it scroll,
+ * so the bottom items stay reachable instead of overflowing off-screen. The clamp
+ * in ContextMenu.tsx reads getBoundingClientRect AFTER this cap, so placement uses
+ * the capped height. Desktop is unaffected (no html.mobile). */
+html.mobile .ctx-menu {
+  max-height: calc(100vh - 8px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
