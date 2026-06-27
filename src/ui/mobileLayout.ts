@@ -150,6 +150,51 @@ function applyTransform(): void {
   }
 }
 
+// ---- Button-driven zoom (mobile) ------------------------------------------
+// Drives the same CSS pinch-zoom as the two-finger gesture, but stepped (OSS-style
+// ±10% per tap) and anchored at the SCREEN CENTER instead of a touch centroid.
+// Mirrors the onTouchMove focal math with cx/cy fixed at the viewport center.
+
+/** Step the view zoom one notch (dir>0 = in ×1.1, dir<0 = out ×1/1.1), clamped to
+ *  [MIN_ZOOM, MAX_ZOOM] and anchored so the design point under the viewport center
+ *  stays put. Portrait centers pan anyway, so there it just re-clamps via apply. */
+export function zoomStep(dir: 1 | -1): void {
+  const old = userZoom;
+  const next = clamp(old * (dir > 0 ? 1.1 : 1 / 1.1), MIN_ZOOM, MAX_ZOOM);
+  if (next === old) return; // already at the clamp — nothing to do
+  userZoom = next;
+
+  const { s, portrait } = fitMetrics();
+  if (!portrait) {
+    // Keep the design point currently under the screen center pinned there across
+    // the zoom change (focal zoom at cx,cy = viewport center). Same form as
+    // onTouchMove, with the centroid replaced by the fixed center and start*
+    // replaced by the live pan/zoom.
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight / 2;
+    const dpx = (cx - panX) / (s * old);
+    const dpy = (cy - panY) / (s * old);
+    panX = cx - dpx * (s * next);
+    panY = cy - dpy * (s * next);
+  }
+  applyTransform(); // re-clamps pan / centers when content <= screen
+}
+
+/** Current pinch factor over the fit scale (1 = full-fit, MAX_ZOOM = closest). */
+export function getUserZoom(): number {
+  return userZoom;
+}
+
+/** True only on mobile and not yet at the in-clamp — for button disabling. */
+export function canZoomIn(): boolean {
+  return mobileActive && userZoom < MAX_ZOOM;
+}
+
+/** True only on mobile and not yet at the out-clamp (fit-to-screen). */
+export function canZoomOut(): boolean {
+  return mobileActive && userZoom > MIN_ZOOM;
+}
+
 // ---- Two-finger pinch-zoom + pan -------------------------------------------
 // Tracked from `window` touch events so a pinch works over any part of the app
 // (canvas, toolbar, panels). One finger is left entirely to the canvas/buttons.

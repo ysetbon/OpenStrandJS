@@ -36,11 +36,26 @@
 .cc-btn:active { background: var(--bgp); }
 .cc-btn.checked { background: var(--bgp); }
 
+/* Fixed-size icon box holding the real OSS layer_panel_icons PNG. Sized by --gs
+   (per-button glyph size). No color filter: the OSS icons are full-color and are
+   designed to sit on these saturated colored buttons (same as OSS). */
 .cc-glyph {
-  font-size: var(--gs);
-  color: var(--gc);
+  width: var(--gs);
+  height: var(--gs);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   line-height: 1;
   pointer-events: none;
+}
+.cc-glyph img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain; /* preserve aspect, never crop */
+  display: block;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 .cc-btn:disabled {
@@ -48,4 +63,9 @@
   border-color: #A9A9A9;
   cursor: default;
 }
-.cc-btn:disabled .cc-glyph { color: #808080; }
+/* The old text-color graying no longer applies to an <img>; dim + desaturate the
+   icon instead so disabled (zoom_in/out at clamps) reads as disabled. */
+.cc-btn:disabled .cc-glyph img {
+  opacity: 0.45;
+  filter: grayscale(1);
+}
