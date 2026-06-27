@@ -9,30 +9,6 @@
 @import './ui/tabEdge.css';
 
 * { box-sizing: border-box; }
-/* Default the whole app to 65% — a uniform page zoom so the chrome (toolbar,
- * buttons, layer + group panels, text) AND the canvas display all scale together
- * to the "default view" look at browser 100%.
- *
- * The earlier attempt at this broke the canvas: CanvasStage measured
- * wrap.getBoundingClientRect() (which a page zoom scales to VISUAL px) into
- * view.width, and strand-renderer.js wrote that back as vis.style.width in
- * LAYOUT px — double-counting the zoom, so the canvas filled only 65% of the
- * stage (grid shrunk, dead gap, wrong bounds). Fixed at the source: CanvasStage
- * now measures the stage's LAYOUT size (clientWidth/clientHeight, zoom-independent
- * and correct at any zoom). The canvas then fills the stage 1:1, the grid covers
- * it, and pointer hit-testing stays correct (InteractionHost.toScreen already
- * normalizes by el.width/getBoundingClientRect().width). view.zoom stays 1.0
- * (pure-OSS), so the page zoom is the ONLY scale and move-mode keeps full grid
- * snap; the in-app wheel/zoom buttons still drive view.zoom on top.
- *
- * DESKTOP ONLY: this is a mouse/desktop "default view" affordance. On a phone the
- * 65% page-zoom shrank the whole UI, stopped the app filling the viewport, and left
- * the browser's address bar permanently overlaid (it never collapsed). Gate it to
- * fine-pointer (mouse) devices so touch/mobile renders the app at 1:1, full-screen,
- * like before. The in-app wheel/zoom buttons still work on mobile via view.zoom. */
-@media (pointer: fine) {
-  html { zoom: 0.65; }
-}
 html, body, #root { height: 100%; margin: 0; }
 body {
   font: 14px/1.4 system-ui, -apple-system, sans-serif;
