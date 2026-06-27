@@ -206,17 +206,40 @@ function onTouchEnd(e: TouchEvent): void {
   if (e.touches.length === 0) gestureLatched = false;
 }
 
-// Best-effort "hide the browser chrome + lock to landscape" on the first user
-// gesture (both require a user-activation on most browsers). Silent on failure —
-// desktop browsers, iOS Safari (no Fullscreen/orientation lock) just keep the
-// CSS-rotation fallback above.
+// Best-effort "hide the browser chrome + lock to landscape" on a user gesture
+// (both require a user-activation on most browsers). Silent on failure — desktop
+// browsers, iOS Safari (no Fullscreen/orientation lock) just keep the CSS-rotation
+// fallback above.
+//
+// IMPORTANT: this re-arms on EVERY tap rather than firing once. A single-shot
+// attempt is fragile — if the very first request is rejected (no activation yet),
+// swallowed by another handler (e.g. a layer-button long-press), or the user later
+// swipes out of fullscreen / a dialog drops it, the chrome would come back forever.
+// `go()` is a cheap no-op while already immersive, so re-arming costs nothing and
+// any subsequent canvas tap puts the editor back to chrome-less.
 function armImmersive(): void {
   if (immersiveArmed) return;
   immersiveArmed = true;
+
+  const el = document.documentElement as HTMLElement & {
+    webkitRequestFullscreen?: () => Promise<void> | void;
+  };
+  const doc = document as Document & { webkitFullscreenElement?: Element | null };
+
+  const alreadyImmersive = (): boolean => {
+    if (document.fullscreenElement || doc.webkitFullscreenElement) return true;
+    // An installed / Add-to-Home-Screen PWA is already chrome-less — don't fight it.
+    const mm = window.matchMedia;
+    if (
+      typeof mm === 'function' &&
+      (mm('(display-mode: fullscreen)').matches || mm('(display-mode: standalone)').matches)
+    )
+      return true;
+    return (navigator as Navigator & { standalone?: boolean }).standalone === true;
+  };
+
   const go = () => {
-    const el = document.documentElement as HTMLElement & {
-      webkitRequestFullscreen?: () => Promise<void> | void;
-    };
+    if (alreadyImmersive()) return; // nothing to do — already chrome-less
     try {
       const req = el.requestFullscreen?.() ?? el.webkitRequestFullscreen?.();
       Promise.resolve(req)
@@ -230,11 +253,10 @@ function armImmersive(): void {
     } catch {
       /* fullscreen unavailable — ignore */
     }
-    window.removeEventListener('pointerup', go);
-    window.removeEventListener('touchend', go);
   };
-  window.addEventListener('pointerup', go, { once: true });
-  window.addEventListener('touchend', go, { once: true });
+
+  window.addEventListener('pointerup', go);
+  window.addEventListener('touchend', go);
 }
 
 /** Wire up the mobile presentation. No-op (and leaves the desktop path fully
