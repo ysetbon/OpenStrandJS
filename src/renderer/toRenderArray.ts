@@ -75,5 +75,10 @@ export function buildMeta(doc: EditorDocument, view: ViewState, settings: Settin
     shadow_enabled: doc.shadow_enabled,
     shadow_overrides: doc.shadow_overrides,
     curve_params: settings.curve_params,
+    // Grid is drawn IN the renderer (behind strands), not on the overlay, so it
+    // composites under the bodies like OSS. The oracle builds its own meta and
+    // never sets these, so fixtures stay byte-identical.
+    show_grid: settings.show_grid,
+    grid_size: settings.grid_size,
   };
 }

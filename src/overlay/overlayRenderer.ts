@@ -18,7 +18,7 @@ import type { PendingStrand } from '../store/editorStore';
 import {
   DEFAULT_STRAND_COLOR, DEFAULT_STRAND_WIDTH, DEFAULT_STROKE_COLOR, DEFAULT_STROKE_WIDTH,
 } from '../model/factory';
-import { screenToWorld, worldToScreen } from '../interaction/viewTransform';
+import { worldToScreen } from '../interaction/viewTransform';
 import { strandHandles } from '../interaction/hitTest';
 import { sampleCenterline } from '../interaction/hitGeometry';
 
@@ -308,26 +308,6 @@ function drawPending(ctx: CanvasRenderingContext2D, st: OverlayState): void {
 
 // ---------------------------------------------------------------------------
 
-function drawGrid(ctx: CanvasRenderingContext2D, st: OverlayState): void {
-  const g = st.settings.grid_size;
-  if (!st.settings.show_grid || g <= 0 || g * st.view.zoom < 4) return; // skip when too dense
-  const w = st.view.width, h = st.view.height;
-  const tl = screenToWorld({ x: 0, y: 0 }, st.view);
-  const br = screenToWorld({ x: w, y: h }, st.view);
-  ctx.save();
-  ctx.strokeStyle = 'rgba(0,0,0,0.08)';
-  ctx.lineWidth = 1;
-  for (let x = Math.floor(tl.x / g) * g; x <= br.x; x += g) {
-    const s = worldToScreen({ x, y: 0 }, st.view);
-    ctx.beginPath(); ctx.moveTo(s.x, 0); ctx.lineTo(s.x, h); ctx.stroke();
-  }
-  for (let y = Math.floor(tl.y / g) * g; y <= br.y; y += g) {
-    const s = worldToScreen({ x: 0, y }, st.view);
-    ctx.beginPath(); ctx.moveTo(0, s.y); ctx.lineTo(w, s.y); ctx.stroke();
-  }
-  ctx.restore();
-}
-
 // Mask-mode body highlight (OSS MaskMode.draw, mask_mode.py:237-312): OSS strokes
 // get_path() into a body-band polygon (width + 2*stroke_width, FLAT caps + MITER
 // joins) and draws it ONCE with brush=`fill` + pen=`outline` — i.e. the band is
@@ -382,7 +362,9 @@ const MASK_PICK_OUTLINE = 'rgba(0,0,0,0.5)';
 export function drawOverlay(ctx: CanvasRenderingContext2D, st: OverlayState): void {
   const { doc, selection, mode } = st;
 
-  drawGrid(ctx, st);
+  // NB: the grid is no longer drawn here. It is painted by the renderer (#c)
+  // BEHIND the strands (strand-renderer.js), so it composites under the bodies
+  // like OSS instead of sitting on top of them on this overlay layer.
 
   // Yellow body HOVER highlight on the strand under the cursor. OSS draws this in
   // BOTH select mode (select_mode.py:101-136) and mask mode (mask_mode.py:237-270)

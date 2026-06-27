@@ -16,6 +16,25 @@ function toColor(c) {
   return new paper.Color(c.r / 255, c.g / 255, c.b / 255, a);
 }
 
+// Grid line positions in TARGET-canvas pixel coords (LIVE EDITOR ONLY — the
+// offline oracle never sets meta.show_grid, so this returns null there and the
+// fidelity fixtures stay byte-identical). `scale` maps world->target px (= zoom
+// for the visible 1x canvas, = ss*zoom for the supersampled offscreen) and ox/oy
+// are the matching pan offsets in that same target space. Mirrors the screen-space
+// math the overlay used previously, so lines land on the same world multiples of
+// grid_size that snap-to-grid quantizes to. Returns { xs, ys } or null.
+function computeGridLines(meta, scale, ox, oy, targetW, targetH) {
+  const g = meta.grid_size;
+  if (!meta.show_grid || !g || g <= 0) return null;
+  if (g * (meta.zoom || 1) < 4) return null; // skip when too dense (matches the old overlay gate)
+  const xs = [], ys = [];
+  const worldLeft = (0 - ox) / scale, worldRight = (targetW - ox) / scale;
+  const worldTop = (0 - oy) / scale, worldBottom = (targetH - oy) / scale;
+  for (let x = Math.floor(worldLeft / g) * g; x <= worldRight; x += g) xs.push(x * scale + ox);
+  for (let y = Math.floor(worldTop / g) * g; y <= worldBottom; y += g) ys.push(y * scale + oy);
+  return { xs, ys };
+}
+
 // Curve-shape parameters. These are canvas-level settings (NOT stored per
 // strand in the JSON); the reference renderer exports the canvas's values
 // into meta.curve_params. Defaults match the braid fixtures.
@@ -1162,6 +1181,27 @@ window.renderFixture = function (strands, meta) {
   const P = (pt) => new paper.Point(pt.x * S + ox * ss, pt.y * S + oy * ss);
   const enableThird = strands.some((s) => s.control_point_center != null);
 
+  // Grid: painted AFTER the white background and BEFORE the strand loop so it
+  // composites UNDER the bodies (OSS draws the grid behind the strands; the old
+  // port drew it on the overlay layer on top — the bug this fixes). Backing space
+  // uses scale S (= ss*zoom) and pan offset ox*ss / oy*ss; strokeWidth ss => 1px
+  // after the ss downscale, matching the previous 1px overlay lines. LIVE EDITOR
+  // ONLY: computeGridLines returns null when meta.show_grid is unset (oracle).
+  {
+    const grid = computeGridLines(meta, S, ox * ss, oy * ss, W * ss, H * ss);
+    if (grid) {
+      const gridColor = toColor({ r: 0, g: 0, b: 0, a: 20 }); // ~0.08 alpha
+      for (const x of grid.xs) {
+        const ln = new paper.Path.Line(new paper.Point(x, 0), new paper.Point(x, H * ss));
+        ln.strokeColor = gridColor; ln.strokeWidth = ss;
+      }
+      for (const y of grid.ys) {
+        const ln = new paper.Path.Line(new paper.Point(0, y), new paper.Point(W * ss, y));
+        ln.strokeColor = gridColor; ln.strokeWidth = ss;
+      }
+    }
+  }
+
   const byLayer = {};
   for (const s of strands) byLayer[s.layer_name] = s;
 
@@ -1462,6 +1502,21 @@ window.renderDragFrame = function (strands, meta) {
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = 'white';
   ctx.fillRect(0, 0, W, H); // backdrop (baked into no band; see renderDragBackground)
+  // Grid: same as the full render path, painted on the visible canvas after the
+  // white backdrop and BEFORE the transparent static bands, so it sits under every
+  // body during a drag. ss is fixed at 1 here, so scale == zoom and the offsets are
+  // the raw meta pan. LIVE EDITOR ONLY (computeGridLines null-guards on show_grid).
+  {
+    const grid = computeGridLines(meta, meta.zoom || 1, meta.x_offset, meta.y_offset, W, H);
+    if (grid) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+      ctx.lineWidth = 1;
+      for (const x of grid.xs) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+      for (const y of grid.ys) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+      ctx.restore();
+    }
+  }
   // Composite bands bottom-to-top in document z-order, dropping in the moving
   // strokes at their z-slot. Per-frame work = k band blits + the one mv blit.
   for (const b of DRAG_BG.bands) {

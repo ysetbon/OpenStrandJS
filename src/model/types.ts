@@ -254,4 +254,10 @@ export interface RenderMeta {
   // oracle uses to byte-match Qt. Keeps full supersampled quality; ~5× faster
   // full render. Absent => exact box-average (byte-identical fidelity path).
   fast_downscale?: boolean;
+  // LIVE EDITOR ONLY (the offline oracle never sets these). When show_grid is
+  // true the renderer paints the grid BEHIND the strands (over the white
+  // background, under the bodies) like OSS, instead of on the overlay layer on
+  // top. Absent/false => no grid, so the fidelity oracle stays byte-identical.
+  show_grid?: boolean;
+  grid_size?: number;
 }
