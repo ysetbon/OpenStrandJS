@@ -27,6 +27,10 @@ export function exportMeta(exportZoom = 2, margin = 40): { meta: RenderMeta; w: 
     shadow_enabled: doc.shadow_enabled,
     shadow_overrides: doc.shadow_overrides,
     curve_params: settings.curve_params,
+    // Honor the Grid toggle in the export: when on, the renderer paints the grid
+    // behind the strands (same path as the on-screen render). Off => no grid.
+    show_grid: settings.show_grid,
+    grid_size: settings.grid_size,
   };
   return { meta, w, h };
 }
