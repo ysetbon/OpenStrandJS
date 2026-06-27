@@ -254,4 +254,10 @@ export interface RenderMeta {
   // oracle uses to byte-match Qt. Keeps full supersampled quality; ~5× faster
   // full render. Absent => exact box-average (byte-identical fidelity path).
   fast_downscale?: boolean;
+  // LIVE EDITOR ONLY (the offline oracle / PNG export never set these). Draw a
+  // reference grid BEHIND the strands, in world space, so it composites UNDER the
+  // bodies instead of over them. Gated on show_grid: the fidelity oracle (which
+  // never sets it) stays byte-identical. grid_size is in world px (strand units).
+  show_grid?: boolean;
+  grid_size?: number;
 }

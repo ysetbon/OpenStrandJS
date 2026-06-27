@@ -1160,6 +1160,29 @@ window.renderFixture = function (strands, meta) {
   // world -> backing: position scaled by S (= ss*zoom), offset by ss. At zoom 1
   // this is exactly (pt + offset) * ss.
   const P = (pt) => new paper.Point(pt.x * S + ox * ss, pt.y * S + oy * ss);
+
+  // Reference grid, drawn BEHIND every strand. Created right after the white bg so
+  // paper's insertion-order z-stacking keeps these lines under all bodies (the
+  // editor's grid must sit under the layers, not over them). LIVE EDITOR ONLY:
+  // gated on meta.show_grid, which the fidelity oracle / PNG export never set, so
+  // their output is byte-identical. World x maps to backing px as x*S + ox*ss.
+  if (meta.show_grid && meta.grid_size > 0 && meta.grid_size * zoom >= 4) {
+    const step = meta.grid_size * S;          // grid spacing in backing px
+    const ox2 = ox * ss, oy2 = oy * ss;       // world origin (0,0) in backing px
+    const Wb = W * ss, Hb = H * ss;
+    const gridColor = new paper.Color(0, 0, 0, 0.08);
+    for (let k = Math.ceil(-ox2 / step); k <= Math.floor((Wb - ox2) / step); k++) {
+      const x = ox2 + k * step;
+      const ln = new paper.Path.Line(new paper.Point(x, 0), new paper.Point(x, Hb));
+      ln.strokeColor = gridColor; ln.strokeWidth = ss;
+    }
+    for (let k = Math.ceil(-oy2 / step); k <= Math.floor((Hb - oy2) / step); k++) {
+      const y = oy2 + k * step;
+      const ln = new paper.Path.Line(new paper.Point(0, y), new paper.Point(Wb, y));
+      ln.strokeColor = gridColor; ln.strokeWidth = ss;
+    }
+  }
+
   const enableThird = strands.some((s) => s.control_point_center != null);
 
   const byLayer = {};
@@ -1462,6 +1485,30 @@ window.renderDragFrame = function (strands, meta) {
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = 'white';
   ctx.fillRect(0, 0, W, H); // backdrop (baked into no band; see renderDragBackground)
+  // Reference grid behind the strands during a drag (same gating + look as
+  // renderFixture). The drag composite is native (ss=1), so backing px == world
+  // * zoom + offset; drawn here, before the band blits, so it stays under them.
+  if (meta.show_grid && meta.grid_size > 0) {
+    const zoom = meta.zoom || 1;
+    const step = meta.grid_size * zoom;
+    if (step >= 4) {
+      const ox = meta.x_offset, oy = meta.y_offset;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let k = Math.ceil(-ox / step); k <= Math.floor((W - ox) / step); k++) {
+        const x = ox + k * step;
+        ctx.moveTo(x, 0); ctx.lineTo(x, H);
+      }
+      for (let k = Math.ceil(-oy / step); k <= Math.floor((H - oy) / step); k++) {
+        const y = oy + k * step;
+        ctx.moveTo(0, y); ctx.lineTo(W, y);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
   // Composite bands bottom-to-top in document z-order, dropping in the moving
   // strokes at their z-slot. Per-frame work = k band blits + the one mv blit.
   for (const b of DRAG_BG.bands) {

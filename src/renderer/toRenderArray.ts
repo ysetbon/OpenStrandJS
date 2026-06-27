@@ -86,5 +86,10 @@ export function buildMeta(doc: EditorDocument, view: ViewState, settings: Settin
     shadow_enabled: doc.shadow_enabled,
     shadow_overrides: doc.shadow_overrides,
     curve_params: settings.curve_params,
+    // Live-only: draw the reference grid behind the strands (see RenderMeta). The
+    // offline oracle / PNG export build their own meta and never set these, so
+    // their output stays byte-identical.
+    show_grid: settings.show_grid,
+    grid_size: settings.grid_size,
   };
 }
