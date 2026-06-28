@@ -1327,8 +1327,14 @@ window.renderFixture = function (strands, meta) {
   hi.height = H * ss;
   paper.setup(hi);
 
-  const bg = new paper.Path.Rectangle(new paper.Point(0, 0), new paper.Size(W * ss, H * ss));
-  bg.fillColor = 'white';
+  // Opaque white backdrop. Skipped for transparent PNG export (meta.transparent_bg),
+  // which matches OSS save_canvas_as_image filling the QImage with Qt.transparent.
+  // The oracle / live render never set the flag, so they keep the white background
+  // (byte-identical). Grid + bodies are inserted after this, so z-order is unchanged.
+  if (!meta.transparent_bg) {
+    const bg = new paper.Path.Rectangle(new paper.Point(0, 0), new paper.Size(W * ss, H * ss));
+    bg.fillColor = 'white';
+  }
 
   const ox = meta.x_offset, oy = meta.y_offset;
   // world -> backing: position scaled by S (= ss*zoom), offset by ss. At zoom 1
