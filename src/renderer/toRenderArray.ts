@@ -38,6 +38,10 @@ export function toRenderArray(
     // them here. Without this the renderer never draws flat-end side lines and
     // can't honor closed/unfolded cap state in the editor.
     const ex = (s.extra ?? {}) as Record<string, unknown>;
+    // Resolve the start-circle color the same way the renderer does (extra wins,
+    // else the shared circle_stroke_color fallback) so we can derive the
+    // is_setting_staring_circle flag from it below.
+    const startCol = (ex.start_circle_stroke_color as RenderStrand['start_circle_stroke_color']) ?? s.circle_stroke_color;
     const r: RenderStrand = {
       type: s.type,
       layer_name: s.layer_name,
@@ -56,9 +60,21 @@ export function toRenderArray(
       closed_connections: ex.closed_connections as [boolean, boolean] | undefined,
       manual_circle_visibility: ex.manual_circle_visibility as [boolean | null, boolean | null] | undefined,
       circle_stroke_color: s.circle_stroke_color,
-      start_circle_stroke_color: (ex.start_circle_stroke_color as RenderStrand['start_circle_stroke_color']) ?? s.circle_stroke_color,
+      start_circle_stroke_color: startCol,
       end_circle_stroke_color: (ex.end_circle_stroke_color as RenderStrand['end_circle_stroke_color']) ?? s.circle_stroke_color,
-      is_setting_staring_circle: ex.is_setting_staring_circle as boolean | undefined,
+      // OSS never persists is_setting_staring_circle; its color setter re-derives it
+      // as (start-circle alpha == 0) on every assignment and on load (strand.py:533-537).
+      // Mirror that here so the renderer's unfolded-start branch fires uniformly for
+      // attach-default / menu-unfold / loaded-OSS strands (a stored extra flag still wins).
+      is_setting_staring_circle: (ex.is_setting_staring_circle as boolean | undefined)
+        ?? ((startCol && startCol.a != null ? startCol.a : 255) === 0),
+      // Junction resolution + elliptical end-cap flag (web/strand-renderer.js
+      // partnerForEnd / ellipticalCapDims). attached_to & knot_connections let the
+      // renderer find the connected partner; elliptical_end_caps lives in `extra`.
+      attached_to: s.attached_to ?? null,
+      attachment_side: s.attachment_side,
+      knot_connections: s.knot_connections as RenderStrand['knot_connections'],
+      elliptical_end_caps: ex.elliptical_end_caps as boolean | undefined,
       // Selected strand draws its unified highlight in the renderer (under the
       // body), exactly like OSS — so the black stroke stays on top. Welded peers
       // moving with a dragged endpoint are highlighted too (highlightSet). In View

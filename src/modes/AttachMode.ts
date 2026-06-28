@@ -169,7 +169,7 @@ export const AttachMode: Mode = {
           width: st.settings.default_strand_width,
           stroke_width: st.settings.default_stroke_width,
         })
-        : attachChild(draft, d.parent!, d.side!, d.start, end);
+        : attachChild(draft, d.parent!, d.side!, d.start, end, st.settings.default_transparent_start_circle, st.settings.default_stroke_color);
     });
     st.commit();                 // one create = one undo step
     if (newName) st.setSelection({ layerName: newName, handle: null });

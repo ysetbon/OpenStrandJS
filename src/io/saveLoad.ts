@@ -169,6 +169,16 @@ function serializeStrand(s: StrandRecord, index: number): Record<string, unknown
   out.shadow_only = s.shadow_only;
   out.knot_connections = s.knot_connections;
   out.circle_stroke_color = s.circle_stroke_color;
+  // OSS always writes all three circle-stroke keys (save_load_manager.py:166-181).
+  // start = the per-strand start override (extra) when set, else the shared
+  // circle_stroke_color; end likewise. This persists an unfolded-start edge across a
+  // round-trip and matches OSS file shape for freshly-created strands (which would
+  // otherwise omit the per-end keys). For loaded files the value rides through `extra`
+  // unchanged, so the keys stay byte-identical.
+  out.start_circle_stroke_color = (s.extra as Record<string, unknown>)?.start_circle_stroke_color
+    ?? s.circle_stroke_color;
+  out.end_circle_stroke_color = (s.extra as Record<string, unknown>)?.end_circle_stroke_color
+    ?? s.circle_stroke_color;
   out.control_points = [
     { x: s.control_points[0].x, y: s.control_points[0].y },
     { x: s.control_points[1].x, y: s.control_points[1].y },

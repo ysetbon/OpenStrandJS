@@ -3,10 +3,12 @@ import { useEditorStore } from '../store/editorStore';
 import {
   toggleHidden, setShadowOnly, setColor, setWidth, setWidthGridUnits, resetMask,
   setCircleStrokeColor, toggleCircleVisible, toggleLineVisible, closeKnot,
+  setEllipticalEndCaps,
 } from '../store/actions';
 import { maskComponents } from '../model/layerName';
 import type { RGBA } from '../model/types';
 import { ContextMenu, type MenuItem, type MenuRowButton } from './ContextMenu';
+import { StrandWidthDialog } from './dialogs/StrandWidthDialog';
 import { t } from './i18n';
 import './layerButton.css';
 
@@ -140,6 +142,9 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
 
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [colorPick, setColorPick] = useState<'fill' | 'stroke' | null>(null);
+  // Open the OSS WidthConfigDialog: wholeSet=true -> "Change Width" (set-wide),
+  // false -> "Change Width (This Layer Only)".
+  const [widthDialog, setWidthDialog] = useState<{ wholeSet: boolean } | null>(null);
   const colorInputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -192,31 +197,25 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
     commitEdit((d) => setColor(d, name, kind, rgba, kind === 'fill'));
   };
 
-  // OSS WidthConfigDialog: total thickness conserved; the slider redistributes
-  // color vs stroke. total = squares*27, stroke clamped to [1, total/2], color =
-  // total - 2*stroke. wholeSet -> Change Width (whole set); else Change Width
-  // (This Layer Only). (numbered_layer_button.py:2698-2799, 3098-3396)
-  // TODO(oss-fidelity): WidthConfigDialog slider redistribution — using prompt
-  // for the grid-square count.
+  // OSS change_width / change_layer_width open the WidthConfigDialog (rendered
+  // below). The dialog conserves total thickness and lets the slider redistribute
+  // color vs stroke; on OK it returns int(color), int(stroke), grid units, and the
+  // elliptical toggle (numbered_layer_button.py:2698-2799, 3098-3396).
   const doChangeWidth = (wholeSet: boolean) => {
-    if (!strand) return;
-    const curUnits = typeof strand.extra.width_in_grid_units === 'number'
-      ? (strand.extra.width_in_grid_units as number)
-      : Math.max(0.5, Math.round(((strand.width + 2 * strand.stroke_width) / GRID_UNIT) * 10) / 10);
-    const raw = window.prompt(t('change_width', lang), String(curUnits));
-    if (raw == null) return;
-    let squares = Number(raw);
-    if (!Number.isFinite(squares)) return;
-    if (squares < 0.5) squares = 0.5;
-    const total = squares * GRID_UNIT;
-    const maxStroke = Math.max(1, Math.floor(total / 2));
-    const stroke = Math.max(1, Math.min(maxStroke, Math.round(strand.stroke_width)));
-    const colorWidth = Math.max(0, total - 2 * stroke);
+    if (strand) setWidthDialog({ wholeSet });
+  };
+
+  // Apply the dialog's result. "Change Width" propagates to the whole set; "Change
+  // Width (This Layer Only)" applies to this strand only and also sets the
+  // elliptical end-cap flag (numbered_layer_button.py:2707-2733 / 2773-2783).
+  const applyWidth = (wholeSet: boolean, width: number, strokeWidth: number, gridUnits: number, elliptical: boolean) => {
     commitEdit((d) => {
-      setWidth(d, name, 'width', colorWidth, wholeSet);
-      setWidth(d, name, 'stroke_width', stroke, wholeSet);
-      setWidthGridUnits(d, name, squares, wholeSet);
+      setWidth(d, name, 'width', width, wholeSet);
+      setWidth(d, name, 'stroke_width', strokeWidth, wholeSet);
+      setWidthGridUnits(d, name, gridUnits, wholeSet);
+      if (!wholeSet) setEllipticalEndCaps(d, name, elliptical);
     });
+    setWidthDialog(null);
   };
 
   // ---- circle / line gating by scanning children attached to this strand ----
@@ -290,11 +289,18 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
       { label: '', separator: true },
     );
 
-    // Circle stroke fold/unfold: one item toggling on circle_stroke_color.alpha.
-    // OSS gates this on hasattr(strand,'circle_stroke_color'), which is true only
-    // for AttachedStrand — so a plain Strand never shows it.
-    if (isAttached) {
-      const strokeAlpha = strand?.circle_stroke_color?.a ?? 255;
+    // Start-edge fold/unfold: one item. OSS gates this on
+    // hasattr(strand,'circle_stroke_color') (numbered_layer_button.py:398), and
+    // circle_stroke_color is a property on the BASE Strand class (strand.py:496-504)
+    // whose getter falls back to opaque black — so it shows on EVERY non-masked
+    // layer (plain Strand AND AttachedStrand), not just attached ones. The label
+    // keys off the START circle's alpha, resolved the same way the renderer does
+    // (extra.start_circle_stroke_color ?? circle_stroke_color; toRenderArray.ts),
+    // defaulting to opaque (255 -> "Unfold Start Edge").
+    {
+      const startStroke = (strand?.extra?.start_circle_stroke_color as RGBA | null | undefined)
+        ?? strand?.circle_stroke_color;
+      const strokeAlpha = startStroke?.a ?? 255;
       if (strokeAlpha === 0) {
         items.push({
           label: t('restore_default_stroke', lang),
@@ -486,6 +492,16 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
           x={menu.x}
           y={menu.y}
           onClose={() => setMenu(null)}
+        />
+      )}
+
+      {widthDialog && strand && (
+        <StrandWidthDialog
+          strand={strand}
+          wholeSet={widthDialog.wholeSet}
+          lang={lang}
+          onClose={() => setWidthDialog(null)}
+          onApply={(w, sw, units, ell) => applyWidth(widthDialog.wholeSet, w, sw, units, ell)}
         />
       )}
     </>

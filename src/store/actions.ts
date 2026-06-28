@@ -459,6 +459,15 @@ export function attachChild(
   side: 0 | 1,
   start: Point,
   end: Point,
+  // OSS canvas.default_transparent_start_circle ("Unfolded start edge by default"):
+  // when set, a newly attached strand begins with a transparent (unfolded) start
+  // edge (attached_strand.py:142-144). Interactive attach only — JSON load keeps a
+  // strand's saved appearance, mirroring OSS.
+  unfoldStart = false,
+  // OSS canvas.default_stroke_color: the new attached strand's CIRCLE stroke comes
+  // from this setting (attached_strand.py:114), falling back to the parent's body
+  // stroke. The BODY stroke itself is copied from the parent (attach_mode.py:1137).
+  circleStrokeColor?: RGBA | null,
 ): string | null {
   const parent = draft.strands[parentName];
   if (!parent) return null;
@@ -467,10 +476,23 @@ export function attachChild(
   const layer_name = `${set}_${idx}`;
   const child = makeAttachedStrand({
     layer_name, set_number: set, start, end,
-    color: clone(parent.color), width: parent.width, stroke_width: parent.stroke_width,
+    // OSS attach_mode.py:1136-1137: a new attached strand inherits the parent's
+    // fill AND body stroke (not the hardcoded default black).
+    color: clone(parent.color), stroke_color: clone(parent.stroke_color),
+    width: parent.width, stroke_width: parent.stroke_width,
     attached_to: parentName, attachment_side: side,
   });
+  // Circle stroke = canvas default_stroke_color, else the parent's body stroke
+  // (attached_strand.py:114-119). makeStrand seeded it from stroke_color (= parent
+  // body stroke), so only override when a default is supplied.
+  child.circle_stroke_color = clone(circleStrokeColor ?? parent.stroke_color);
   parent.has_circles[side] = true;
+  if (unfoldStart) {
+    // Set ONLY the start override transparent (matches OSS, which sets _start_circle_
+    // stroke_color and leaves the end opaque). is_setting_staring_circle is derived
+    // from this alpha in toRenderArray.
+    (child.extra as Record<string, unknown>).start_circle_stroke_color = { r: 0, g: 0, b: 0, a: 0 };
+  }
   draft.strands[layer_name] = child;
   draft.order.push(layer_name);
   return layer_name;
@@ -627,6 +649,17 @@ export function setWidthGridUnits(
   }
 }
 
+// OSS change_layer_width elliptical end-cap toggle (numbered_layer_button.py:2779):
+// per-LAYER only (this strand). Stored in `extra` (round-trips like OSS's
+// elliptical_end_caps strand field). Rendering currently treats caps as circular;
+// the half-ellipse geometry is a separate renderer task.
+export function setEllipticalEndCaps(draft: EditorDocument, name: string, value: boolean): void {
+  const s = draft.strands[name];
+  if (!s) return;
+  if (!s.extra) s.extra = {};
+  (s.extra as Record<string, unknown>).elliptical_end_caps = value;
+}
+
 export function setShadowOnly(draft: EditorDocument, name: string, value: boolean): void {
   const s = draft.strands[name];
   if (s) s.shadow_only = value;
@@ -640,11 +673,19 @@ export function isStrandDeletable(s: StrandRecord): boolean {
   return !(s.has_circles[0] && s.has_circles[1]);
 }
 
-// OSS Transparent / Restore-Default Stroke item: sets circle_stroke_color (the
-// stroke around the endpoint circle). Passing null clears it.
+// OSS "Unfold Start Edge" / "Fold Over Start Edge" (numbered_layer_button.py
+// set_start_circle_stroke_color): sets ONLY the START circle's stroke. alpha 0 =
+// unfolded (transparent start edge), opaque black = folded. The renderer and the
+// menu both resolve the start as extra.start_circle_stroke_color ?? circle_stroke_
+// color (toRenderArray.ts), so writing the start override here — without touching
+// circle_stroke_color or the end — isolates the start edge exactly as OSS does (it
+// only sets _start_circle_stroke_color, leaving the end opaque). is_setting_staring_
+// circle is derived from this alpha in toRenderArray. Passing null clears the override.
 export function setCircleStrokeColor(draft: EditorDocument, name: string, color: RGBA | null): void {
   const s = draft.strands[name];
-  if (s) s.circle_stroke_color = color ? { ...color } : null;
+  if (!s) return;
+  if (!s.extra) s.extra = {};
+  (s.extra as Record<string, unknown>).start_circle_stroke_color = color ? { ...color } : null;
 }
 
 // OSS toggle_strand_circle_visibility: flips has_circles[index] and records the

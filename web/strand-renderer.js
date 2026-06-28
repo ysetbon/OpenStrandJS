@@ -231,24 +231,47 @@ function localRect(center, x, y, w, h, angle) {
 
 // Outer cap half at a START end: keeps the half pointing away from the body.
 // `angle` is the tangent at the start (points into the body); `td` = total diameter.
-function capOuterStart(center, angle, td) {
-  const circle = new paper.Path.Circle(center, td / 2);
-  const mask = localRect(center, 0, -td, 2 * td, 2 * td, angle);
-  const half = circle.subtract(mask);
-  circle.remove();
+// Full ellipse centered at `center` with semi-axis `rxAlong` along the tangent
+// direction `angle` (radians) and `ryAcross` perpendicular to it. Port of the
+// rotated addEllipse(rx, ry) used by _make_cap_ellipse / _make_cap_inner.
+function ellipseAlong(center, rxAlong, ryAcross, angle) {
+  const rect = new paper.Rectangle(center.x - rxAlong, center.y - ryAcross, 2 * rxAlong, 2 * ryAcross);
+  const e = new paper.Path.Ellipse(rect);
+  e.rotate(angle * 180 / Math.PI, new paper.Point(center.x, center.y));
+  return e;
+}
+// Outer (stroke) end-cap half. `depthPx` (optional) makes it an ELLIPSE whose
+// depth (along the tangent) = depthPx and across (perpendicular) = td — a port of
+// _make_cap_ellipse for elliptical_end_caps. Omitted -> the original circle
+// (kept byte-identical for non-elliptical strands).
+function capOuterStart(center, angle, td, depthPx) {
+  const outer = depthPx != null ? ellipseAlong(center, depthPx / 2, td / 2, angle)
+                                : new paper.Path.Circle(center, td / 2);
+  const m = depthPx != null ? Math.max(td, depthPx) * 2 : td;
+  const mask = depthPx != null ? localRect(center, 0, -m, 2 * m, 2 * m, angle)
+                               : localRect(center, 0, -td, 2 * td, 2 * td, angle);
+  const half = outer.subtract(mask);
+  outer.remove();
   mask.remove();
   return half;
 }
 // Outer cap half at an END end: keeps the half pointing out of the end.
-function capOuterEnd(center, angle, td) {
-  const circle = new paper.Path.Circle(center, td / 2);
-  const mask = localRect(center, -2 * td, -td, 2 * td, 2 * td, angle);
-  const half = circle.subtract(mask);
-  circle.remove();
+function capOuterEnd(center, angle, td, depthPx) {
+  const outer = depthPx != null ? ellipseAlong(center, depthPx / 2, td / 2, angle)
+                                : new paper.Path.Circle(center, td / 2);
+  const m = depthPx != null ? Math.max(td, depthPx) * 2 : td;
+  const mask = depthPx != null ? localRect(center, -2 * m, -m, 2 * m, 2 * m, angle)
+                               : localRect(center, -2 * td, -td, 2 * td, 2 * td, angle);
+  const half = outer.subtract(mask);
+  outer.remove();
   mask.remove();
   return half;
 }
-function capInner(center, wpx) {
+// Inner (fill) cap. `depthPx` (optional) -> full ELLIPSE (across=wpx, depth=depthPx)
+// aligned to the tangent `angle`; else the original full circle. Port of
+// _make_cap_inner.
+function capInner(center, wpx, depthPx, angle) {
+  if (depthPx != null) return ellipseAlong(center, depthPx / 2, wpx / 2, angle);
   return new paper.Path.Circle(center, wpx / 2);
 }
 // Side cover rect: Qt addRect(-sw, -w/2, sw, w) rotated to the tangent.
@@ -272,9 +295,100 @@ function capEndQuad(center, angle, swpx, wpx) {
   });
 }
 
+// ---- elliptical end-cap dims (port of strand.py _partner_cap_dims & helpers) ----
+// When elliptical_end_caps is on for EITHER strand at a junction, the connected cap
+// is a half-ELLIPSE: across-axis = this strand's width, DEPTH (along the tangent) =
+// the partner's width. Depth is angle-scaled only for an attached child at its start
+// junction (folded vs unfolded curves differ). Returns {total, width} in WORLD px,
+// or null (draw a plain circle — byte-identical for non-elliptical strands).
+
+function pmod(x, m) { return ((x % m) + m) % m; } // Python-style modulo (always >= 0)
+
+function isStartUnfolded(s) {
+  const c = s.start_circle_stroke_color;
+  if (c) return (c.a != null ? c.a : 255) === 0;
+  return !!s.is_setting_staring_circle;
+}
+
+// The strand connected at end 0/1 (parent for an attached child's start, a child
+// attached at the point, or a knot partner), or null.
+function partnerForEnd(s, endIndex, strands) {
+  const pt = endIndex === 0 ? s.start : s.end;
+  if (endIndex === 0 && s.type === 'AttachedStrand' && s.attached_to) {
+    const par = strands.find((x) => x.layer_name === s.attached_to);
+    if (par) return par;
+  }
+  for (const c of strands) {
+    if (c === s || c.type !== 'AttachedStrand') continue;
+    if (approxPt(c.start, pt)) return c;
+  }
+  const kc = s.knot_connections && s.knot_connections[endIndex === 0 ? 'start' : 'end'];
+  if (kc && kc.connected_strand_name) {
+    const k = strands.find((x) => x.layer_name === kc.connected_strand_name);
+    if (k) return k;
+  }
+  return null;
+}
+
+function partnerConnectingEnd(partner, pt) {
+  if (approxPt(partner.start, pt)) return 0;
+  if (approxPt(partner.end, pt)) return 1;
+  return 0;
+}
+
+// Angle (degrees, 0..180) between the strand tangent at this end and the partner's
+// tangent at its connecting end (_junction_connection_angle_rad).
+function junctionConnectionAngleDeg(s, endIndex, partner, P, enableThird) {
+  const selfCl = buildCenterline(s, P, enableThird);
+  const selfAngle = tangentAngle(selfCl, endIndex === 0 ? 0 : selfCl.length);
+  selfCl.remove();
+  const pt = endIndex === 0 ? s.start : s.end;
+  const pEnd = partnerConnectingEnd(partner, pt);
+  const pCl = buildCenterline(partner, P, enableThird);
+  const partnerAngle = tangentAngle(pCl, pEnd === 0 ? 0 : pCl.length);
+  pCl.remove();
+  return Math.abs(pmod(partnerAngle - selfAngle + Math.PI, 2 * Math.PI) - Math.PI) * 180 / Math.PI;
+}
+
+// _unfolded_start_cap_dims: 0/180 -> half other inner, 45/135 -> other inner, 90 -> partner.
+function unfoldedStartCapDims(s, pTotal, pWidth, selfTotal, deg) {
+  const halfInner = s.width / 2, halfTotal = selfTotal / 2;
+  let dw, dt;
+  if (deg <= 45) { const t = deg / 45; dw = halfInner + (s.width - halfInner) * t; dt = halfTotal + (selfTotal - halfTotal) * t; }
+  else if (deg <= 90) { const t = (deg - 45) / 45; dw = s.width + (pWidth - s.width) * t; dt = selfTotal + (pTotal - selfTotal) * t; }
+  else if (deg <= 135) { const t = (deg - 90) / 45; dw = pWidth + (s.width - pWidth) * t; dt = pTotal + (selfTotal - pTotal) * t; }
+  else { const t = (deg - 135) / 45; dw = s.width + (halfInner - s.width) * t; dt = selfTotal + (halfTotal - selfTotal) * t; }
+  return { total: dt, width: dw };
+}
+
+// _folded_start_cap_dims: 0/180 -> exact other inner depth, 90 -> full partner width.
+function foldedStartCapDims(s, pTotal, pWidth, selfTotal, deg) {
+  let dw, dt;
+  if (deg <= 90) { const t = deg / 90; dw = s.width + (pWidth - s.width) * t; dt = selfTotal + (pTotal - selfTotal) * t; }
+  else { const t = (deg - 90) / 90; dw = pWidth + (s.width - pWidth) * t; dt = pTotal + (selfTotal - pTotal) * t; }
+  return { total: dt, width: dw };
+}
+
+function ellipticalCapDims(s, endIndex, strands, P, enableThird) {
+  const partner = partnerForEnd(s, endIndex, strands);
+  if (!partner) return null;
+  if (!s.elliptical_end_caps && !partner.elliptical_end_caps) return null;
+  const pTotal = partner.width + 2 * partner.stroke_width;
+  const pWidth = partner.width;
+  // Only the attached child at its START junction is angle-scaled; every other
+  // junction (parent side, knot) keeps the full partner depth.
+  const isChildStart = endIndex === 0 && s.type === 'AttachedStrand' && s.attached_to === partner.layer_name;
+  if (!isChildStart) return { total: pTotal, width: pWidth };
+  const selfTotal = s.width + 2 * s.stroke_width;
+  const deg = junctionConnectionAngleDeg(s, endIndex, partner, P, enableThird);
+  return isStartUnfolded(s)
+    ? unfoldedStartCapDims(s, pTotal, pWidth, selfTotal, deg)
+    : foldedStartCapDims(s, pTotal, pWidth, selfTotal, deg);
+}
+
 // Collect end-cap pieces (pixel-space paper paths) for one strand, split into the
 // stroke-color layer and the fill-color layer.
-function collectCaps(s, strands, centerline, P, S) {
+function collectCaps(s, strands, centerline, P, enableThird, S) {
   const stroke = [], fill = [];
   const w = s.width || 0, sw = s.stroke_width || 0;
   const td = (w + 2 * sw) * S, wpx = w * S, swpx = sw * S;
@@ -288,43 +402,48 @@ function collectCaps(s, strands, centerline, P, S) {
   const aEnd = tangentAngle(centerline, len);
   const childStart = hasAttachedChildAt(s.start, strands, s);
   const childEnd = hasAttachedChildAt(s.end, strands, s);
+  // Elliptical end-cap depths (world px -> *S). undefined => circular cap (unchanged).
+  const eS = ellipticalCapDims(s, 0, strands, P, enableThird);
+  const eE = ellipticalCapDims(s, 1, strands, P, enableThird);
+  const dSt = eS ? eS.total * S : undefined, dSi = eS ? eS.width * S : undefined;
+  const dEt = eE ? eE.total * S : undefined, dEi = eE ? eE.width * S : undefined;
 
   if (s.type === 'AttachedStrand') {
     // start (its own attachment point)
     if (hc[0] && startA > 0) {
-      stroke.push(capOuterStart(cStart, aStart, td));
-      fill.push(capInner(cStart, wpx));
+      stroke.push(capOuterStart(cStart, aStart, td, dSt));
+      fill.push(capInner(cStart, wpx, dSi, aStart));
       fill.push(capSideRect(cStart, aStart, swpx, wpx));
     } else if (startA === 0 && s.is_setting_staring_circle && hc[0]) {
-      fill.push(capInner(cStart, wpx));
+      fill.push(capInner(cStart, wpx, dSi, aStart));
     }
     // end — half-circle only when a child attaches there (no alpha gate, per Qt)
     if (hc[1] && childEnd) {
-      stroke.push(capOuterEnd(cEnd, aEnd, td));
-      fill.push(capInner(cEnd, wpx));
+      stroke.push(capOuterEnd(cEnd, aEnd, td, dEt));
+      fill.push(capInner(cEnd, wpx, dEi, aEnd));
       if (endA > 0) fill.push(capSideRect(cEnd, aEnd, swpx, wpx));
     }
     // end fill is added whenever has_circles[1] (rounds the end)
     if (hc[1]) {
-      fill.push(capInner(cEnd, wpx));
+      fill.push(capInner(cEnd, wpx, dEi, aEnd));
       fill.push(capEndQuad(cEnd, aEnd, swpx, wpx));
     }
     // closed-knot end cap
     if (hc[1] && cc[1]) {
-      if (endA > 0) stroke.push(capOuterEnd(cEnd, aEnd, td));
-      fill.push(capInner(cEnd, wpx));
+      if (endA > 0) stroke.push(capOuterEnd(cEnd, aEnd, td, dEt));
+      fill.push(capInner(cEnd, wpx, dEi, aEnd));
       if (endA > 0) fill.push(capSideRect(cEnd, aEnd, swpx, wpx));
     }
   } else {
     // plain Strand: cap an end only where a child attaches or the end is closed
     if ((hc[0] && startA > 0 && childStart) || (cc[0] && startA > 0)) {
-      stroke.push(capOuterStart(cStart, aStart, td));
-      fill.push(capInner(cStart, wpx));
+      stroke.push(capOuterStart(cStart, aStart, td, dSt));
+      fill.push(capInner(cStart, wpx, dSi, aStart));
       fill.push(capSideRect(cStart, aStart, swpx, wpx));
     }
     if ((hc[1] && endA > 0 && childEnd) || (cc[1] && endA > 0)) {
-      stroke.push(capOuterEnd(cEnd, aEnd, td));
-      fill.push(capInner(cEnd, wpx));
+      stroke.push(capOuterEnd(cEnd, aEnd, td, dEt));
+      fill.push(capInner(cEnd, wpx, dEi, aEnd));
       fill.push(capSideRect(cEnd, aEnd, swpx, wpx));
     }
   }
@@ -407,19 +526,32 @@ function buildShadowReceiverGeom(s, strands, P, enableThird, S) {
   const len = cl.length;
   const isAttached = s.type === 'AttachedStrand';
   const addCircle = (centre, angle, which) => {
+    // Elliptical receiver cap = _make_cap_ellipse (across=td, depth=partner_total,
+    // no margin) when elliptical_end_caps is on; else the original circle.
+    const dims = ellipticalCapDims(s, which, strands, P, enableThird);
+    const depthPx = dims ? dims.total * S : undefined;
     let circle;
     if (isAttached) {
-      circle = which === 0 ? capOuterStart(centre, angle, td) : capOuterEnd(centre, angle, td);
+      circle = which === 0 ? capOuterStart(centre, angle, td, depthPx) : capOuterEnd(centre, angle, td, depthPx);
     } else {
-      circle = new paper.Path.Circle(centre, td / 2);
+      circle = depthPx != null ? ellipseAlong(centre, depthPx / 2, td / 2, angle)
+                               : new paper.Path.Circle(centre, td / 2);
     }
     const u = path.unite(circle);
     path.remove();
     circle.remove();
     path = u;
   };
-  if (hc[0] && startA > 0) addCircle(P(s.start), tangentAngle(cl, 0), 0);
-  if (hc[1] && endA > 0) addCircle(P(s.end), tangentAngle(cl, len), 1);
+  // build_rendered_geometry gates its ENTIRE circle union on the START circle's
+  // alpha (circle_stroke_color == start_circle_stroke_color, strand.py:495-498;
+  // shader_utils.py:1600-1606): an unfolded start drops ALL circles from the
+  // receiver footprint, including a folded/attached END circle. (The caster
+  // circles in buildShadowCasterCircles keep per-end gating — build_shadow_circle_
+  // geometry intentionally differs there.)
+  if (startA > 0) {
+    if (hc[0]) addCircle(P(s.start), tangentAngle(cl, 0), 0);
+    if (hc[1] && endA > 0) addCircle(P(s.end), tangentAngle(cl, len), 1);
+  }
   cl.remove();
   return path;
 }
@@ -430,6 +562,28 @@ function buildShadowReceiverGeom(s, strands, P, enableThird, S) {
 function buildShadowCasterCore(s, P, enableThird, S) {
   const w = s.width || 0, sw = s.stroke_width || 0;
   return strokedBodyAtWidth(s, P, enableThird, (w + 2 * sw) * S);
+}
+
+// draw_strand_shadow (shader_utils.py:514-547): when an end has has_circles set
+// but its circle is TRANSPARENT (an unfolded start / closing edge), OSS cuts an
+// enlarged circle of radius (w+2sw)/1.5 out of the caster's shadow_path so the
+// square body end-cap can't leak a shadow halo past the transparent cap. Returns
+// the trimmed path (the input is consumed); never returns null for a real body.
+function subtractTransparentCaps(path, s, P, S) {
+  const hc = s.has_circles || [false, false];
+  if (!hc[0] && !hc[1]) return path;
+  const w = s.width || 0, sw = s.stroke_width || 0;
+  const radius = ((w + 2 * sw) / 1.5) * S;
+  const cut = (centre) => {
+    const c = new paper.Path.Circle(centre, radius);
+    const r = path.subtract(c);
+    c.remove();
+    path.remove();
+    path = r;
+  };
+  if (hc[0] && circleStrokeAlpha(s.start_circle_stroke_color) === 0) cut(P(s.start));
+  if (hc[1] && circleStrokeAlpha(s.end_circle_stroke_color) === 0) cut(P(s.end));
+  return path;
 }
 
 // build_shadow_circle_geometry(strand): caster end-circles only, radius
@@ -450,11 +604,16 @@ function buildShadowCasterCircles(s, strands, P, enableThird, S) {
   const len = cl.length;
   let path = null;
   const addCircle = (centre, angle, which) => {
+    // Elliptical caster cap = _cap_shadow_path (across=radius, depth=cap_total/2+2,
+    // i.e. depthPx=(cap_total+4)*S) when elliptical_end_caps is on; else circle.
+    const dims = ellipticalCapDims(s, which, strands, P, enableThird);
+    const depthPx = dims ? (dims.total + 4) * S : undefined;
     let circle;
     if (isAttached) {
-      circle = which === 0 ? capOuterStart(centre, angle, td) : capOuterEnd(centre, angle, td);
+      circle = which === 0 ? capOuterStart(centre, angle, td, depthPx) : capOuterEnd(centre, angle, td, depthPx);
     } else {
-      circle = new paper.Path.Circle(centre, radius);
+      circle = depthPx != null ? ellipseAlong(centre, depthPx / 2, radius, angle)
+                               : new paper.Path.Circle(centre, radius);
     }
     if (!path) { path = circle; return; }
     const u = path.unite(circle);
@@ -509,6 +668,10 @@ function castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i) 
     if (!core) return;
   } else {
     core = buildShadowCasterCore(s, P, enableThird, S);
+    if (!core) return;
+    // Trim the caster core where an unfolded (transparent) cap should cast no halo
+    // (shader_utils.py:514-547). No-op unless the strand has a transparent start/end.
+    core = subtractTransparentCaps(core, s, P, S);
     if (!core) return;
     circles = buildShadowCasterCircles(s, strands, P, enableThird, S);
   }
@@ -706,18 +869,29 @@ function drawHighlight(s, strands, P, enableThird, S) {
     : ((hc[1] && endA > 0 && childEnd) || (cc[1] && endA > 0));
 
   // (2) C-shape rings: highlight_circle(cr+5) - mask(half-plane toward body) -
-  // outer_circle(cr). Same boolean construction as Qt.
-  const cShape = (center, angle) => {
-    const outer = new paper.Path.Circle(center, cr + 5 * S);
-    const inner = new paper.Path.Circle(center, cr);
+  // outer_circle(cr). Same boolean construction as Qt. When the end is elliptical
+  // (_partner_cap_dims set) the ring follows the ELLIPSE: across-semi grows cr->cr+5
+  // and depth-semi grows partner_total/2 -> partner_total/2+5 (_rotated_ellipse,
+  // strand.py:2102-2111). `depthTotal` is the partner total width (world px) or null.
+  const dimStart = ellipticalCapDims(s, 0, strands, P, enableThird);
+  const dimEnd = ellipticalCapDims(s, 1, strands, P, enableThird);
+  const cShape = (center, angle, depthTotal) => {
+    const ell = depthTotal != null;
+    const ds = ell ? (depthTotal * S) / 2 : 0;             // depth semi (along tangent)
+    const outer = ell ? ellipseAlong(center, ds + 5 * S, cr + 5 * S, angle)
+                      : new paper.Path.Circle(center, cr + 5 * S);
+    const inner = ell ? ellipseAlong(center, ds, cr, angle)
+                      : new paper.Path.Circle(center, cr);
     const ring = outer.subtract(inner); outer.remove(); inner.remove();
-    const mask = localRect(center, 0, -td, 2 * td, 2 * td, angle); // +x_local = toward body
+    const m = ell ? Math.max(td, depthTotal * S) * 2 : td;
+    const mask = ell ? localRect(center, 0, -m, 2 * m, 2 * m, angle)
+                     : localRect(center, 0, -td, 2 * td, 2 * td, angle); // +x_local = toward body
     const c = ring.subtract(mask); ring.remove(); mask.remove();
     c.fillColor = red; c.strokeColor = null;
     items.push(c);
   };
-  if (startCircle) cShape(P(s.start), tangentAngle(cl, 0));            // tangent into body
-  if (endCircle) cShape(P(s.end), tangentAngle(cl, len) + Math.PI);   // angle_end - pi
+  if (startCircle) cShape(P(s.start), tangentAngle(cl, 0), dimStart ? dimStart.total : undefined);            // tangent into body
+  if (endCircle) cShape(P(s.end), tangentAngle(cl, len) + Math.PI, dimEnd ? dimEnd.total : undefined);   // angle_end - pi
 
   // (3) side lines: a flat red bar across each circle-less, visible end.
   const hhw = cr + 5 * S;            // highlight half width
@@ -745,7 +919,7 @@ function drawStrand(s, strands, P, enableThird, S) {
   if (!layers) { centerline.remove(); return; }
   let strokePath = layers.stroke, fillPath = layers.fill;
 
-  const caps = collectCaps(s, strands, centerline, P, S);
+  const caps = collectCaps(s, strands, centerline, P, enableThird, S);
   const sideLines = collectSideLines(s, centerline, P, S);
   centerline.remove();
 

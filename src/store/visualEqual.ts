@@ -34,6 +34,16 @@ const rectSig = (rects: DeletionRect[] = []): string =>
     return `${Math.round(r.x ?? 0)},${Math.round(r.y ?? 0)},${Math.round(r.width ?? 0)},${Math.round(r.height ?? 0)}`;
   }).sort().join(';');
 
+// Resolve a per-end circle stroke the way the renderer does: the `extra` override
+// for that edge, falling back to the shared circle_stroke_color.
+const resolveEdgeCircle = (
+  s: StrandRecord,
+  key: 'start_circle_stroke_color' | 'end_circle_stroke_color',
+): RGBA | null => {
+  const v = (s.extra as Record<string, unknown> | undefined)?.[key] as RGBA | null | undefined;
+  return v ?? s.circle_stroke_color;
+};
+
 export function strandVisualEqual(a: StrandRecord, b: StrandRecord): boolean {
   if (a.type !== b.type) return false;
   if (!ptEq(a.start, b.start) || !ptEq(a.end, b.end)) return false;
@@ -43,6 +53,15 @@ export function strandVisualEqual(a: StrandRecord, b: StrandRecord): boolean {
   if (!approx(a.width, b.width) || !approx(a.stroke_width, b.stroke_width)) return false;
   if (!rgbaEq(a.color, b.color) || !rgbaEq(a.stroke_color, b.stroke_color)) return false;
   if (!rgbaNullEq(a.circle_stroke_color, b.circle_stroke_color)) return false;
+  // Per-end fold/unfold overrides live in `extra` and the renderer resolves each
+  // edge as extra.<side>_circle_stroke_color ?? circle_stroke_color (toRenderArray.ts).
+  // Compare the RESOLVED values so unfolding/folding a start (or closing) edge counts
+  // as a visual change and pushes an undo step (OSS save_state, numbered_layer_button.py).
+  if (!rgbaNullEq(resolveEdgeCircle(a, 'start_circle_stroke_color'), resolveEdgeCircle(b, 'start_circle_stroke_color'))) return false;
+  if (!rgbaNullEq(resolveEdgeCircle(a, 'end_circle_stroke_color'), resolveEdgeCircle(b, 'end_circle_stroke_color'))) return false;
+  // elliptical_end_caps (extra) changes the cap geometry, so it's a visual change.
+  if (!!(a.extra as Record<string, unknown> | undefined)?.elliptical_end_caps
+      !== !!(b.extra as Record<string, unknown> | undefined)?.elliptical_end_caps) return false;
   if (a.has_circles[0] !== b.has_circles[0] || a.has_circles[1] !== b.has_circles[1]) return false;
   if (!!a.is_hidden !== !!b.is_hidden || !!a.shadow_only !== !!b.shadow_only) return false;
   if ((a.attached_to ?? null) !== (b.attached_to ?? null)) return false;

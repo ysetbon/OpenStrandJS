@@ -221,6 +221,13 @@ export interface RenderStrand {
   start_circle_stroke_color?: RGBA | null;
   end_circle_stroke_color?: RGBA | null;
   is_setting_staring_circle?: boolean;
+  // Junction resolution for elliptical end-caps: the renderer finds the partner
+  // strand at each end (parent / attached child / knot) and, when elliptical_end_caps
+  // is set on either side, draws a half-ellipse cap whose depth = the partner's width.
+  attached_to?: string | null;
+  attachment_side?: 0 | 1;
+  knot_connections?: Record<string, { connected_strand_name?: string; connected_end?: string }>;
+  elliptical_end_caps?: boolean;
   is_selected?: boolean;          // draws the unified selection highlight (under the body)
   // OSS shadow_only: suppress this strand's own body/extension drawing but keep
   // its shadow contribution (it still casts onto lower strands). Absent/false ==
