@@ -7,7 +7,7 @@
 // Phase 6).
 
 import type {
-  EditorDocument, RenderMeta, RenderStrand, Settings, ViewState,
+  EditorDocument, RenderMeta, RenderStrand, RGBA, Settings, ViewState,
 } from '../model/types';
 
 // `highlightSet` (optional) marks extra strands as selected for highlight
@@ -57,6 +57,14 @@ export function toRenderArray(
       control_point_center_locked: s.control_point_center_locked,
       start_line_visible: ex.start_line_visible as boolean | undefined,
       end_line_visible: ex.end_line_visible as boolean | undefined,
+      start_extension_visible: ex.start_extension_visible as boolean | undefined,
+      end_extension_visible: ex.end_extension_visible as boolean | undefined,
+      start_arrow_visible: ex.start_arrow_visible as boolean | undefined,
+      end_arrow_visible: ex.end_arrow_visible as boolean | undefined,
+      full_arrow_visible: ex.full_arrow_visible as boolean | undefined,
+      arrow_color: ex.arrow_color as RGBA | null | undefined,
+      arrow_transparency: ex.arrow_transparency as number | undefined,
+      arrow_head_visible: ex.arrow_head_visible as boolean | undefined,
       closed_connections: ex.closed_connections as [boolean, boolean] | undefined,
       manual_circle_visibility: ex.manual_circle_visibility as [boolean | null, boolean | null] | undefined,
       circle_stroke_color: s.circle_stroke_color,
@@ -107,5 +115,19 @@ export function buildMeta(doc: EditorDocument, view: ViewState, settings: Settin
     // their output stays byte-identical.
     show_grid: settings.show_grid,
     grid_size: settings.grid_size,
+    // Dashed-extension settings (consumed when a strand has start/end_extension_visible).
+    extension_length: settings.extension_length,
+    extension_dash_count: settings.extension_dash_count,
+    extension_dash_width: settings.extension_dash_width,
+    extension_dash_gap_length: settings.extension_dash_gap_length,
+    // Arrow head/shaft settings (consumed when a strand has start/end_arrow_visible).
+    arrow_head_length: settings.arrow_head_length,
+    arrow_head_width: settings.arrow_head_width,
+    arrow_head_stroke_width: settings.arrow_head_stroke_width,
+    arrow_gap_length: settings.arrow_gap_length,
+    arrow_line_length: settings.arrow_line_length,
+    arrow_line_width: settings.arrow_line_width,
+    use_default_arrow_color: settings.use_default_arrow_color,
+    default_arrow_fill_color: settings.default_arrow_fill_color,
   };
 }

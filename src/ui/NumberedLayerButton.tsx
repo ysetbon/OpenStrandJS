@@ -2,13 +2,16 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import {
   toggleHidden, setShadowOnly, setColor, setWidth, setWidthGridUnits, resetMask,
-  setCircleStrokeColor, toggleCircleVisible, toggleLineVisible, closeKnot,
-  setEllipticalEndCaps,
+  setCircleStrokeColor, setEndCircleStrokeColor, toggleCircleVisible, toggleLineVisible,
+  toggleExtensionVisible, toggleArrowVisible, toggleFullArrow, closeKnot, setEllipticalEndCaps,
 } from '../store/actions';
 import { maskComponents } from '../model/layerName';
 import type { RGBA } from '../model/types';
 import { ContextMenu, type MenuItem, type MenuRowButton } from './ContextMenu';
 import { StrandWidthDialog } from './dialogs/StrandWidthDialog';
+import { ColorPickerDialog } from './dialogs/ColorPickerDialog';
+import { StrandShadowEditorDialog } from './dialogs/StrandShadowEditorDialog';
+import { ArrowCustomizeDialog } from './dialogs/ArrowCustomizeDialog';
 import { t } from './i18n';
 import './layerButton.css';
 
@@ -32,14 +35,6 @@ function rgbaToHex(c: RGBA | undefined | null): string {
   if (!c) return '#c8aae6';
   const h = (n: number) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
   return `#${h(c.r)}${h(c.g)}${h(c.b)}`;
-}
-
-// "#rrggbb" -> RGBA(0..255), preserving the previous alpha.
-function hexToRgba(hex: string, prev: RGBA | undefined | null): RGBA {
-  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim());
-  const a = prev ? prev.a : 255;
-  if (!m) return prev ? { ...prev } : { r: 200, g: 170, b: 230, a };
-  return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16), a };
 }
 
 // Qt QColor.lighter(factor)/darker(factor): operate on the HSV Value channel.
@@ -126,6 +121,10 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
   const locked = useEditorStore((s) => s.doc.locked_layers.includes(name));
   const multiSelectMode = useEditorStore((s) => s.multiSelectMode);
   const multiSelectedLayers = useEditorStore((s) => s.multiSelectedLayers);
+  const toggleMultiSelectLayer = useEditorStore((s) => s.toggleMultiSelectLayer);
+  const clearMultiSelectedLayers = useEditorStore((s) => s.clearMultiSelectedLayers);
+  const defaultWidth = useEditorStore((s) => s.settings.default_strand_width);
+  const defaultStroke = useEditorStore((s) => s.settings.default_stroke_width);
   const firstColor = useEditorStore((s) => {
     const mc = maskComponents(name);
     return mc ? s.doc.strands[mc.first]?.color : undefined;
@@ -141,11 +140,16 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
   const exitMaskEdit = useEditorStore((s) => s.exitMaskEdit);
 
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const [colorPick, setColorPick] = useState<'fill' | 'stroke' | null>(null);
+  // Change (Stroke) Color opens an RGBA picker dialog seeded with the current color
+  // (alpha-capable, unlike the native <input type=color>).
+  const [colorPick, setColorPick] = useState<{ kind: 'fill' | 'stroke'; value: RGBA } | null>(null);
   // Open the OSS WidthConfigDialog: wholeSet=true -> "Change Width" (set-wide),
   // false -> "Change Width (This Layer Only)".
   const [widthDialog, setWidthDialog] = useState<{ wholeSet: boolean } | null>(null);
-  const colorInputRef = useRef<HTMLInputElement>(null);
+  // Per-strand "Edit Shadows" dialog (OSS open_shadow_editor / ShadowEditorDialog).
+  const [shadowEditor, setShadowEditor] = useState(false);
+  // Full-arrow customization dialog (OSS arrow-customization sub-widget).
+  const [arrowCustomize, setArrowCustomize] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
   // Long-press = the mobile "right click". A ~500ms touch-hold with no significant
@@ -173,11 +177,6 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
   const hidden = !!strand?.is_hidden;
   const shadowOnly = !!strand?.shadow_only;
 
-  // When the user picks fill/stroke via the menu, open the native color input.
-  useEffect(() => {
-    if (colorPick) colorInputRef.current?.click();
-  }, [colorPick]);
-
   // ---- store-wired menu actions ----
   const doToggleHidden = () => commitEdit((d) => toggleHidden(d, name));
   const doToggleShadowOnly = () => commitEdit((d) => setShadowOnly(d, name, !shadowOnly));
@@ -189,9 +188,7 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
   };
   // Edit Mask -> enter the per-mask deletion-rectangle erase session for this mask.
   const doEditMask = () => enterMaskEdit(name);
-  const applyColor = (kind: 'fill' | 'stroke', hex: string) => {
-    const prev = kind === 'fill' ? strand?.color : strand?.stroke_color;
-    const rgba = hexToRgba(hex, prev);
+  const applyColor = (kind: 'fill' | 'stroke', rgba: RGBA) => {
     // Change Color (fill) propagates over the whole set; Change Stroke Color is
     // this-strand-only (numbered_layer_button.py change_color vs change_stroke_color).
     commitEdit((d) => setColor(d, name, kind, rgba, kind === 'fill'));
@@ -240,21 +237,30 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
         : [name, ...multiSelectedLayers];
       const anyHidden = S.some((n) => strands[n]?.is_hidden);
       const anyShadow = S.some((n) => strands[n]?.shadow_only);
+      // OSS clears the multi-selection set + refreshes after each callback
+      // (layer_panel.py:2058-2059 etc), so the gold borders don't linger and the
+      // next op starts fresh.
       items.push(
         {
           label: anyHidden ? t('show_selected_layers', lang) : t('hide_selected_layers', lang),
-          onClick: () => commitEdit((d) => {
-            const next = !anyHidden;
-            for (const n of S) { const sd = d.strands[n]; if (sd) sd.is_hidden = next; }
-          }),
+          onClick: () => {
+            commitEdit((d) => {
+              const next = !anyHidden;
+              for (const n of S) { const sd = d.strands[n]; if (sd) sd.is_hidden = next; }
+            });
+            clearMultiSelectedLayers();
+          },
         },
         { label: '', separator: true },
         {
           label: anyShadow ? t('disable_shadow_only_selected', lang) : t('enable_shadow_only_selected', lang),
-          onClick: () => commitEdit((d) => {
-            const next = !anyShadow;
-            for (const n of S) { const sd = d.strands[n]; if (sd) sd.shadow_only = next; }
-          }),
+          onClick: () => {
+            commitEdit((d) => {
+              const next = !anyShadow;
+              for (const n of S) { const sd = d.strands[n]; if (sd) sd.shadow_only = next; }
+            });
+            clearMultiSelectedLayers();
+          },
         },
       );
       return items;
@@ -266,8 +272,8 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
       // Shadow Only: inline ✓ prefix when active (OSS prepends "✓ "). No checked
       // gutter — the ctx-check gutter is not used here.
       { label: (shadowOnly ? '✓ ' : '') + t('shadow_only', lang), onClick: doToggleShadowOnly },
-      // TODO(oss-fidelity): open_shadow_editor per-strand dialog not ported.
-      { label: t('edit_shadows', lang), disabled: true },
+      // OSS open_shadow_editor (numbered_layer_button.py:2088): per-strand shadow editor.
+      { label: t('edit_shadows', lang), onClick: () => setShadowEditor(true) },
       { label: '', separator: true },
     );
 
@@ -282,8 +288,14 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
     // ---- regular / attached strand branch ----
     const isAttached = strand?.type === 'AttachedStrand';
     items.push(
-      { label: t('change_color', lang), onClick: () => setColorPick('fill') },
-      { label: t('change_stroke_color', lang), onClick: () => setColorPick('stroke') },
+      {
+        label: t('change_color', lang),
+        onClick: () => setColorPick({ kind: 'fill', value: strand?.color ?? { r: 200, g: 170, b: 230, a: 255 } }),
+      },
+      {
+        label: t('change_stroke_color', lang),
+        onClick: () => setColorPick({ kind: 'stroke', value: strand?.stroke_color ?? { r: 0, g: 0, b: 0, a: 255 } }),
+      },
       { label: t('change_width', lang), onClick: () => doChangeWidth(true) },
       { label: t('change_layer_width', lang), onClick: () => doChangeWidth(false) },
       { label: '', separator: true },
@@ -316,14 +328,13 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
 
     // ---- Line group (start/end side-line visibility) ----
     // OSS renders this as one compound row: a "Line" label + inline Start/End
-    // buttons (numbered_layer_button.py:820+). Rendered via ContextMenu's
-    // compound-row item (rowLabel + buttons).
-    // TODO(oss-fidelity): line flags only initialized on masked strands today;
-    // renderer parity unverified.
+    // buttons (numbered_layer_button.py:425-473). The side-line flags always exist
+    // (default true via factory + loader), so the start button shows for regular
+    // strands and the end button for all; the label reads the flag (absent == visible).
     const startLine = strand?.extra?.start_line_visible;
     const endLine = strand?.extra?.end_line_visible;
-    const hasStartLine = startLine !== undefined && !isAttached;
-    const hasEndLine = endLine !== undefined;
+    const hasStartLine = !isAttached;
+    const hasEndLine = true;
     if (hasStartLine || hasEndLine) {
       const buttons: MenuRowButton[] = [];
       if (hasStartLine) buttons.push({
@@ -338,30 +349,46 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
       items.push({ label: '', rowLabel: t('line', lang), buttons });
     }
 
-    // ---- Circle group (start/end circle visibility) ----
-    // OSS compound row: "Circle" label (no padding) + inline Start/End buttons.
-    // Gating: a child attached at side 0 -> start; side 1 -> end. AttachedStrand
-    // always allows its start toggle.
-    // TODO(oss-fidelity): child-scan gating approximated; renderer parity unverified.
-    const sides = childSides();
-    const showStart = isAttached || sides.start;
-    const showEnd = sides.end;
-    if (showStart || showEnd) {
-      const hc = strand?.has_circles ?? [false, false];
-      const buttons: MenuRowButton[] = [];
-      if (showStart) buttons.push({
-        label: hc[0] ? t('hide_start_circle', lang) : t('show_start_circle', lang),
-        onClick: () => commitEdit((d) => toggleCircleVisible(d, name, 0)),
-      });
-      if (showEnd) buttons.push({
-        label: hc[1] ? t('hide_end_circle', lang) : t('show_end_circle', lang),
-        onClick: () => commitEdit((d) => toggleCircleVisible(d, name, 1)),
-      });
+    // ---- Arrow group (start/end individual-arrow visibility) ----
+    // OSS compound "Arrow" row with inline Start/End buttons, shown for every
+    // non-masked strand between the Line row and Close-the-Knot
+    // (numbered_layer_button.py:490-558). Both buttons appear for regular AND attached
+    // strands. Flags default false (factory), so labels default to "Show ...".
+    {
+      const startArrow = !!strand?.extra?.start_arrow_visible;
+      const endArrow = !!strand?.extra?.end_arrow_visible;
+      const buttons: MenuRowButton[] = [
+        {
+          label: startArrow ? t('hide_start_arrow', lang) : t('show_start_arrow', lang),
+          onClick: () => commitEdit((d) => toggleArrowVisible(d, name, 'start')),
+        },
+        {
+          label: endArrow ? t('hide_end_arrow', lang) : t('show_end_arrow', lang),
+          onClick: () => commitEdit((d) => toggleArrowVisible(d, name, 'end')),
+        },
+      ];
       items.push({ label: '', separator: true });
-      items.push({ label: '', rowLabel: t('circle', lang), buttons, noPad: true });
+      items.push({ label: '', rowLabel: t('arrow', lang), buttons });
+    }
+
+    // ---- Full Arrow toggle + customization (OSS numbered_layer_button.py:560-729) ----
+    // "Show/Hide Full Arrow"; when on, a "Customize Arrow…" item opens the dialog with
+    // the six controls (OSS shows them inline; the ContextMenu can't host dropdowns).
+    {
+      const fullOn = !!strand?.extra?.full_arrow_visible;
+      items.push({ label: '', separator: true });
+      items.push({
+        label: fullOn ? t('hide_full_arrow', lang) : t('show_full_arrow', lang),
+        onClick: () => commitEdit((d) => toggleFullArrow(d, name)),
+      });
+      if (fullOn) {
+        items.push({ label: t('customize_arrow', lang), onClick: () => setArrowCustomize(true) });
+      }
     }
 
     // ---- Close the Knot (exactly one free end) ----
+    // OSS emits Close-the-Knot, then the END-edge closing-knot fold item, BEFORE the
+    // Circle row (numbered_layer_button.py:758-816 precede the Circle row at 873+).
     const hc = strand?.has_circles ?? [false, false];
     let freeCount = 0;
     let freeEndType: 'start' | 'end' = 'end';
@@ -380,6 +407,76 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
           onClick: () => commitEdit((d) => closeKnot(d, name, freeEndType)),
         },
       );
+    }
+
+    // ---- END-edge fold: Transparent / Restore Default Closing Knot Stroke ----
+    // OSS shows a second, independent fold item when the END is a closed knot
+    // connection (numbered_layer_button.py:773-816). Regular strands gate on
+    // closed_connections[1]; attached strands accept either closed end. The label
+    // flips off the END circle's alpha, resolved like the renderer
+    // (extra.end_circle_stroke_color ?? circle_stroke_color), default opaque (255).
+    const closed = strand?.extra?.closed_connections as [boolean, boolean] | undefined;
+    const hasClosedEnding = isAttached ? !!(closed?.[1] || closed?.[0]) : !!closed?.[1];
+    if (hasClosedEnding) {
+      const endStroke = (strand?.extra?.end_circle_stroke_color as RGBA | null | undefined)
+        ?? strand?.circle_stroke_color;
+      const endAlpha = endStroke?.a ?? 255;
+      items.push({ label: '', separator: true });
+      if (endAlpha === 0) {
+        items.push({
+          label: t('restore_default_closing_knot_stroke', lang),
+          onClick: () => commitEdit((d) => setEndCircleStrokeColor(d, name, { r: 0, g: 0, b: 0, a: 255 })),
+        });
+      } else {
+        items.push({
+          label: t('transparent_closing_knot_side', lang),
+          onClick: () => commitEdit((d) => setEndCircleStrokeColor(d, name, { r: 0, g: 0, b: 0, a: 0 })),
+        });
+      }
+    }
+
+    // ---- Extension / Dash group (start/end dashed-extension visibility) ----
+    // OSS compound row labeled "Dash" with inline Start/End buttons, shown for every
+    // non-masked strand (numbered_layer_button.py:820-854); both buttons appear for
+    // regular AND attached strands (no start-side exclusion, unlike the Line row).
+    // Flags default false (factory), so the labels default to "Show ...".
+    {
+      const startExt = !!strand?.extra?.start_extension_visible;
+      const endExt = !!strand?.extra?.end_extension_visible;
+      const buttons: MenuRowButton[] = [
+        {
+          label: startExt ? t('hide_start_extension', lang) : t('show_start_extension', lang),
+          onClick: () => commitEdit((d) => toggleExtensionVisible(d, name, 'start')),
+        },
+        {
+          label: endExt ? t('hide_end_extension', lang) : t('show_end_extension', lang),
+          onClick: () => commitEdit((d) => toggleExtensionVisible(d, name, 'end')),
+        },
+      ];
+      items.push({ label: '', separator: true });
+      items.push({ label: '', rowLabel: t('extension', lang), buttons });
+    }
+
+    // ---- Circle group (start/end circle visibility) ----
+    // OSS compound row: "Circle" label + inline Start/End buttons. OSS gives the
+    // label EXTRA contents-margins (numbered_layer_button.py:897), so no noPad.
+    // Gating: a child attached at side 0 -> start; side 1 -> end. AttachedStrand
+    // always allows its start toggle.
+    const sides = childSides();
+    const showStart = isAttached || sides.start;
+    const showEnd = sides.end;
+    if (showStart || showEnd) {
+      const buttons: MenuRowButton[] = [];
+      if (showStart) buttons.push({
+        label: hc[0] ? t('hide_start_circle', lang) : t('show_start_circle', lang),
+        onClick: () => commitEdit((d) => toggleCircleVisible(d, name, 0)),
+      });
+      if (showEnd) buttons.push({
+        label: hc[1] ? t('hide_end_circle', lang) : t('show_end_circle', lang),
+        onClick: () => commitEdit((d) => toggleCircleVisible(d, name, 1)),
+      });
+      items.push({ label: '', separator: true });
+      items.push({ label: '', rowLabel: t('circle', lang), buttons });
     }
 
     return items;
@@ -437,7 +534,10 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
           // (OSS setContextMenuPolicy(Qt.NoContextMenu)); exit with ESC.
           if (editActive) return;
           // OSS suppresses the normal per-button menu in multi-select mode and
-          // shows the 2-item multi menu instead (built in menuItems()).
+          // shows the 2-item multi menu instead (built in menuItems()). It also
+          // ADDS the right-clicked layer to the persistent set (+ gold highlight)
+          // before opening the menu (layer_panel.py:1887-1889).
+          if (multiSelectMode && !multiSelectedLayers.includes(name)) toggleMultiSelectLayer(name);
           setMenu({ x: e.clientX, y: e.clientY });
         }}
         onTouchStart={(e) => {
@@ -451,6 +551,7 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
           longPress.current.timer = window.setTimeout(() => {
             longPress.current.timer = null;
             longPressFired.current = true;
+            if (multiSelectMode && !multiSelectedLayers.includes(name)) toggleMultiSelectLayer(name);
             setMenu({ x: longPress.current.x, y: longPress.current.y });
           }, LP_DELAY_MS);
         }}
@@ -476,15 +577,16 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
         {locked && <span className="nlb-lock" aria-hidden>🔒</span>}
       </div>
 
-      {/* Hidden native color input driven by the menu "Change (Stroke) Color" items. */}
-      <input
-        ref={colorInputRef}
-        type="color"
-        className="nlb-color-input"
-        defaultValue={rgbaToHex(colorPick === 'stroke' ? strand?.stroke_color : strand?.color)}
-        onChange={(e) => { if (colorPick) applyColor(colorPick, e.target.value); }}
-        onBlur={() => setColorPick(null)}
-      />
+      {/* RGBA picker for "Change (Stroke) Color" — alpha-capable (OSS ShowAlphaChannel). */}
+      {colorPick && (
+        <ColorPickerDialog
+          title={t(colorPick.kind === 'fill' ? 'change_color' : 'change_stroke_color', lang)}
+          initial={colorPick.value}
+          lang={lang}
+          onClose={() => setColorPick(null)}
+          onApply={(c) => { applyColor(colorPick.kind, c); setColorPick(null); }}
+        />
+      )}
 
       {menu && (
         <ContextMenu
@@ -500,9 +602,19 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
           strand={strand}
           wholeSet={widthDialog.wholeSet}
           lang={lang}
+          defaultWidth={defaultWidth}
+          defaultStroke={defaultStroke}
           onClose={() => setWidthDialog(null)}
           onApply={(w, sw, units, ell) => applyWidth(widthDialog.wholeSet, w, sw, units, ell)}
         />
+      )}
+
+      {shadowEditor && (
+        <StrandShadowEditorDialog layerName={name} onClose={() => setShadowEditor(false)} />
+      )}
+
+      {arrowCustomize && (
+        <ArrowCustomizeDialog layerName={name} onClose={() => setArrowCustomize(false)} />
       )}
     </>
   );

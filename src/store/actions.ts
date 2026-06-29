@@ -593,8 +593,19 @@ export function setColor(
   const s = draft.strands[name];
   if (!s) return;
   const apply = (t: StrandRecord) => {
-    if (kind === 'fill') t.color = { ...color };
-    else t.stroke_color = { ...color };
+    if (kind === 'fill') {
+      t.color = { ...color };
+      // OSS update_color_for_set (strand_drawing_canvas.py:3741-3749): on a fill
+      // change the stroke's ALPHA follows the new fill alpha (RGB preserved); for
+      // AttachedStrands the circle stroke is re-synced to the stroke color too,
+      // unless it was deliberately made transparent (alpha 0 -> left alone).
+      t.stroke_color = { ...t.stroke_color, a: color.a };
+      if (t.type === 'AttachedStrand' && t.circle_stroke_color && t.circle_stroke_color.a > 0) {
+        t.circle_stroke_color = { ...t.stroke_color };
+      }
+    } else {
+      t.stroke_color = { ...color };
+    }
   };
   if (wholeSet) {
     for (const k of Object.keys(draft.strands)) {
@@ -688,6 +699,19 @@ export function setCircleStrokeColor(draft: EditorDocument, name: string, color:
   (s.extra as Record<string, unknown>).start_circle_stroke_color = color ? { ...color } : null;
 }
 
+// OSS "Transparent Closing Knot Side" / "Restore Default Closing Knot Stroke"
+// (numbered_layer_button.py set_end_circle_stroke_color, 1299-1310): sets ONLY the
+// END circle's stroke. alpha 0 = transparent closing-knot edge, opaque black =
+// default. The renderer resolves the end as extra.end_circle_stroke_color ??
+// circle_stroke_color (toRenderArray.ts), so writing the end override here isolates
+// the end edge exactly as OSS does. Passing null clears the override.
+export function setEndCircleStrokeColor(draft: EditorDocument, name: string, color: RGBA | null): void {
+  const s = draft.strands[name];
+  if (!s) return;
+  if (!s.extra) s.extra = {};
+  (s.extra as Record<string, unknown>).end_circle_stroke_color = color ? { ...color } : null;
+}
+
 // OSS toggle_strand_circle_visibility: flips has_circles[index] and records the
 // manual override in extra.manual_circle_visibility so the renderer's has_circles
 // recompute respects the user's explicit choice.
@@ -713,16 +737,66 @@ export function toggleLineVisible(draft: EditorDocument, name: string, end: 'sta
   s.extra[key] = cur === false ? true : false;
 }
 
+// OSS toggle_strand_extension_visibility: flips the start/end dashed-extension flag
+// (default false). The renderer draws a dashed line past that endpoint when true.
+export function toggleExtensionVisible(draft: EditorDocument, name: string, end: 'start' | 'end'): void {
+  const s = draft.strands[name];
+  if (!s) return;
+  const key = `${end}_extension_visible`;
+  s.extra[key] = !s.extra[key];
+}
+
+// OSS toggle_strand_arrow_visibility: flips the start/end individual-arrow flag
+// (default false). The renderer draws a shaft + triangle head past that endpoint.
+export function toggleArrowVisible(draft: EditorDocument, name: string, end: 'start' | 'end'): void {
+  const s = draft.strands[name];
+  if (!s) return;
+  const key = `${end}_arrow_visible`;
+  s.extra[key] = !s.extra[key];
+}
+
+// OSS toggle_strand_full_arrow_visibility: flips full_arrow_visible (default false).
+// The renderer draws the whole strand path as a thick shaft + a triangle head.
+export function toggleFullArrow(draft: EditorDocument, name: string): void {
+  const s = draft.strands[name];
+  if (!s) return;
+  s.extra.full_arrow_visible = !s.extra.full_arrow_visible;
+}
+
+// OSS arrow-customization setters (numbered_layer_button.py:2824-2895). All stored in
+// `extra` and round-trip. color/transparency/head_visible are rendered; texture/
+// shaft_style/casts_shadow are stored-only (decorative Qt pixmap brushes / arrow shadow
+// not ported to the canvas renderer).
+export function setArrowCustomization(
+  draft: EditorDocument,
+  name: string,
+  patch: {
+    arrow_color?: RGBA | null;
+    arrow_transparency?: number;
+    arrow_texture?: string;
+    arrow_shaft_style?: string;
+    arrow_head_visible?: boolean;
+    arrow_casts_shadow?: boolean;
+  },
+): void {
+  const s = draft.strands[name];
+  if (!s) return;
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined) continue;
+    (s.extra as Record<string, unknown>)[k] = v === null ? null : v;
+  }
+}
+
 // OSS close_the_knot: connect this strand's free end to the nearest sibling in
 // the same set that also has exactly one free end. Moves the free point (plus any
 // control point — including control_point_center — coincident with it) to the
 // target's free point, caps both ends with circles, marks closed_connections +
 // manual_circle_visibility on BOTH strands, and records the knot connection on
 // both (keyed by END TYPE) with the target mirroring the initiator. Gating
-// (exactly-one-free-end) is computed by the caller (NumberedLayerButton).
-// TODO(oss-fidelity): per-end circle-stroke transparency on the target's
-// connecting edge (OSS start/end_circle_stroke_color) needs per-end stroke model
-// fields the JS renderer lacks; the target keeps an opaque-black circle stroke.
+// (exactly-one-free-end) is computed by the caller (NumberedLayerButton). The
+// target's connecting edge is auto-set transparent (per-end stroke override stored
+// in extra.{start,end}_circle_stroke_color, which the renderer honors) so the two
+// closing circles join seamlessly — OSS numbered_layer_button.py:2602-2608.
 export function closeKnot(draft: EditorDocument, name: string, freeEnd: 'start' | 'end'): void {
   const s = draft.strands[name];
   if (!s) return;
@@ -738,9 +812,17 @@ export function closeKnot(draft: EditorDocument, name: string, freeEnd: 'start' 
     const t = draft.strands[k];
     if (t.type === 'MaskedStrand') continue;
     if (t.set_number !== s.set_number) continue;
-    const freeEnds: ('start' | 'end')[] = [];
-    if (!t.has_circles[0]) freeEnds.push('start');
-    if (!t.has_circles[1]) freeEnds.push('end');
+    // AttachedStrand: start is always bound, so only its END can be a free knot
+    // end (OSS close_the_knot, numbered_layer_button.py:2485-2501). Regular strands
+    // check both ends. A target qualifies only with EXACTLY one free end.
+    let freeEnds: ('start' | 'end')[];
+    if (t.type === 'AttachedStrand') {
+      freeEnds = t.has_circles[1] ? [] : ['end'];
+    } else {
+      freeEnds = [];
+      if (!t.has_circles[0]) freeEnds.push('start');
+      if (!t.has_circles[1]) freeEnds.push('end');
+    }
     if (freeEnds.length !== 1) continue;
     const te = freeEnds[0];
     const tIdx: 0 | 1 = te === 'start' ? 0 : 1;
@@ -773,6 +855,16 @@ export function closeKnot(draft: EditorDocument, name: string, freeEnd: 'start' 
   const black: RGBA = { r: 0, g: 0, b: 0, a: 255 };
   if (!s.circle_stroke_color) s.circle_stroke_color = { ...black };
   if (!target.circle_stroke_color) target.circle_stroke_color = { ...black };
+
+  // Auto-set the TARGET's connecting-edge stroke (OSS:2602-2608): an 'end' seam
+  // goes transparent (a:0) so the two closing circles join without a doubled ring;
+  // a 'start' seam stays opaque black. Stored per-end in extra (the renderer
+  // resolves extra.{start,end}_circle_stroke_color ?? circle_stroke_color).
+  if (best.end === 'end') {
+    (target.extra as Record<string, unknown>).end_circle_stroke_color = { r: 0, g: 0, b: 0, a: 0 };
+  } else {
+    (target.extra as Record<string, unknown>).start_circle_stroke_color = { r: 0, g: 0, b: 0, a: 255 };
+  }
 
   // Mark closed_connections + manual_circle_visibility on BOTH strands so the
   // renderer draws full closing circles (OSS:2610-2651).

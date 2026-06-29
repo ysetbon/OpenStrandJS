@@ -69,6 +69,17 @@ function loadStrand(raw: any): StrandRecord {
     if (!MODELED_KEYS.has(k)) extra[k] = raw[k];
   }
 
+  // OSS forces the side-line flags present, defaulting to True on every load path
+  // (save_load_manager.py:451-452/720-721/891-892). Mirror that for non-masked
+  // strands so older / hand-authored JSON still shows the Line menu row and draws
+  // its side lines (the renderer + menu treat absent as "no line"). New strands get
+  // these from the factory; every current fixture already serializes them, so this
+  // only touches files that omit the key — no oracle change.
+  if (type !== 'MaskedStrand') {
+    if (extra.start_line_visible === undefined) extra.start_line_visible = true;
+    if (extra.end_line_visible === undefined) extra.end_line_visible = true;
+  }
+
   const knot: Record<string, KnotConnection> = {};
   if (raw.knot_connections && typeof raw.knot_connections === 'object') {
     for (const [endKey, info] of Object.entries<any>(raw.knot_connections)) {

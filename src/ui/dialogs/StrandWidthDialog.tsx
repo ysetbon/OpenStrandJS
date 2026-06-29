@@ -11,16 +11,20 @@ import type { Language, StrandRecord } from '../../model/types';
 //   wholeSet = true   -> "Change Width" (applies to the whole set; NO elliptical)
 //   wholeSet = false  -> "Change Width (This Layer Only)" (this strand + elliptical)
 const GRID_UNIT = 27;
-const DEFAULT_STROKE_PX = 4;
 
 export function StrandWidthDialog({
-  strand, wholeSet, lang, onClose, onApply,
+  strand, wholeSet, lang, onClose, onApply, defaultWidth = 46, defaultStroke = 4,
 }: {
   strand: StrandRecord;
   wholeSet: boolean;
   lang: Language;
   onClose: () => void;
   onApply: (width: number, strokeWidth: number, gridUnits: number, elliptical: boolean) => void;
+  // Degenerate-fallback defaults for a width<=0 strand — OSS reads these from the
+  // Settings dialog (numbered_layer_button.py:3100-3124), so thread the user's
+  // configured default_strand_width / default_stroke_width rather than hardcoding.
+  defaultWidth?: number;
+  defaultStroke?: number;
 }): JSX.Element {
   const showElliptical = !wholeSet;
   const ex = (strand.extra ?? {}) as Record<string, unknown>;
@@ -31,11 +35,11 @@ export function StrandWidthDialog({
     const u = ex.width_in_grid_units;
     let sq = typeof u === 'number' && u
       ? u
-      : Math.round(((strand.width + 2 * strand.stroke_width) || (46 + 2 * DEFAULT_STROKE_PX)) / GRID_UNIT * 10) / 10;
+      : Math.round(((strand.width + 2 * strand.stroke_width) || (defaultWidth + 2 * defaultStroke)) / GRID_UNIT * 10) / 10;
     if (sq < 0.5) sq = 0.5;
     return sq;
   })();
-  const initStrokePx = strand.stroke_width > 0 ? Math.round(strand.stroke_width) : DEFAULT_STROKE_PX;
+  const initStrokePx = strand.stroke_width > 0 ? Math.round(strand.stroke_width) : defaultStroke;
 
   const clampStroke = (px: number, sq: number) => {
     const maxS = Math.max(1, Math.floor((sq * GRID_UNIT) / 2));

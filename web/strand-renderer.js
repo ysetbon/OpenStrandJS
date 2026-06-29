@@ -21,6 +21,20 @@ function toColor(c) {
 // into meta.curve_params. Defaults match the braid fixtures.
 let CURVE = { base_fraction: 1.0, dist_multiplier: 2.0, exponent: 2.0 };
 
+// Dashed-extension settings (OSS strand_drawing_canvas.py:220-224). renderFixture
+// overrides from meta.extension_* when present; the offline oracle leaves meta unset,
+// so these defaults match the Qt reference canvas exactly.
+let EXT_SETTINGS = { length: 100, dashCount: 10, dashWidth: 2, gap: 5 };
+
+// Arrow head/shaft settings (OSS strand.py:2708-2812). renderFixture overrides from
+// meta.arrow_* when present. `useDefault` mirrors canvas.use_default_arrow_color:
+// undefined (oracle / Qt reference, which never sets it) => head fill = strand color;
+// false => fill = defaultFill; true => strand color.
+let ARROW_SETTINGS = {
+  headLen: 20, headWidth: 10, headStroke: 4, gap: 10, lineLen: 20, lineWidth: 10,
+  useDefault: undefined, defaultFill: { r: 0, g: 0, b: 0, a: 255 },
+};
+
 // Centerline sampling step (px) used to build stroked outlines. renderFixture (the
 // pixel oracle) always uses 1 (~1px, full accuracy). The interactive drag path sets
 // it coarser via DRAG_SAMPLE_STEP so a long curvy strand isn't sampled thousands of
@@ -483,6 +497,148 @@ function collectSideLines(s, centerline, P, S) {
   return out;
 }
 
+// Dashed extension lines drawn PAST each endpoint when start/end_extension_visible.
+// Faithful port of OSS strand.py:2670-2707: a dash pen (width = EXT.dashWidth, equal
+// on/off segments of EXT.length/(2*dashCount)) drawn from the endpoint along the
+// tangent (start backward, end forward), offset by a gap so a small space separates
+// the body from the first dash. Color = stroke_color at the fill's alpha. Returns
+// paper paths (empty when neither flag is set, so non-extension strands are unaffected).
+function collectExtensions(s, centerline, P, S) {
+  const out = [];
+  if (!s.start_extension_visible && !s.end_extension_visible) return out;
+  const { length: extLen, dashCount, dashWidth, gap } = EXT_SETTINGS;
+  const dashSeg = dashCount > 0 ? extLen / (2 * dashCount) : extLen;
+  const dashSegPx = dashSeg * S;
+  // side color = stroke_color with the FILL's alpha (OSS side_color.setAlpha(color.alpha())).
+  const col = toColor(s.stroke_color);
+  const fillA = s.color && s.color.a != null ? s.color.a : 255;
+  col.alpha = fillA > 1 ? fillA / 255 : fillA;
+  const mk = (ax, ay, bx, by) => {
+    const line = new paper.Path.Line(new paper.Point(ax, ay), new paper.Point(bx, by));
+    line.strokeColor = col;
+    line.strokeWidth = dashWidth * S;
+    line.strokeCap = 'butt';
+    line.dashArray = [dashSegPx, dashSegPx];
+    out.push(line);
+  };
+  if (s.start_extension_visible) {
+    const a = tangentAngle(centerline, 0);   // unit points into the body (toward end)
+    const ux = Math.cos(a), uy = Math.sin(a), c = P(s.start);
+    mk(c.x - ux * gap * S, c.y - uy * gap * S,
+       c.x - ux * (extLen + gap) * S, c.y - uy * (extLen + gap) * S);
+  }
+  if (s.end_extension_visible) {
+    const a = tangentAngle(centerline, centerline.length);
+    const ux = Math.cos(a), uy = Math.sin(a), c = P(s.end);
+    mk(c.x + ux * gap * S, c.y + uy * gap * S,
+       c.x + ux * (extLen + gap) * S, c.y + uy * (extLen + gap) * S);
+  }
+  return out;
+}
+
+// Individual start/end arrows: a short shaft (stroke color) + a filled, outlined
+// triangle head past the endpoint. Faithful port of OSS strand.py:2727-2812. The
+// head fill follows OSS's use_default_arrow_color rule (see ARROW_SETTINGS). Returns
+// paper paths (empty when neither flag is set, so non-arrow strands are unaffected).
+function collectArrows(s, centerline, P, S) {
+  const out = [];
+  if (!s.start_arrow_visible && !s.end_arrow_visible) return out;
+  const A = ARROW_SETTINGS;
+  // Head fill: use_default_arrow_color === false -> defaultFill; else strand color.
+  const fillCol = A.useDefault === false ? toColor(A.defaultFill) : toColor(s.color);
+  const borderCol = toColor(s.stroke_color);
+  // One arrow anchored at `anchor`, pointing along (dx,dy) (a unit direction).
+  const arrow = (anchor, dx, dy) => {
+    const c = P(anchor);
+    const sx = c.x + dx * A.gap * S, sy = c.y + dy * A.gap * S;            // shaft start
+    const ex = sx + dx * A.lineLen * S, ey = sy + dy * A.lineLen * S;      // shaft end
+    const shaft = new paper.Path.Line(new paper.Point(sx, sy), new paper.Point(ex, ey));
+    shaft.strokeColor = borderCol;
+    shaft.strokeWidth = A.lineWidth * S;
+    shaft.strokeCap = 'butt';
+    out.push(shaft);
+    const tipx = ex + dx * A.headLen * S, tipy = ey + dy * A.headLen * S;  // head tip
+    const px = -dy, py = dx;                                               // perpendicular
+    const hw = (A.headWidth / 2) * S;
+    const lx = ex + px * hw, ly = ey + py * hw;
+    const rx = ex - px * hw, ry = ey - py * hw;
+    const tri = () => {
+      const t = new paper.Path([new paper.Point(tipx, tipy), new paper.Point(lx, ly), new paper.Point(rx, ry)]);
+      t.closed = true;
+      return t;
+    };
+    const fill = tri(); fill.fillColor = fillCol; fill.strokeColor = null; out.push(fill);
+    const border = tri();
+    border.fillColor = null;
+    border.strokeColor = borderCol;
+    border.strokeWidth = A.headStroke * S;
+    border.strokeJoin = 'miter';
+    border.strokeCap = 'butt';
+    out.push(border);
+  };
+  if (s.start_arrow_visible) {
+    const a = tangentAngle(centerline, 0);               // unit toward end
+    arrow(s.start, -Math.cos(a), -Math.sin(a));          // start arrow points backward
+  }
+  if (s.end_arrow_visible) {
+    const a = tangentAngle(centerline, centerline.length);
+    arrow(s.end, Math.cos(a), Math.sin(a));              // end arrow points forward
+  }
+  return out;
+}
+
+// Full-strand arrow (full_arrow_visible): the whole strand path becomes a thick
+// shaft, capped by a triangle head at the END. Faithful port of OSS strand.py:
+// 2816-2888 for the SOLID case. shaft color = arrow_color ?? stroke_color; head fill
+// = arrow_color ?? (use_default_arrow_color===false ? defaultFill : strand color);
+// arrow_transparency (0-100) overrides alpha; arrow_head_visible (default true) gates
+// the head. arrow_texture / arrow_shaft_style (decorative Qt pixmap-tile brushes) are
+// STORED-ONLY — paper.js can't fill a path with a tiled brush, so the solid base is
+// drawn (the patterns are faint a=80 overlays); arrow_casts_shadow is stored-only too.
+function collectFullArrow(s, centerline, P, S) {
+  const out = [];
+  if (!s.full_arrow_visible) return out;
+  const A = ARROW_SETTINGS;
+  const trans = s.arrow_transparency;
+  const applyAlpha = (col) => { if (trans != null) col.alpha = Math.max(0, Math.min(100, trans)) / 100; return col; };
+  const shaftCol = applyAlpha(toColor(s.arrow_color ?? s.stroke_color));
+  const headBase = s.arrow_color ?? (A.useDefault === false ? A.defaultFill : s.color);
+  const headFill = applyAlpha(toColor(headBase));
+  const borderCol = toColor(s.stroke_color);
+
+  // Shaft = the strand centerline stroked at arrow_line_width (Qt: flat cap, round join).
+  const shaft = centerline.clone();
+  shaft.fillColor = null;
+  shaft.strokeColor = shaftCol;
+  shaft.strokeWidth = A.lineWidth * S;
+  shaft.strokeCap = 'butt';
+  shaft.strokeJoin = 'round';
+  out.push(shaft);
+
+  // Head at the END, base centered on the endpoint, tip along the tangent.
+  if (s.arrow_head_visible !== false) {
+    const a = tangentAngle(centerline, centerline.length);
+    const ux = Math.cos(a), uy = Math.sin(a), c = P(s.end);
+    const px = -uy, py = ux, hw = (A.headWidth / 2) * S;
+    const tipx = c.x + ux * A.headLen * S, tipy = c.y + uy * A.headLen * S;
+    const lx = c.x + px * hw, ly = c.y + py * hw, rx = c.x - px * hw, ry = c.y - py * hw;
+    const tri = () => {
+      const t = new paper.Path([new paper.Point(tipx, tipy), new paper.Point(lx, ly), new paper.Point(rx, ry)]);
+      t.closed = true;
+      return t;
+    };
+    const fill = tri(); fill.fillColor = headFill; fill.strokeColor = null; out.push(fill);
+    const border = tri();
+    border.fillColor = null;
+    border.strokeColor = borderCol;
+    border.strokeWidth = A.headStroke * S;
+    border.strokeJoin = 'miter';
+    border.strokeCap = 'butt';
+    out.push(border);
+  }
+  return out;
+}
+
 // Build the two filled body layers for a strand at scale S (no caps): the outer
 // (stroke-color) layer at width+2*stroke and the inner (fill-color) layer at
 // width. Returns {stroke, fill} paper paths (uncolored) or null.
@@ -921,6 +1077,9 @@ function drawStrand(s, strands, P, enableThird, S) {
 
   const caps = collectCaps(s, strands, centerline, P, enableThird, S);
   const sideLines = collectSideLines(s, centerline, P, S);
+  const extLines = collectExtensions(s, centerline, P, S);
+  const arrows = collectArrows(s, centerline, P, S);
+  const fullArrow = collectFullArrow(s, centerline, P, S);
   centerline.remove();
 
   for (const shp of caps.stroke) {
@@ -941,8 +1100,9 @@ function drawStrand(s, strands, P, enableThird, S) {
   fillPath.fillColor = toColor(s.color);
   fillPath.strokeColor = null;
 
-  // Paint stroke layer, then fill layer, then side bars (top), in order.
-  new paper.Group([strokePath, fillPath, ...sideLines]);
+  // Paint stroke layer, fill layer, then side bars + extensions + individual arrows,
+  // then the full-strand arrow on top (matches OSS draw order).
+  new paper.Group([strokePath, fillPath, ...sideLines, ...extLines, ...arrows, ...fullArrow]);
 }
 
 // A deletion rectangle (over-under gap) in pixel space. Corner-based
@@ -1300,6 +1460,28 @@ function drawMasked(ms, byLayer, P, enableThird, S, shadowOnly) {
 // Render `strands` (flat array) using `meta` into the canvas #c.
 window.renderFixture = function (strands, meta) {
   if (meta.curve_params) CURVE = meta.curve_params;
+  // Dashed-extension settings: meta override, else OSS canvas defaults. OSS's gap
+  // default is the dash segment length (extension_length/(2*dash_count)).
+  {
+    const L = meta.extension_length ?? 100;
+    const N = meta.extension_dash_count ?? 10;
+    EXT_SETTINGS = {
+      length: L,
+      dashCount: N,
+      dashWidth: meta.extension_dash_width ?? 2,
+      gap: meta.extension_dash_gap_length ?? (N > 0 ? L / (2 * N) : L),
+    };
+  }
+  ARROW_SETTINGS = {
+    headLen: meta.arrow_head_length ?? 20,
+    headWidth: meta.arrow_head_width ?? 10,
+    headStroke: meta.arrow_head_stroke_width ?? 4,
+    gap: meta.arrow_gap_length ?? 10,
+    lineLen: meta.arrow_line_length ?? 20,
+    lineWidth: meta.arrow_line_width ?? 10,
+    useDefault: meta.use_default_arrow_color,            // undefined for the oracle
+    defaultFill: meta.default_arrow_fill_color ?? { r: 0, g: 0, b: 0, a: 255 },
+  };
   SAMPLE_STEP = 1; // full-accuracy sampling for the oracle / pointer-up render
   const W = meta.image_width, H = meta.image_height;
   // Match the reference, which renders at `supersample`x then downscales.

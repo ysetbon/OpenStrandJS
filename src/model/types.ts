@@ -215,6 +215,22 @@ export interface RenderStrand {
   // caps, folded/unfolded state, has_circles recompute).
   start_line_visible?: boolean;
   end_line_visible?: boolean;
+  // OSS dashed-extension visibility (strand.py:2689-2707). When true the renderer
+  // draws a dashed line past that endpoint. Absent/false == no extension (oracle-safe).
+  start_extension_visible?: boolean;
+  end_extension_visible?: boolean;
+  // OSS individual start/end arrows (strand.py:2727-2812): a short shaft + filled,
+  // outlined triangle head past that endpoint. Absent/false == no arrow (oracle-safe).
+  start_arrow_visible?: boolean;
+  end_arrow_visible?: boolean;
+  // OSS full-strand arrow (strand.py:2816-2888): the whole strand path as a thick
+  // shaft + a triangle head at the end. arrow_color overrides shaft+head color;
+  // arrow_transparency (0-100) overrides alpha; arrow_head_visible gates the head
+  // (default true). arrow_texture/arrow_shaft_style are stored-only (not rendered).
+  full_arrow_visible?: boolean;
+  arrow_color?: RGBA | null;
+  arrow_transparency?: number;
+  arrow_head_visible?: boolean;
   closed_connections?: [boolean, boolean];
   manual_circle_visibility?: [boolean | null, boolean | null];
   circle_stroke_color?: RGBA | null;
@@ -267,6 +283,27 @@ export interface RenderMeta {
   // never sets it) stays byte-identical. grid_size is in world px (strand units).
   show_grid?: boolean;
   grid_size?: number;
+  // OSS dashed-extension settings (strand_drawing_canvas.py:220-224). Drive the
+  // dashed extension lines drawn past endpoints with start/end_extension_visible.
+  // Absent => OSS canvas defaults (length 100, count 10, width 2, gap 5) — the
+  // fidelity oracle never sets these, so it uses the same defaults as the Qt canvas.
+  extension_length?: number;
+  extension_dash_count?: number;
+  extension_dash_width?: number;
+  extension_dash_gap_length?: number;
+  // OSS arrow-head/shaft settings (strand.py:2708-2812). Drive the individual
+  // start/end arrows. Absent => OSS canvas defaults (head 20×10, stroke 4, gap 10,
+  // line 20×10). use_default_arrow_color/default_arrow_fill_color pick the head fill:
+  // when use_default_arrow_color === false the fill is default_arrow_fill_color, else
+  // the strand's own color. Absent (oracle) => strand color, matching the Qt reference.
+  arrow_head_length?: number;
+  arrow_head_width?: number;
+  arrow_head_stroke_width?: number;
+  arrow_gap_length?: number;
+  arrow_line_length?: number;
+  arrow_line_width?: number;
+  use_default_arrow_color?: boolean;
+  default_arrow_fill_color?: RGBA;
   // PNG EXPORT ONLY (the live editor / fidelity oracle never set this). Skip the
   // opaque white backdrop so the rendered image keeps a transparent background,
   // matching OSS save_canvas_as_image (the QImage is filled with Qt.transparent).
