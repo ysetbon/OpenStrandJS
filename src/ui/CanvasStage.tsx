@@ -25,6 +25,7 @@ export function CanvasStage() {
     (s.maskEditTarget && s.doc.strands[s.maskEditTarget]?.type === 'MaskedStrand') ? s.maskEditTarget : null);
   const lang = useEditorStore((s) => s.settings.language);
   const angleEditTarget = useEditorStore((s) => s.angleEditTarget);
+  const panMode = useEditorStore((s) => s.panMode);
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -79,9 +80,14 @@ export function CanvasStage() {
 
   useEffect(() => {
     const cCanvas = document.getElementById('c') as HTMLCanvasElement | null;
-    // An active Edit Mask session forces the crosshair (OSS enter_mask_edit_mode).
-    if (cCanvas) cCanvas.style.cursor = maskEditTarget ? 'crosshair' : (modes[mode]?.cursor ?? 'default');
-  }, [mode, maskEditTarget]);
+    if (!cCanvas) return;
+    // Idle cursor when the mode / mask-edit / pan-tool toggles. The InteractionHost
+    // refines this on every pointer event (open/closed hand while panning or grabbing);
+    // this effect just gives the immediate resting cursor since those events don't fire
+    // on a toolbar click. An active Edit Mask session forces the crosshair (OSS
+    // enter_mask_edit_mode); the pan/hand tool rests on the open hand (OSS OpenHandCursor).
+    cCanvas.style.cursor = maskEditTarget ? 'crosshair' : panMode ? 'grab' : (modes[mode]?.cursor ?? 'default');
+  }, [mode, maskEditTarget, panMode]);
 
   // Repaint the overlay whenever the interaction mode changes. The overlay is the
   // only mode-dependent layer (move squares vs attach circles vs select/mask

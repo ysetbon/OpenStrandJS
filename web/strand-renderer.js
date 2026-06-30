@@ -44,6 +44,15 @@ let ARROW_SETTINGS = {
 let SAMPLE_STEP = 1;
 const DRAG_SAMPLE_STEP = 3;
 
+// Simplified mask drawing for slow-machine drags. Each masked crossing normally costs TWO
+// Paper.js path-booleans — a fill region AND a wider stroke-border region. When set, drawMasked
+// computes ONLY the fill region (the crossing stays visible, just without the dark border),
+// roughly halving every mask's cost — which matters most for the per-grab static-background
+// bake of a knot (dozens of static crossings). Only _dragPaint turns it on from
+// meta.drag.mask_simple; renderFixture (the pixel oracle) forces it OFF on entry, so the
+// offline harness is byte-identical. The full mask (with border) returns on pointer-up.
+let DRAG_SIMPLE_MASK = false;
+
 // Shadow parameters — faithful port of shader_utils.py::draw_strand_shadow. The
 // canvas loads NumSteps=2 / MaxBlurRadius=30.0 / ShadowColor=0,0,0,150 from
 // user_settings.txt, so the function-signature default of 3 is moot; the LOADED
@@ -1410,13 +1419,18 @@ function drawMasked(ms, byLayer, P, enableThird, S, shadowOnly) {
   // skips all body rendering and returns early when self.shadow_only).
   if (shadowOnly) return;
 
-  // stroke-color region: first@(w+2sw) ∩ second@(w+2sw)
-  const fStroke = maskComponentPath(first, P, enableThird, S, fw + 2 * fsw);
-  const sStroke = maskComponentPath(second, P, enableThird, S, sw + 2 * ssw);
-  let strokeRegion = fStroke && sStroke ? fStroke.intersect(sStroke) : null;
-  fStroke && fStroke.remove();
-  sStroke && sStroke.remove();
-  strokeRegion = subtractDeletions(strokeRegion, ms, P, S);
+  // stroke-color region: first@(w+2sw) ∩ second@(w+2sw). On the simplified drag path this
+  // (the SECOND per-mask boolean) is skipped — the crossing keeps its body fill, just without
+  // the darker outer border, and the full border returns on the release / oracle render.
+  let strokeRegion = null;
+  if (!DRAG_SIMPLE_MASK) {
+    const fStroke = maskComponentPath(first, P, enableThird, S, fw + 2 * fsw);
+    const sStroke = maskComponentPath(second, P, enableThird, S, sw + 2 * ssw);
+    strokeRegion = fStroke && sStroke ? fStroke.intersect(sStroke) : null;
+    fStroke && fStroke.remove();
+    sStroke && sStroke.remove();
+    strokeRegion = subtractDeletions(strokeRegion, ms, P, S);
+  }
 
   // fill-color region: first@w ∩ second@(w+2sw+4)
   const fFill = maskComponentPath(first, P, enableThird, S, fw);
@@ -1483,6 +1497,7 @@ window.renderFixture = function (strands, meta) {
     defaultFill: meta.default_arrow_fill_color ?? { r: 0, g: 0, b: 0, a: 255 },
   };
   SAMPLE_STEP = 1; // full-accuracy sampling for the oracle / pointer-up render
+  DRAG_SIMPLE_MASK = false; // full masks (with stroke border) for the oracle / release render
   const W = meta.image_width, H = meta.image_height;
   // Match the reference, which renders at `supersample`x then downscales.
   // Paper draws into an offscreen W*ss x H*ss canvas; we then downscale into
@@ -1737,7 +1752,12 @@ function computeDragTopology(strands) {
 // read / composite, then remove.
 function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg, topo) {
   if (meta.curve_params) CURVE = meta.curve_params;
-  SAMPLE_STEP = DRAG_SAMPLE_STEP; // coarse sampling keeps per-frame stroking cheap
+  // Coarse sampling keeps per-frame stroking cheap. The cost of a masked crossing is a
+  // Paper.js path-boolean over the two stroked component outlines, which is superlinear
+  // in segment count (~len/SAMPLE_STEP) — so the scheduler raises sample_step when the
+  // moving set contains masks (the expensive case) to keep masked drags interactive.
+  SAMPLE_STEP = (meta.drag && meta.drag.sample_step) || DRAG_SAMPLE_STEP;
+  DRAG_SIMPLE_MASK = !!(meta.drag && meta.drag.mask_simple); // skip each mask's stroke-border boolean
 
   const W = meta.image_width, H = meta.image_height;
   const S = meta.zoom || 1; // supersample fixed at 1 on the drag path
@@ -1780,6 +1800,15 @@ function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg, topo) {
 window.renderDragBackground = function (strands, meta) {
   const W = meta.image_width, H = meta.image_height;
   const moving = new Set((meta.drag && meta.drag.moving) || []);
+  // Reduced drag resolution: bake the static bands at lw x lh (offsets/zoom scaled to
+  // match) so per-frame raster cost drops ~1/scale^2. renderDragFrame upscale-blits the
+  // composite onto the full-size #c. scale 1 == full res (no change).
+  const scale = (meta.drag && meta.drag.res_scale) || 1;
+  const lw = Math.max(1, Math.round(W * scale)), lh = Math.max(1, Math.round(H * scale));
+  const bakeMeta = scale === 1 ? meta : {
+    ...meta, image_width: lw, image_height: lh,
+    x_offset: meta.x_offset * scale, y_offset: meta.y_offset * scale, zoom: (meta.zoom || 1) * scale,
+  };
   const topo = computeDragTopology(strands);
   // Partition strands into ordered segments: maximal runs of static strands
   // alternating with the moving-set slots. A MaskedStrand whose components move is
@@ -1792,8 +1821,12 @@ window.renderDragBackground = function (strands, meta) {
     const name = strands[i].layer_name;
     if (moving.has(name)) {
       if (run) { bands.push({ kind: 'band', names: run }); run = null; }
-      // Collapse a contiguous cluster of moving strands into a single 'move' slot.
-      if (!inMove) { bands.push({ kind: 'move' }); inMove = true; }
+      // Collapse a contiguous cluster of moving strands into a single 'move' slot, and
+      // record WHICH moving strands belong to it. A NON-CONTIGUOUS moving set produces
+      // several move slots; renderDragFrame paints each from only its own members, so z-order
+      // is exact (painting the whole moving set at every slot would double-draw + mis-layer).
+      if (!inMove) { bands.push({ kind: 'move', names: new Set() }); inMove = true; }
+      bands[bands.length - 1].names.add(name);
     } else {
       if (!run) run = new Set();
       run.add(name);
@@ -1809,15 +1842,17 @@ window.renderDragBackground = function (strands, meta) {
   for (const b of bands) {
     if (b.kind !== 'band') continue;
     const c = document.createElement('canvas');
-    _dragPaint(c, strands, meta, (name) => b.names.has(name), false, topo);
+    _dragPaint(c, strands, bakeMeta, (name) => b.names.has(name), false, topo); // c sized lw x lh by bakeMeta
     paper.project.remove();
     b.canvas = c;
     delete b.names; // names only needed during bake
   }
+  // W/H/ox/oy/zoom are the FULL-res keys renderDragFrame validates against; scale/lw/lh
+  // drive the reduced-resolution per-frame composite + upscale.
   DRAG_BG = {
-    bands, W, H, ox: meta.x_offset, oy: meta.y_offset, zoom: meta.zoom || 1, topo,
+    bands, W, H, ox: meta.x_offset, oy: meta.y_offset, zoom: meta.zoom || 1, topo, scale, lw, lh,
   };
-  return { baked: true, staticCount: strands.length - moving.size, bands: bands.length };
+  return { baked: true, staticCount: strands.length - moving.size, bands: bands.length, scale };
 };
 
 // Per-move frame: composite the pre-baked static bands and the live moving
@@ -1833,51 +1868,88 @@ window.renderDragFrame = function (strands, meta) {
     return window.renderFixture(strands, meta);
   }
   const moving = new Set((meta.drag && meta.drag.moving) || []);
-  // Stroke the moving strands once into a transparent offscreen bitmap; it gets
-  // blitted at every 'move' slot in the band order (normally exactly one slot).
-  const mv = document.createElement('canvas');
-  _dragPaint(mv, strands, meta, (name) => moving.has(name), false, DRAG_BG.topo);
-  paper.project.remove();
+  const scale = DRAG_BG.scale || 1, lw = DRAG_BG.lw || W, lh = DRAG_BG.lh || H;
+  // The actively-moving strand + its masks (the per-frame cost — Paper raster ∝ pixels, and
+  // a mask boolean ∝ outline segment count ∝ render resolution) are stroked at mv_scale,
+  // which the scheduler drops BELOW the baked band scale while the pointer is moving fast and
+  // raises back as it slows — motion hides the blur, and a slow/precise move stays crisp. mv
+  // is upscaled to the band resolution (lw x lh) when composited. Defaults to the bake scale.
+  const mvScale = Math.max(0.12, Math.min(scale, (meta.drag && meta.drag.mv_scale) || scale));
+  const mlw = Math.max(1, Math.round(W * mvScale)), mlh = Math.max(1, Math.round(H * mvScale));
+  const frameMeta = (mvScale === 1) ? meta : {
+    ...meta, image_width: mlw, image_height: mlh,
+    x_offset: meta.x_offset * mvScale, y_offset: meta.y_offset * mvScale, zoom: (meta.zoom || 1) * mvScale,
+  };
+  // Paint each MOVE band's own strands into its own transient bitmap (mlw x mlh). A
+  // non-contiguous moving set has several move bands; each is painted from only its members
+  // so the moving strands land at their exact z-slots (contiguous = one band = same cost).
+  for (const b of DRAG_BG.bands) {
+    if (b.kind !== 'move') continue;
+    const c = document.createElement('canvas');
+    _dragPaint(c, strands, frameMeta, (name) => b.names.has(name), false, DRAG_BG.topo);
+    paper.project.remove();
+    b.mv = c;
+  }
+  // Composite white backdrop + grid + baked static bands + moving strokes onto a
+  // LOW-RES buffer (every band/mv is lw x lh), then upscale-blit it ONCE onto the
+  // full-size #c. #c keeps its full backing size, so #overlay stays pixel-aligned and
+  // no overlay change is needed; only the strand bodies go slightly soft during the
+  // drag (snapped crisp by the full render on release).
+  const buf = document.createElement('canvas');
+  buf.width = lw; buf.height = lh;
+  const bctx = buf.getContext('2d');
+  bctx.fillStyle = 'white';
+  bctx.fillRect(0, 0, lw, lh); // backdrop (baked into no band; see renderDragBackground)
+  // Reference grid behind the strands during a drag (same gating + look as
+  // renderFixture), at the reduced resolution so it composites under the bands.
+  if (meta.show_grid && meta.grid_size > 0) {
+    const zoom = (meta.zoom || 1) * scale;
+    const step = meta.grid_size * zoom;
+    if (step >= 4) {
+      const ox = meta.x_offset * scale, oy = meta.y_offset * scale;
+      bctx.save();
+      bctx.strokeStyle = 'rgba(0,0,0,0.08)';
+      bctx.lineWidth = 1;
+      bctx.beginPath();
+      for (let k = Math.ceil(-ox / step); k <= Math.floor((lw - ox) / step); k++) {
+        const x = ox + k * step;
+        bctx.moveTo(x, 0); bctx.lineTo(x, lh);
+      }
+      for (let k = Math.ceil(-oy / step); k <= Math.floor((lh - oy) / step); k++) {
+        const y = oy + k * step;
+        bctx.moveTo(0, y); bctx.lineTo(lw, y);
+      }
+      bctx.stroke();
+      bctx.restore();
+    }
+  }
+  // Composite bands bottom-to-top in document z-order, dropping in the moving strokes at
+  // their z-slot. Static bands are lw x lh; the moving bitmap is mlw x mlh (≤ band res while
+  // flinging) and gets upscaled into the band resolution here.
+  const mvNeedsScale = mlw !== lw || mlh !== lh;
+  for (const b of DRAG_BG.bands) {
+    if (b.kind === 'move') {
+      if (mvNeedsScale) bctx.drawImage(b.mv, 0, 0, mlw, mlh, 0, 0, lw, lh);
+      else bctx.drawImage(b.mv, 0, 0);
+    } else bctx.drawImage(b.canvas, 0, 0);
+  }
+  // Release the transient per-band bitmaps (Stage 1 will instead CACHE these for the
+  // translate-while-fast preview).
+  for (const b of DRAG_BG.bands) if (b.kind === 'move') b.mv = null;
   const vis = document.getElementById('c');
   vis.width = W;
   vis.height = H;
   vis.style.width = W + 'px';
   vis.style.height = H + 'px';
   const ctx = vis.getContext('2d');
-  ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = 'white';
-  ctx.fillRect(0, 0, W, H); // backdrop (baked into no band; see renderDragBackground)
-  // Reference grid behind the strands during a drag (same gating + look as
-  // renderFixture). The drag composite is native (ss=1), so backing px == world
-  // * zoom + offset; drawn here, before the band blits, so it stays under them.
-  if (meta.show_grid && meta.grid_size > 0) {
-    const zoom = meta.zoom || 1;
-    const step = meta.grid_size * zoom;
-    if (step >= 4) {
-      const ox = meta.x_offset, oy = meta.y_offset;
-      ctx.save();
-      ctx.strokeStyle = 'rgba(0,0,0,0.08)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      for (let k = Math.ceil(-ox / step); k <= Math.floor((W - ox) / step); k++) {
-        const x = ox + k * step;
-        ctx.moveTo(x, 0); ctx.lineTo(x, H);
-      }
-      for (let k = Math.ceil(-oy / step); k <= Math.floor((H - oy) / step); k++) {
-        const y = oy + k * step;
-        ctx.moveTo(0, y); ctx.lineTo(W, y);
-      }
-      ctx.stroke();
-      ctx.restore();
-    }
+  if (scale === 1) {
+    ctx.drawImage(buf, 0, 0);
+  } else {
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'low';
+    ctx.drawImage(buf, 0, 0, lw, lh, 0, 0, W, H); // upscale the whole composite once
   }
-  // Composite bands bottom-to-top in document z-order, dropping in the moving
-  // strokes at their z-slot. Per-frame work = k band blits + the one mv blit.
-  for (const b of DRAG_BG.bands) {
-    if (b.kind === 'move') ctx.drawImage(mv, 0, 0);
-    else ctx.drawImage(b.canvas, 0, 0);
-  }
-  return { drawn: moving.size, mode: 'dragframe', bands: DRAG_BG.bands.length };
+  return { drawn: moving.size, mode: 'dragframe', bands: DRAG_BG.bands.length, scale };
 };
 
 // Drop the cached background at the end of a gesture (or before any full render).

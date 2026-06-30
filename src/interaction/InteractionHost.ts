@@ -80,6 +80,33 @@ export class InteractionHost {
     };
   }
 
+  // Single source of truth for the canvas cursor, recomputed from CURRENT state on
+  // every pointer/key event so it can never get stuck (the old code set it only in
+  // onPointerMove, and the pan/erase branches `return` before reaching it — so the
+  // pan tool's open/closed hand never updated after a press). Faithful to OSS
+  // strand_drawing_canvas.py: the pan/hand tool is OpenHandCursor idle and
+  // ClosedHandCursor while dragging (toggle_pan_mode / mousePress / mouseRelease);
+  // an Edit-Mask session forces the crosshair. We also surface the open hand over a
+  // grabbable handle and the closed hand while a handle is actively dragged, so a
+  // grab reads the same as the pan tool ('grab' == OpenHand, 'grabbing' == ClosedHand).
+  private updateCursor = (): void => {
+    const st = useEditorStore.getState();
+    if (this.editTarget()) { this.el.style.cursor = 'crosshair'; return; }
+    // Hand/pan tool (toolbar pan button or Space held) OR any active pan drag
+    // (middle / right-drag): open hand idle, closed hand while panning.
+    if (st.panMode || this.spaceHeld || this.panning) {
+      this.el.style.cursor = this.panning ? 'grabbing' : 'grab';
+      return;
+    }
+    // A live canvas handle drag (move/rotate pointer gesture) = closed hand. The angle
+    // dialog also sets `dragging`, but it is dialog-driven (mode 'angle'), not a canvas
+    // grab, so it is excluded here.
+    if (st.dragging && (st.mode === 'move' || st.mode === 'rotate')) { this.el.style.cursor = 'grabbing'; return; }
+    // Hovering a grabbable handle = open hand (ready to grab).
+    if (st.hover.handle) { this.el.style.cursor = 'grab'; return; }
+    this.el.style.cursor = this.mode().cursor;
+  };
+
   private toScreen(e: PointerEvent | WheelEvent): Point {
     const rect = this.el.getBoundingClientRect();
     const W = this.el.width;
@@ -136,6 +163,7 @@ export class InteractionHost {
       this.panning = true;
       this.panStart = this.toScreen(e);
       this.panOrigin = { x: view.panX, y: view.panY };
+      this.updateCursor();   // OSS ClosedHandCursor on pan press
       return;
     }
     if (e.button !== 0) return;
@@ -151,6 +179,7 @@ export class InteractionHost {
       return;
     }
     this.mode().onPointerDown(this.info(e), this.ctx());
+    this.updateCursor();   // closed hand once a handle grab (move/rotate) is armed
   };
 
   private onPointerMove = (e: PointerEvent) => {
@@ -164,6 +193,7 @@ export class InteractionHost {
         panX: this.panOrigin.x + (screen.x - this.panStart.x),
         panY: this.panOrigin.y + (screen.y - this.panStart.y),
       });
+      this.updateCursor();   // keep the closed hand while panning
       return;
     }
     // Edit Mask eraser drag: grow the white preview rectangle (OSS current_erase_rect).
@@ -175,9 +205,7 @@ export class InteractionHost {
       return;
     }
     this.mode().onPointerMove(this.info(e), this.ctx());
-    // Cursor feedback: crosshair during an Edit Mask session, grab over a handle.
-    const st = useEditorStore.getState();
-    this.el.style.cursor = this.editTarget() ? 'crosshair' : (st.hover.handle ? 'grab' : this.mode().cursor);
+    this.updateCursor();
   };
 
   private onPointerUp = (e: PointerEvent) => {
@@ -189,7 +217,7 @@ export class InteractionHost {
       if (this.touchPointers.size === 0) { this.multiTouched = false; this.gestureAborting = false; }
       return;
     }
-    if (this.panning) { this.panning = false; return; }
+    if (this.panning) { this.panning = false; this.updateCursor(); return; }   // OSS OpenHandCursor on pan release
     // Finalize an Edit Mask erase: commit one deletion rectangle (one undo step),
     // OSS mouseReleaseEvent appends to deletion_rectangles + subtracts the path.
     if (this.maskErase) {
@@ -207,6 +235,7 @@ export class InteractionHost {
       return;
     }
     this.mode().onPointerUp(this.info(e), this.ctx());
+    this.updateCursor();   // drop the closed hand once the grab releases
   };
 
   // Pointer interrupted (OS gesture, focus loss, touch-cancel). Abort any in-progress
@@ -219,9 +248,10 @@ export class InteractionHost {
       if (this.touchPointers.size === 0) { this.multiTouched = false; this.gestureAborting = false; }
       return;
     }
-    if (this.panning) { this.panning = false; return; }
+    if (this.panning) { this.panning = false; this.updateCursor(); return; }
     if (this.maskErase) { this.maskErase = null; useEditorStore.getState().setEraser(null); requestOverlay(); return; }
     this.mode().onCancel?.(this.ctx());
+    this.updateCursor();
   };
 
   private onWheel = (e: WheelEvent) => {
@@ -240,7 +270,7 @@ export class InteractionHost {
   private onContextMenu = (e: MouseEvent) => { e.preventDefault(); };
 
   private onKeyDown = (e: KeyboardEvent) => {
-    if (e.code === 'Space') { this.spaceHeld = true; }
+    if (e.code === 'Space') { this.spaceHeld = true; this.updateCursor(); }   // space = temporary hand tool
     const tag = (e.target as HTMLElement | null)?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return; // don't hijack typing
     const st = useEditorStore.getState();
@@ -252,7 +282,9 @@ export class InteractionHost {
       // ESC to exit").
       if (editing) { st.exitMaskEdit(); this.maskErase = null; requestRender(); return; }
       // Mid-drag ESC ABORTS the move (revert, no undo entry) — OSS cancel_movement.
-      if (st.dragging) { this.mode().onCancel?.(this.ctx()); return; }
+      // updateCursor() drops the closed (grabbing) hand the abort just invalidated;
+      // without it the cursor stays stuck until the next canvas pointer event.
+      if (st.dragging) { this.mode().onCancel?.(this.ctx()); this.updateCursor(); return; }
       // Otherwise ESC clears the selection.
       st.setSelection({ layerName: null, handle: null });
       requestOverlay();
@@ -277,6 +309,6 @@ export class InteractionHost {
   };
 
   private onKeyUp = (e: KeyboardEvent) => {
-    if (e.code === 'Space') this.spaceHeld = false;
+    if (e.code === 'Space') { this.spaceHeld = false; this.updateCursor(); }
   };
 }

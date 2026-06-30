@@ -1,7 +1,9 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Modal } from '../Modal';
 import { useEditorStore } from '../../store/editorStore';
 import { applyStrandAngleLength } from '../../store/actions';
+import { movingStrandSet } from '../../interaction/connections';
+import { requestRender } from '../../renderer/renderScheduler';
 import { t } from '../i18n';
 
 // The "Adjust Angle and Length" modal — a faithful port of OpenStrand Studio's
@@ -27,10 +29,48 @@ export function AngleAdjustDialog(): JSX.Element | null {
     Math.max(10, Math.min(maxLen, Math.round((session?.length0 ?? 100) / 5) * 5)),
   );
 
+  // Engage the renderer drag fast-path for the adjusted strand's branch (bake every
+  // static strand once, redraw only the moving set per tick, shadows off) so the live
+  // angle/length preview stays smooth instead of triggering a full re-render of all
+  // strands on every slider tick — mirroring GroupRotateDialog / GroupAngleEditorDialog.
+  // The single undo gesture is already open (store.enterAngleEdit -> beginGesture);
+  // confirm/cancel commit/revert it. The cleanup drops the fast-path on unmount (OK /
+  // Cancel clear angleEditTarget -> this dialog unmounts) and forces one full-quality
+  // render with shadows back on.
+  useEffect(() => {
+    const s = useEditorStore.getState();
+    const tgt = s.angleEditTarget;
+    if (!tgt) return;
+    const moving = new Set(movingStrandSet(s.doc, tgt, 'end'));
+    // applyStrandAngleLength shifts EVERY direct child whose start sits on the adjusted
+    // END (a non-directed manhattan<1 loop), but movingStrandSet's directed first-claim
+    // walk keeps only ONE sibling per endpoint. Union in the rest so a 2nd+ child sharing
+    // that end (reachable via loaded multi-child JSON) can't render frozen/stale during
+    // the live preview while its geometry is actually being moved.
+    const end = s.doc.strands[tgt]?.end;
+    if (end) {
+      for (const n of s.doc.order) {
+        const c = s.doc.strands[n];
+        if (c && c.type === 'AttachedStrand' && c.attached_to === tgt
+            && Math.abs(c.start.x - end.x) + Math.abs(c.start.y - end.y) < 1) moving.add(n);
+      }
+    }
+    s.setDragging(true);
+    s.setDragMoving([...moving]);
+    return () => {
+      const z = useEditorStore.getState();
+      if (z.dragging) { z.setDragging(false); z.setDragMoving([]); requestRender(); }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   if (!target || !session) return null;
 
   const apply = (a: number, l: number) => {
-    useEditorStore.getState().mutateDoc((d) => applyStrandAngleLength(d, target, a, l, session));
+    // Hot path: deep-clone only the moving set (== dragMoving), share the rest.
+    // applyStrandAngleLength writes only the target + its end-children, all ⊆ dragMoving.
+    const st = useEditorStore.getState();
+    st.mutateDocDuringDrag((d) => applyStrandAngleLength(d, target, a, l, session), st.dragMoving);
   };
   const onAngle = (v: number) => {
     const a = Math.max(-360, Math.min(360, v));

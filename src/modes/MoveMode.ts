@@ -16,6 +16,7 @@ let drag: {
   layer: string;
   handle: HandleKind;
   offset: Point;
+  moving: Set<string>;
   lastSnap: Point | null;
   prevSelection: Selection;     // selection before this grab — restored on abort (OSS originally_selected_strand)
 } | null = null;
@@ -44,6 +45,7 @@ export const MoveMode: Mode = {
       drag = {
         layer: hit.layerName, handle: hit.handle,
         offset: { x: hp.x - p.world.x, y: hp.y - p.world.y },   // cursor-lock offset (no jump)
+        moving,
         // Seed the snapped-target early-out to the snapped CLICK position (OSS seeds
         // last_snapped_pos = snap_to_grid(press pos), move_mode.py:1375). This is NOT the
         // snapped handle: when the off-grid handle and the click sit in different grid
@@ -89,8 +91,11 @@ export const MoveMode: Mode = {
       if (drag.lastSnap && drag.lastSnap.x === pos.x && drag.lastSnap.y === pos.y) return;
       drag.lastSnap = pos;
       const d = drag;
-      st.mutateDoc((draft) => moveHandle(draft, d.layer, d.handle, pos, st.settings.curve_params));
-      // mutateDoc bumps docRevision -> CanvasStage re-renders #c + overlay.
+      // Hot path: deep-clone only the moving set (== st.dragMoving), share the rest.
+      // moveHandle writes only the grabbed strand + its connected movers + masks of
+      // moved components, all ⊆ dragMoving — so this is safe and O(moving) per frame.
+      st.mutateDocDuringDrag((draft) => moveHandle(draft, d.layer, d.handle, pos, st.settings.curve_params, d.moving), d.moving);
+      // mutateDocDuringDrag bumps docRevision -> CanvasStage re-renders #c + overlay.
     } else {
       const hit = moveGrab(p.world, st.doc, st.settings);   // hover mirrors what a press would grab
       const next = hit

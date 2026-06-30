@@ -77,6 +77,7 @@ export function moveHandle(
   handle: HandleKind,
   pos: Point,
   curve?: Settings['curve_params'],
+  dragMoving?: ReadonlySet<string> | readonly string[],
 ): void {
   const s = draft.strands[layerName];
   if (!s) return;
@@ -167,7 +168,7 @@ export function moveHandle(
 
   // Any MaskedStrand built on a moved strand has its erase windows ride along by the
   // shift of the intersection CENTROID — OSS move_mode.py:2978-3031.
-  trackMaskDeletionRects(draft, moved, curve);
+  trackMaskDeletionRects(draft, moved, curve, dragMoving);
 }
 
 // When a constituent strand of a MaskedStrand moves, the mask's intersection region
@@ -181,8 +182,10 @@ function trackMaskDeletionRects(
   draft: EditorDocument,
   moved: Set<string>,
   curve: Settings['curve_params'] = DEFAULT_CURVE,
+  candidates?: ReadonlySet<string> | readonly string[],
 ): void {
-  for (const name of draft.order) {
+  const names: Iterable<string> = candidates ?? draft.order;
+  for (const name of names) {
     const m = draft.strands[name];
     if (!m || m.type !== 'MaskedStrand') continue;
     if (!m.deletion_rectangles || m.deletion_rectangles.length === 0) continue;

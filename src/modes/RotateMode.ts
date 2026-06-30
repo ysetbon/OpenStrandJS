@@ -10,6 +10,7 @@
 
 import { useEditorStore } from '../store/editorStore';
 import { rotateStrandEndpoint } from '../store/actions';
+import { movingStrandSet } from '../interaction/connections';
 import type { EditorDocument, Point, Selection } from '../model/types';
 import type { Mode, ModeContext, PointerInfo } from './Mode';
 
@@ -57,6 +58,13 @@ export const RotateMode: Mode = {
     st.setSelection({ layerName: hit.layer, handle: hit.side === 0 ? 'start' : 'end' });
     st.beginGesture();          // one undo step per drag
     st.setDragging(true);
+    // Engage the renderer drag fast-path (bake every static strand once, redraw only
+    // the moving set per frame, shadows off) so rotation stays smooth regardless of
+    // scene size — mirroring MoveMode. WITHOUT this, dragMoving stays empty and every
+    // pointer-move triggers a full re-render of all strands (the "slow" rotation).
+    // The free endpoint has no attachment, so the set is just this strand plus any
+    // mask built on it (movingStrandSet adds the mask so its crossing re-derives).
+    st.setDragMoving([...movingStrandSet(st.doc, hit.layer, hit.side === 0 ? 'start' : 'end')]);
     ctx.requestRender();        // selection highlight is drawn in #c (under the body)
   },
 
@@ -70,8 +78,11 @@ export const RotateMode: Mode = {
     const angle = Math.atan2(p.world.y - pivot.y, p.world.x - pivot.x);
     if (angle === d.lastAngle) return;
     d.lastAngle = angle;
-    st.mutateDoc((draft) => rotateStrandEndpoint(draft, d.layer, d.side, p.world, d.radius));
-    // mutateDoc bumps docRevision -> CanvasStage re-renders #c + overlay.
+    // Hot path: deep-clone only the moving set (== st.dragMoving), share the rest.
+    // rotateStrandEndpoint writes only the rotated strand (its free end has no attached
+    // children), all ⊆ dragMoving — safe and O(moving) per frame.
+    st.mutateDocDuringDrag((draft) => rotateStrandEndpoint(draft, d.layer, d.side, p.world, d.radius), st.dragMoving);
+    // mutateDocDuringDrag bumps docRevision -> CanvasStage re-renders #c + overlay.
   },
 
   onPointerUp(_p: PointerInfo, ctx: ModeContext) {
@@ -79,6 +90,7 @@ export const RotateMode: Mode = {
     drag = null;
     const st = useEditorStore.getState();
     st.setDragging(false);
+    st.setDragMoving([]);       // end the gesture's moving set (drop the static bake)
     st.commit();                // one drag = one undo step (no-op if unchanged)
     ctx.requestRender();        // full-quality render (shadows + supersample)
   },
@@ -91,6 +103,7 @@ export const RotateMode: Mode = {
     drag = null;
     const st = useEditorStore.getState();
     st.setDragging(false);
+    st.setDragMoving([]);
     st.cancelGesture();
     st.setSelection(d.prevSelection);
     ctx.requestRender();
