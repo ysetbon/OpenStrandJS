@@ -1773,16 +1773,24 @@ function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg, topo) {
   // Matches renderFixture's P at ss=1: P(pt) = pt*S + offset.
   const P = (pt) => new paper.Point(pt.x * S + ox, pt.y * S + oy);
   if (!topo) topo = computeDragTopology(strands); // defensive self-contained fallback
-  const { hasCircles, byLayer, enableThird } = topo;
+  const { hasCircles, enableThird } = topo;
+  // REBUILD byLayer from the CURRENT strands every frame — do NOT reuse topo.byLayer (it
+  // points at the BAKE-time strand objects). A moving MaskedStrand reads its components'
+  // positions through byLayer, so a stale map freezes the crossing at the grab position even
+  // though the components moved. Only has_circles / enableThird are position-INDEPENDENT and
+  // stay cached. Apply the cached has_circles to every LIVE strand object up front so a mask
+  // sees correct caps even for a component not itself drawn in this band. O(N), cheap.
+  const byLayer = {};
+  for (const s of strands) {
+    byLayer[s.layer_name] = s;
+    const hc = hasCircles.get(s.layer_name);
+    if (hc) s.has_circles = hc;
+  }
   SHADOW_ENABLED = false; // no shadows while dragging (restored by renderFixture on release)
   for (let i = 0; i < strands.length; i++) {
     const s = strands[i];
     if (!shouldDraw(s.layer_name)) continue;
     if (s.type === 'MaskedStrand') { drawMasked(s, byLayer, P, enableThird, S); continue; }
-    // Apply the cached topology to the strand we are about to draw (the Map holds
-    // every non-masked strand's value, computed once per gesture at bake).
-    const hc = hasCircles.get(s.layer_name);
-    if (hc) s.has_circles = hc;
     drawStrand(s, strands, P, enableThird, S);
   }
   paper.view.update();

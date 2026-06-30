@@ -62,9 +62,18 @@ export const RotateMode: Mode = {
     // the moving set per frame, shadows off) so rotation stays smooth regardless of
     // scene size — mirroring MoveMode. WITHOUT this, dragMoving stays empty and every
     // pointer-move triggers a full re-render of all strands (the "slow" rotation).
-    // The free endpoint has no attachment, so the set is just this strand plus any
-    // mask built on it (movingStrandSet adds the mask so its crossing re-derives).
-    st.setDragMoving([...movingStrandSet(st.doc, hit.layer, hit.side === 0 ? 'start' : 'end')]);
+    const movingSet = new Set(movingStrandSet(st.doc, hit.layer, hit.side === 0 ? 'start' : 'end'));
+    // rotateStrandEndpoint ALSO rigidly shifts any AttachedStrand whose start sits on the moved
+    // joint (actions.ts). movingStrandSet keys off the free endpoint's (empty) attachment slot,
+    // so on loaded JSON with stale has_circles it can miss such a child — and then the per-frame
+    // mutateDocDuringDrag would write outside dragMoving (DEV assert / prod shared-strand
+    // corruption). Union those children in, same guard as the angle dialog.
+    for (const n of st.doc.order) {
+      const c = st.doc.strands[n];
+      if (c && c.type === 'AttachedStrand' && c.attached_to === hit.layer
+          && Math.abs(c.start.x - moving.x) + Math.abs(c.start.y - moving.y) < 0.5) movingSet.add(n);
+    }
+    st.setDragMoving([...movingSet]);
     ctx.requestRender();        // selection highlight is drawn in #c (under the body)
   },
 

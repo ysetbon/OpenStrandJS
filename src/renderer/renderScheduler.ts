@@ -225,7 +225,13 @@ function runFrame(): void {
         // Bake the static background when none is live OR when a prior gesture's stale bake is
         // cached for a DIFFERENT moving set (re-grab after a release). The resolution scale is
         // captured at bake time only (changing it mid-gesture would need an expensive re-bake).
-        const key = dragMoving.join('|');
+        // The bake key includes the VIEW signature (size + pan + zoom), not just the moving set:
+        // if the view changes mid-drag (pan-while-dragging, wheel-zoom, window/panel resize), the
+        // baked bands no longer match the live meta and renderDragFrame would fall back to a full
+        // render EVERY frame forever. Folding the view in forces a re-bake at the new view so fast
+        // frames resume.
+        const key = dragMoving.join('|') + '|' + base.image_width + 'x' + base.image_height
+          + '|' + base.x_offset + ',' + base.y_offset + '|' + (base.zoom || 1);
         const rebake = !dragBaked || bakedKey !== key;
         if (rebake) { bakedScale = dragScale; lastHandlePos = null; dispEma = 0; }
         const sample_step = dragStep >= 3 ? Math.round(dragStep) : undefined;
