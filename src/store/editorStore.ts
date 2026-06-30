@@ -23,6 +23,10 @@ import {
 } from '../model/factory';
 import { makeAngleSession, type AngleSession } from './actions';
 import { areVisuallyEqual } from './visualEqual';
+// Leaf i18n module (no store dependency) — lets tab lifecycle actions resolve
+// "Untitled N" and the duplicate "copy" suffix in the active language, exactly
+// like OSS TabManager.title_for / _tr('tab_copy_suffix').
+import { t as tr } from '../ui/i18n';
 
 export function emptyDocument(): EditorDocument {
   return {
@@ -108,19 +112,32 @@ function saveSettings(s: Settings): void {
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch { /* ignore */ }
 }
 
-// Floating tab-edge overlay position, persisted across sessions.
+// Floating tab-edge overlay position, persisted across sessions. Two-mode model
+// mirroring OSS DraggableTabEdge (tab_bar_widget.py): either docked to a named
+// magnet anchor, OR free-floating at a resolution-independent canvas CENTER RATIO
+// (cx, cy). A free edge then tracks canvas resize proportionally, exactly like
+// OSS reposition()/_store_ratio — not a fixed pixel offset.
+export type TabEdgePos = { anchor: string | null; cx: number; cy: number };
 const TAB_EDGE_KEY = 'openstrandjs.tabEdgePosition';
-const DEFAULT_TAB_EDGE: { anchor: string; dx: number; dy: number } = { anchor: 'bottom_center', dx: 0, dy: 0 };
+const DEFAULT_TAB_EDGE: TabEdgePos = { anchor: 'bottom_center', cx: 0.5, cy: 0.9 };
 
-function loadTabEdgePosition(): { anchor: string; dx: number; dy: number } {
+function loadTabEdgePosition(): TabEdgePos {
   try {
     const raw = typeof localStorage !== 'undefined' && localStorage.getItem(TAB_EDGE_KEY);
-    if (raw) return { ...DEFAULT_TAB_EDGE, ...JSON.parse(raw) };
+    if (raw) {
+      const p = JSON.parse(raw);
+      // Backfill defaults; ignore the legacy {dx,dy} shape (only anchor survives).
+      return {
+        anchor: p.anchor === null || typeof p.anchor === 'string' ? p.anchor : DEFAULT_TAB_EDGE.anchor,
+        cx: typeof p.cx === 'number' ? Math.max(0, Math.min(1, p.cx)) : DEFAULT_TAB_EDGE.cx,
+        cy: typeof p.cy === 'number' ? Math.max(0, Math.min(1, p.cy)) : DEFAULT_TAB_EDGE.cy,
+      };
+    }
   } catch { /* ignore */ }
   return { ...DEFAULT_TAB_EDGE };
 }
 
-function saveTabEdgePosition(p: { anchor: string; dx: number; dy: number }): void {
+function saveTabEdgePosition(p: TabEdgePos): void {
   try { localStorage.setItem(TAB_EDGE_KEY, JSON.stringify(p)); } catch { /* ignore */ }
 }
 
@@ -174,9 +191,16 @@ export interface EditorState {
   tabs: {
     id: number; name: string; doc?: EditorDocument; view?: ViewState;
     dirty?: boolean; filePath?: string; untitledIndex?: number;
+    // Per-tab undo/redo history (OSS TabSession.history_payload). Snapshotted into
+    // the tab when leaving it and restored on re-entry, so each tab keeps its own
+    // undo stack instead of sharing one global history.
+    past?: EditorDocument[]; future?: EditorDocument[];
   }[];
   activeTabId: number;
   nextTabId: number;
+  // Monotonic "Untitled N" counter, independent of nextTabId (OSS _untitled_counter
+  // vs _id_seq): a duplicate consumes an id but must NOT advance the untitled number.
+  untitledCounter: number;
   newTab: () => void;
   switchTab: (id: number) => void;
   closeTab: (id: number) => void;
@@ -185,9 +209,9 @@ export interface EditorState {
   markActiveDirty: () => void;
   markTabSaved: (id: number, path: string) => void;
   setTabEdgeVisible: (b: boolean) => void;
-  // Floating tab-edge overlay anchor/offset, persisted to localStorage.
-  tabEdgePosition: { anchor: string; dx: number; dy: number };
-  setTabEdgePosition: (pos: { anchor: string; dx?: number; dy?: number }) => void;
+  // Floating tab-edge overlay position (anchor | center-ratio), persisted to localStorage.
+  tabEdgePosition: TabEdgePos;
+  setTabEdgePosition: (pos: TabEdgePos) => void;
 
   loadDocument: (doc: EditorDocument) => void;
   setDoc: (doc: EditorDocument) => void;
@@ -270,6 +294,28 @@ export function cloneDoc(doc: EditorDocument): EditorDocument {
   return JSON.parse(JSON.stringify(doc)) as EditorDocument;
 }
 
+// Transient interaction state cleared whenever a tab action swaps the live
+// document (OSS canvas.reset_for_new_tab). A new/switched/closed tab must never
+// inherit a dangling pending strand, eraser, mask session, drag or hover from the
+// previous tab. NOTE: `mode` is intentionally preserved (OSS keeps the active
+// tool across reset_for_new_tab); `selection` is reset by each action separately.
+function resetTransient() {
+  return {
+    pending: null,
+    maskPending: [] as string[],
+    maskCreateMode: false,
+    firstMaskedLayer: null,
+    maskEditTarget: null,
+    eraser: null,
+    angleEditTarget: null,
+    angleEditInitial: null,
+    newStrandArmed: false,
+    dragging: false,
+    dragMoving: [] as string[],
+    hover: { layerName: null, handle: null },
+  };
+}
+
 export const useEditorStore = create<EditorState>((set, get) => ({
   doc: emptyDocument(),
   selection: { layerName: null, handle: null },
@@ -291,76 +337,101 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   past: [],
   future: [],
   gestureBase: null,
-  tabs: [{ id: 1, name: 'Untitled 1', untitledIndex: 1 }],
+  tabs: [{ id: 1, name: 'Untitled 1', untitledIndex: 1, past: [], future: [] }],
   activeTabId: 1,
   nextTabId: 2,
+  untitledCounter: 1,
   tabEdgePosition: loadTabEdgePosition(),
 
+  // Leaving the active tab snapshots its live doc/view AND undo history into the
+  // tab record (OSS capture_active_session) so it resumes intact later.
   newTab: () => set((s) => {
-    const tabs = s.tabs.map((t) => (t.id === s.activeTabId ? { ...t, doc: s.doc, view: s.view } : t));
+    const tabs = s.tabs.map((t) => (t.id === s.activeTabId ? { ...t, doc: s.doc, view: s.view, past: s.past, future: s.future } : t));
     const id = s.nextTabId;
-    tabs.push({ id, name: `Untitled ${id}` });
+    const n = s.untitledCounter + 1;   // OSS _untitled_counter is independent of the id seq
+    tabs.push({ id, name: `Untitled ${n}`, untitledIndex: n, past: [], future: [] });
     return {
-      tabs, activeTabId: id, nextTabId: id + 1,
+      tabs, activeTabId: id, nextTabId: id + 1, untitledCounter: n,
       doc: emptyDocument(), view: { ...DEFAULT_VIEW, width: s.view.width, height: s.view.height },
       past: [], future: [], gestureBase: null, selection: { layerName: null, handle: null },
       docRevision: s.docRevision + 1,
+      ...resetTransient(),
     };
   }),
 
   switchTab: (id) => set((s) => {
     if (id === s.activeTabId) return {};
-    const tabs = s.tabs.map((t) => (t.id === s.activeTabId ? { ...t, doc: s.doc, view: s.view } : t));
+    const tabs = s.tabs.map((t) => (t.id === s.activeTabId ? { ...t, doc: s.doc, view: s.view, past: s.past, future: s.future } : t));
     const target = tabs.find((t) => t.id === id);
     if (!target) return {};
     const doc = target.doc ?? emptyDocument();
     return {
       tabs, activeTabId: id,
       doc, view: target.view ?? { ...DEFAULT_VIEW, width: s.view.width, height: s.view.height },
-      past: [], future: [], gestureBase: null,
+      past: target.past ?? [], future: target.future ?? [], gestureBase: null,
       selection: { layerName: doc.selected_strand_name ?? null, handle: null },
       docRevision: s.docRevision + 1,
+      ...resetTransient(),
     };
   }),
 
   closeTab: (id) => set((s) => {
     const remaining = s.tabs.filter((t) => t.id !== id);
     if (remaining.length === 0) {
+      // Never leave the user with no workspace (OSS close_tab: spawn a fresh Untitled).
       const nid = s.nextTabId;
+      const n = s.untitledCounter + 1;
       return {
-        tabs: [{ id: nid, name: `Untitled ${nid}` }], activeTabId: nid, nextTabId: nid + 1,
+        tabs: [{ id: nid, name: `Untitled ${n}`, untitledIndex: n, past: [], future: [] }],
+        activeTabId: nid, nextTabId: nid + 1, untitledCounter: n,
         doc: emptyDocument(), view: { ...s.view }, past: [], future: [], gestureBase: null,
         selection: { layerName: null, handle: null }, docRevision: s.docRevision + 1,
+        ...resetTransient(),
       };
     }
     if (id !== s.activeTabId) return { tabs: remaining };
-    const target = remaining[0];
+    // Closed the live tab: fall back to the neighbor at the closed slot's index,
+    // clamped to the end (OSS tabs[min(idx, len-1)]) — not always the first tab.
+    const idx = s.tabs.findIndex((t) => t.id === id);
+    const target = remaining[Math.min(idx, remaining.length - 1)];
     const doc = target.doc ?? emptyDocument();
     return {
       tabs: remaining, activeTabId: target.id,
-      doc, view: target.view ?? { ...s.view }, past: [], future: [], gestureBase: null,
+      doc, view: target.view ?? { ...s.view },
+      past: target.past ?? [], future: target.future ?? [], gestureBase: null,
       selection: { layerName: doc.selected_strand_name ?? null, handle: null },
       docRevision: s.docRevision + 1,
+      ...resetTransient(),
     };
   }),
 
-  // Clone the active doc into a brand-new tab named "<name> copy". The new tab
-  // becomes active and starts clean (no dirty flag, fresh history).
+  // Clone the active doc into a copy inserted right after the source (OSS
+  // duplicate_tab: insert at idx+1, deep-copy doc+history, name "<title> <copy>",
+  // and mark it DIRTY/unsaved). The new tab becomes active.
   duplicateTab: (id) => set((s) => {
-    // Persist the active doc/view into its tab first so the source is current.
-    const persisted = s.tabs.map((t) => (t.id === s.activeTabId ? { ...t, doc: s.doc, view: s.view } : t));
-    const src = persisted.find((t) => t.id === id);
-    if (!src) return {};
+    // Persist the active doc/view/history into its tab first so the source is current.
+    const persisted = s.tabs.map((t) => (t.id === s.activeTabId ? { ...t, doc: s.doc, view: s.view, past: s.past, future: s.future } : t));
+    const srcIdx = persisted.findIndex((t) => t.id === id);
+    if (srcIdx < 0) return {};
+    const src = persisted[srcIdx];
     const srcDoc = src.doc ?? (id === s.activeTabId ? s.doc : emptyDocument());
     const nid = s.nextTabId;
     const copyDoc = cloneDoc(srcDoc);
-    const tabs = [...persisted, { id: nid, name: `${src.name} copy`, doc: copyDoc, view: src.view }];
+    const copyPast = (src.past ?? []).map(cloneDoc);
+    const copyFuture = (src.future ?? []).map(cloneDoc);
+    // OSS title_for(src) + tab_copy_suffix, resolved in the active language.
+    const lang = s.settings.language;
+    const srcTitle = src.untitledIndex != null ? `${tr('untitled', lang)} ${src.untitledIndex}` : src.name;
+    const copyName = `${srcTitle} ${tr('tab_copy_suffix', lang)}`;
+    const newTabRec = { id: nid, name: copyName, doc: copyDoc, view: src.view, dirty: true, past: copyPast, future: copyFuture };
+    const tabs = [...persisted.slice(0, srcIdx + 1), newTabRec, ...persisted.slice(srcIdx + 1)];
     return {
       tabs, activeTabId: nid, nextTabId: nid + 1,
       doc: copyDoc, view: src.view ? { ...src.view } : { ...DEFAULT_VIEW, width: s.view.width, height: s.view.height },
-      past: [], future: [], gestureBase: null,
+      past: copyPast, future: copyFuture, gestureBase: null,
       selection: { layerName: copyDoc.selected_strand_name ?? null, handle: null },
       docRevision: s.docRevision + 1,
+      ...resetTransient(),
     };
   }),
 
@@ -371,19 +442,21 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     return { tabs: s.tabs.map((t) => (t.id === s.activeTabId ? { ...t, dirty: true } : t)) };
   }),
 
-  // Record that a tab was saved to `path`: clears dirty, sets filePath and name.
+  // Record that a tab was saved to `path`: clears dirty, sets filePath, retitles
+  // the tab to the file's basename WITHOUT its extension (OSS os.path.splitext),
+  // and clears untitledIndex so it stops being an auto-translated "Untitled N".
   markTabSaved: (id, path) => set((s) => {
-    const name = path.split(/[\\/]/).pop() || path;
-    return { tabs: s.tabs.map((t) => (t.id === id ? { ...t, dirty: false, filePath: path, name } : t)) };
+    const base = path.split(/[\\/]/).pop() || path;
+    const name = base.replace(/(?!^)\.[^.]+$/, '');   // drop a single trailing ext, keep dotfiles
+    return { tabs: s.tabs.map((t) => (t.id === id ? { ...t, dirty: false, filePath: path, name, untitledIndex: undefined } : t)) };
   }),
 
   // Tab-edge overlay visibility reuses the showTabs flag.
   setTabEdgeVisible: (b) => set({ showTabs: b }),
 
-  setTabEdgePosition: (pos) => set((s) => {
-    const next = { anchor: pos.anchor, dx: pos.dx ?? s.tabEdgePosition.dx, dy: pos.dy ?? s.tabEdgePosition.dy };
-    saveTabEdgePosition(next);
-    return { tabEdgePosition: next };
+  setTabEdgePosition: (pos) => set(() => {
+    saveTabEdgePosition(pos);
+    return { tabEdgePosition: pos };
   }),
 
   loadDocument: (doc) => set((s) => ({
@@ -570,7 +643,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   multiSelectMode: false,
   multiSelectedLayers: [],
   previouslyLockedLayers: [],
-  showTabs: true,
+  // OSS hides the floating tab edge at startup (tab_edge.hide(), tabs_button
+  // unchecked); it appears only when the Tabs toolbar button is toggled.
+  showTabs: false,
   drawNames: false,
   setPanMode: (panMode) => set({ panMode }),
   togglePanMode: () => set((s) => ({ panMode: !s.panMode })),

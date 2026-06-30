@@ -40,6 +40,7 @@
   --tab-inactive-bg: rgba(45,45,45,0.667);
   --tab-active-text: #111111;
   --tab-inactive-text: #F0F0F0;
+  --tab-snap: rgba(70,70,70,0.9);
   /* Settings dialog (settings_dialog.py apply_dialog_theme — default theme) */
   --accent: #2d6cdf;
   --danger: #c0392b;
@@ -96,6 +97,7 @@
   --tab-inactive-bg: rgba(225,225,225,0.706);
   --tab-active-text: #111111;
   --tab-inactive-text: #333333;
+  --tab-snap: rgba(70,70,70,0.9);
   /* Settings dialog (settings_dialog.py apply_dialog_theme — light theme) */
   --accent: #2d6cdf;
   --danger: #c0392b;
@@ -152,6 +154,7 @@
   --tab-inactive-bg: rgba(35,35,35,0.706);
   --tab-active-text: #FFFFFF;
   --tab-inactive-text: #DADADA;
+  --tab-snap: rgba(235,235,235,0.92);
   /* Settings dialog (settings_dialog.py apply_dialog_theme — dark theme) */
   --accent: #2d6cdf;
   --danger: #e06c5e;

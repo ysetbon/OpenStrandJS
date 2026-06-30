@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import { SettingsDialog } from './SettingsDialog';
 import { LayerStateDialog } from './LayerStateDialog';
+import { Modal } from './Modal';
 import { t } from './i18n';
 import { loadProject, serializeProject } from '../io/saveLoad';
 import { downloadJSON } from '../io/fileDialog';
@@ -37,7 +38,7 @@ const BTNS: Btn[] = [
   { key: 'save_image',  c: ['#7D344D', '#B36E89', '#7D344D'], action: 'image' },
   { key: 'toggle_control_points', c: ['#4CAF50', '#81C784', '#388E3C'], toggle: 'points' },
   { key: 'toggle_shadow', c: ['rgba(176,190,197,.7)', 'rgba(196,207,212,.7)', 'rgba(156,173,182,.7)'], toggle: 'shadow' },
-  { key: 'tabs', label: 'Tabs', c: ['#a34d92', '#b85baa', '#833a75'], toggle: 'tabs' },
+  { key: 'tabs', c: ['#a34d92', '#b85baa', '#833a75'], toggle: 'tabs' },
 ];
 
 const btnVars = (c: [string, string, string]): React.CSSProperties =>
@@ -57,25 +58,42 @@ export function Toolbar() {
   const lang = useEditorStore((s) => s.settings.language);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [stateOpen, setStateOpen] = useState(false);
+  // OSS load_project: opening a file replaces the ACTIVE tab; if that tab has
+  // unsaved changes, confirm (Save/Discard/Cancel) first. A browser file picker
+  // must open from a user gesture, so we confirm AFTER the file is chosen.
+  const [pendingLoad, setPendingLoad] = useState<{ json: unknown; name: string } | null>(null);
 
-  function applyDoc(json: unknown) {
+  // Loading replaces the active tab's document and marks that tab saved/clean,
+  // titled after the loaded file (OSS mark_active_saved).
+  function applyDoc(json: unknown, fileName?: string) {
     const doc = loadProject(json);
     const st = useEditorStore.getState();
     st.loadDocument(doc);
     const { panX, panY } = fitPan(doc, st.view);
     st.setView({ panX, panY });
+    if (fileName) st.markTabSaved(st.activeTabId, fileName);
   }
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    try { applyDoc(JSON.parse(await file.text())); }
-    catch (err) { console.error('Failed to load file:', err); alert('Could not load that file — see console.'); }
+    try {
+      const json = JSON.parse(await file.text());
+      const st = useEditorStore.getState();
+      const active = st.tabs.find((tb) => tb.id === st.activeTabId);
+      if (active?.dirty) setPendingLoad({ json, name: file.name });   // confirm before replacing
+      else applyDoc(json, file.name);
+    } catch (err) {
+      console.error('Failed to load file:', err); alert('Could not load that file — see console.');
+    }
     e.target.value = '';
   }
 
   function onSave() {
-    downloadJSON('openstrand_project.json', serializeProject(useEditorStore.getState().doc));
+    const fileName = 'openstrand_project.json';
+    downloadJSON(fileName, serializeProject(useEditorStore.getState().doc));
+    const st = useEditorStore.getState();
+    st.markTabSaved(st.activeTabId, fileName);   // clears the active tab's unsaved flag (OSS save_project)
   }
 
   const checked = (b: Btn): boolean => {
@@ -129,6 +147,31 @@ export function Toolbar() {
 
       {stateOpen && <LayerStateDialog onClose={() => setStateOpen(false)} />}
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
+
+      {pendingLoad && (
+        <Modal
+          title={t('unsaved_tab_title', lang)}
+          lang={lang}
+          onClose={() => setPendingLoad(null)}                /* Cancel/Esc: abort the load */
+          onEnter={() => { onSave(); applyDoc(pendingLoad.json, pendingLoad.name); setPendingLoad(null); }}
+          footer={
+            <>
+              <button type="button" className="tab-confirm-save"
+                onClick={() => { onSave(); applyDoc(pendingLoad.json, pendingLoad.name); setPendingLoad(null); }}>
+                {t('save', lang)}
+              </button>
+              <button type="button"
+                onClick={() => { applyDoc(pendingLoad.json, pendingLoad.name); setPendingLoad(null); }}>
+                {t('discard', lang)}
+              </button>
+              <button type="button" onClick={() => setPendingLoad(null)}>{t('cancel', lang)}</button>
+            </>
+          }
+        >
+          <div className="tab-confirm-body">{t('unsaved_tab_title', lang)}</div>
+        </Modal>
+      )}
+
       <input ref={fileRef} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={onFile} />
     </div>
   );

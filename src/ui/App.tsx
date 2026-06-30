@@ -30,6 +30,22 @@ export function App() {
   // Background session-history recorder (feeds the Settings → History page).
   useEffect(() => startHistoryRecorder(), []);
 
+  // OSS closeEvent / _confirm_close_with_dirty_tabs: warn before quitting while
+  // any tab has unsaved changes (unless the user opted out). The browser can only
+  // show its own generic leave-confirmation — it can't render OSS's custom dialog
+  // text/buttons — so we gate that native prompt on the same dirty/skip condition.
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      const st = useEditorStore.getState();
+      if (st.tabs.some((t) => t.dirty) && !st.settings.skip_quit_warning) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, []);
+
   // On phones: present the desktop UI scaled-to-fit and always horizontal, with
   // the browser chrome hidden. No-op on desktop.
   useEffect(() => initMobileLayout(), []);

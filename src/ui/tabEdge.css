@@ -8,7 +8,10 @@
   align-items: center;
   gap: 8px;
   height: 53px;
-  padding: 0 10px 0 0;
+  /* Logical inline-end padding so the trailing + button keeps its gap in both
+     LTR and RTL (the grip hugs the inline-start edge with no padding). */
+  padding: 0;
+  padding-inline-end: 10px;
   border-radius: 13px;
   background: var(--tab-panel-bg, rgba(25, 25, 25, 0.529));
   border: 1px solid var(--tab-border, rgba(210, 210, 210, 0.471));
@@ -24,19 +27,20 @@
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38);
 }
 
-/* Grip strip — 26px wide, 3 rows × 2 cols dot matrix; the drag handle. */
+/* Grip strip — 26px wide, 3 rows × 2 cols dot matrix; the drag handle. Sits on the
+   inline-start side (left in LTR, right in RTL); the whole panel body is draggable. */
 .tab-edge-grip {
   flex: 0 0 26px;
   align-self: stretch;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-top-left-radius: 13px;
-  border-bottom-left-radius: 13px;
+  border-start-start-radius: 13px;
+  border-end-start-radius: 13px;
   cursor: grab;
   touch-action: none;
 }
-.tab-edge-grip:active { cursor: grabbing; }
+.tab-edge.tab-edge-dragging .tab-edge-grip { cursor: grabbing; }
 
 .tab-grip-dots {
   display: grid;
@@ -147,18 +151,29 @@
 }
 .tab-icon-btn:active { background: rgba(128, 128, 128, 0.27); }
 
-/* Snap pill hint — 128×38, shown over the candidate magnet anchor while dragging. */
+/* Magnet dock targets — 128×38 ghost pills shown at ALL six anchors for the whole
+   drag (OSS SnapOverlay), with the active (about-to-grab) one emphasized. */
 .tab-snap-pill {
   position: absolute;
   z-index: 39;
   width: 128px;
   height: 38px;
   border-radius: 19px;
-  border: 1.5px dashed var(--tab-border, rgba(210, 210, 210, 0.471));
-  background: var(--tab-panel-bg, rgba(25, 25, 25, 0.4));
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
+  border: 1.6px dashed var(--tab-snap, rgba(70, 70, 70, 0.7));
+  background: rgba(255, 255, 255, 0.10);
+  opacity: 0.62;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
   pointer-events: none;
+  transition: opacity 90ms linear;
+}
+.tab-snap-pill-active {
+  opacity: 1;
+  border-style: solid;
+  border-width: 2.4px;
+  border-color: var(--tab-snap, rgba(70, 70, 70, 0.95));
+  background: rgba(255, 255, 255, 0.16);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.18), 0 4px 12px rgba(0, 0, 0, 0.28);
 }
 
 /* Unsaved-changes confirm — emphasized Save button. */
