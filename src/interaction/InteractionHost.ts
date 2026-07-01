@@ -289,9 +289,12 @@ export class InteractionHost {
       // updateCursor() drops the closed (grabbing) hand the abort just invalidated;
       // without it the cursor stays stuck until the next canvas pointer event.
       if (st.dragging) { this.mode().onCancel?.(this.ctx()); this.updateCursor(); return; }
-      // Otherwise ESC clears the selection.
+      // Otherwise ESC clears the selection. Use requestRender (full), NOT requestOverlay:
+      // the selection highlight is baked into #c (toRenderArray is_selected -> drawHighlight),
+      // so an overlay-only redraw would leave the red highlight stale on #c until the next
+      // full render. requestRender resyncs the overlay too. Oracle-safe (editor path only).
       st.setSelection({ layerName: null, handle: null });
-      requestOverlay();
+      requestRender();
       return;
     }
     // OSS disables the main-window buttons + shortcuts during an Edit Mask session

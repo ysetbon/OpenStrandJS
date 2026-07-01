@@ -89,8 +89,23 @@ function renderPanOverImage(doc: EditorDocument, view: ViewState, settings: Sett
   }
   rx0 -= W * PAN_MARGIN_FRAC; ry0 -= H * PAN_MARGIN_FRAC; rx1 += W * PAN_MARGIN_FRAC; ry1 += H * PAN_MARGIN_FRAC;
   let regionW = rx1 - rx0, regionH = ry1 - ry0;
-  if (regionW > PAN_MAX_DIM) { const c = (rx0 + rx1) / 2; rx0 = c - PAN_MAX_DIM / 2; regionW = PAN_MAX_DIM; }
-  if (regionH > PAN_MAX_DIM) { const c = (ry0 + ry1) / 2; ry0 = c - PAN_MAX_DIM / 2; regionH = PAN_MAX_DIM; }
+  // Cap the capture at PAN_MAX_DIM. After recentering on the region center, SHIFT the
+  // window so the visible viewport [0,W] / [0,H] stays fully inside it — otherwise a
+  // viewport strip falls outside the capture and blits WHITE for the whole pan (the
+  // strand body there just vanishes until release / a zoom nudge). This is the direct
+  // analog of the OSS per-strand temp-image bounds clip that the author removed: a
+  // bounds-sized cache must never drop the on-screen body. Prefer viewport coverage
+  // over content centering (what's on screen is what must stay painted).
+  if (regionW > PAN_MAX_DIM) {
+    const c = (rx0 + rx1) / 2; rx0 = c - PAN_MAX_DIM / 2; regionW = PAN_MAX_DIM;
+    if (rx0 > 0) rx0 = 0;
+    else if (rx0 + PAN_MAX_DIM < W) rx0 = W - PAN_MAX_DIM;
+  }
+  if (regionH > PAN_MAX_DIM) {
+    const c = (ry0 + ry1) / 2; ry0 = c - PAN_MAX_DIM / 2; regionH = PAN_MAX_DIM;
+    if (ry0 > 0) ry0 = 0;
+    else if (ry0 + PAN_MAX_DIM < H) ry0 = H - PAN_MAX_DIM;
+  }
   const sc = Math.min(1, Math.sqrt(PAN_PX_BUDGET / Math.max(1, regionW * regionH)));
   const lw = Math.max(1, Math.round(regionW * sc)), lh = Math.max(1, Math.round(regionH * sc));
   const arr = toRenderArray(doc, selLayer, undefined, false);
@@ -265,12 +280,22 @@ function runFrame(): void {
         if (!panning && panSnap) panSnap = null;
         if (dragBaked) { callEndDrag(); dragBaked = false; bakedKey = null; }
         callRender(arr, { ...buildMeta(doc, view, settings), supersample: EDITOR_SUPERSAMPLE });
-        if (panning) snapshotPanBase(view);
+        // Mid-pan stale re-render (wheel-zoom / resize changed size/zoom): re-capture the
+        // WHOLE scene (off-screen strands included) as the new pan base, NOT a viewport-only
+        // #c snapshot — otherwise off-screen bodies panned in after the zoom blit white until
+        // release. Fall back to the plain snapshot only if the over-render is unavailable.
+        if (panning) { if (!renderPanOverImage(doc, view, settings, selection.layerName)) snapshotPanBase(view); }
       }
       }
     } catch (err) {
-      // Surface renderer errors without killing the rAF loop.
+      // Surface renderer errors without killing the rAF loop, and DROP the fast-path
+      // bitmap caches so the next input renders clean from scratch instead of blitting a
+      // half-updated / stale cache forever. Defense-in-depth: a render that throws must
+      // never be able to freeze #c on a stale frame until the user nudges. Do NOT
+      // reschedule the same geometry here (it would just throw again — an infinite loop).
       console.error('[OpenStrandJS] render failed:', err);
+      if (dragBaked) { try { callEndDrag(); } catch { /* ignore */ } dragBaked = false; bakedKey = null; }
+      panSnap = null;
     }
   }
   syncOverlay();

@@ -165,11 +165,8 @@ function strokedOutline(centerline, width) {
 // into a clean boundary. Returns a paper path or null. The masking primitive.
 function strokedBodyAtWidth(s, P, enableThird, widthPx) {
   const centerline = buildCenterline(s, P, enableThird);
-  let outline = strokedOutline(centerline, widthPx);
+  const outline = cleanOutline(strokedOutline(centerline, widthPx));
   centerline.remove();
-  if (!outline) return null;
-  const cleaned = outline.resolveCrossings();
-  if (cleaned !== outline) { outline.remove(); outline = cleaned; }
   return outline;
 }
 
@@ -177,7 +174,20 @@ function strokedBodyAtWidth(s, P, enableThird, widthPx) {
 function cleanOutline(outline) {
   if (!outline) return null;
   const cleaned = outline.resolveCrossings();
-  if (cleaned !== outline) outline.remove();
+  // resolveCrossings can return null OR collapse a self-overlapping offset polygon
+  // (a tightly curved centerline offset at high scale) to an EMPTY path. A body/cap
+  // layer that empties here would paint NOTHING while the wider stroke layer still
+  // paints — the "filled body vanishes, outline stays" dropout the user reported.
+  // Keep the un-resolved (valid) original in that case: a slightly self-overlapping
+  // fill still rasterizes to the correct silhouette. This is a NO-OP on valid
+  // geometry (the oracle/PNG path always gets a non-empty cleaned result), so the
+  // fidelity harness output stays byte-identical.
+  if (!cleaned) return outline;
+  if (cleaned !== outline) {
+    const bb = cleaned.bounds;
+    if (!bb || bb.width < 1e-6 || bb.height < 1e-6) { cleaned.remove(); return outline; }
+    outline.remove();
+  }
   return cleaned;
 }
 
@@ -1091,18 +1101,23 @@ function drawStrand(s, strands, P, enableThird, S) {
   const fullArrow = collectFullArrow(s, centerline, P, S);
   centerline.remove();
 
-  for (const shp of caps.stroke) {
-    const u = strokePath.unite(shp);
-    strokePath.remove();
+  // Fold each cap into the running body path, but NEVER replace a valid path with a
+  // null/empty boolean result. Paper.js unite() can return an empty path for a
+  // near-tangent cap; the FILL chain does strictly more unions than the STROKE chain
+  // (an AttachedStrand always unions its start cap + side rect, plus the end cap when
+  // present — collectCaps.fill > collectCaps.stroke), so the fill empties first and
+  // the body disappears while the outline survives. Keeping the prior valid path is a
+  // NO-OP on valid geometry (a real cap union is always non-empty), so the oracle /
+  // PNG export output is byte-identical.
+  const uniteCap = (path, shp) => {
+    const u = path.unite(shp);
     shp.remove();
-    strokePath = u;
-  }
-  for (const shp of caps.fill) {
-    const u = fillPath.unite(shp);
-    fillPath.remove();
-    shp.remove();
-    fillPath = u;
-  }
+    if (u && u.bounds && u.bounds.width > 1e-6 && u.bounds.height > 1e-6) { path.remove(); return u; }
+    if (u && u !== path) u.remove();
+    return path;
+  };
+  for (const shp of caps.stroke) strokePath = uniteCap(strokePath, shp);
+  for (const shp of caps.fill) fillPath = uniteCap(fillPath, shp);
 
   strokePath.fillColor = toColor(s.stroke_color);
   strokePath.strokeColor = null;
