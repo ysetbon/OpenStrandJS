@@ -65,9 +65,9 @@ export const RotateMode: Mode = {
     const movingSet = new Set(movingStrandSet(st.doc, hit.layer, hit.side === 0 ? 'start' : 'end'));
     // rotateStrandEndpoint ALSO rigidly shifts any AttachedStrand whose start sits on the moved
     // joint (actions.ts). movingStrandSet keys off the free endpoint's (empty) attachment slot,
-    // so on loaded JSON with stale has_circles it can miss such a child — and then the per-frame
-    // mutateDocDuringDrag would write outside dragMoving (DEV assert / prod shared-strand
-    // corruption). Union those children in, same guard as the angle dialog.
+    // so on loaded JSON with stale has_circles it can miss such a child — which would then render
+    // FROZEN (baked static) while its geometry moves. Union those children (+ their masks) into
+    // the moving set so the fast-path redraws them, same as the angle dialog.
     for (const n of st.doc.order) {
       const c = st.doc.strands[n];
       if (c && c.type === 'AttachedStrand' && c.attached_to === hit.layer
@@ -90,11 +90,8 @@ export const RotateMode: Mode = {
     const angle = Math.atan2(p.world.y - pivot.y, p.world.x - pivot.x);
     if (angle === d.lastAngle) return;
     d.lastAngle = angle;
-    // Hot path: deep-clone only the moving set (== st.dragMoving), share the rest.
-    // rotateStrandEndpoint writes only the rotated strand (its free end has no attached
-    // children), all ⊆ dragMoving — safe and O(moving) per frame.
-    st.mutateDocDuringDrag((draft) => rotateStrandEndpoint(draft, d.layer, d.side, p.world, d.radius), st.dragMoving);
-    // mutateDocDuringDrag bumps docRevision -> CanvasStage re-renders #c + overlay.
+    st.mutateDoc((draft) => rotateStrandEndpoint(draft, d.layer, d.side, p.world, d.radius));
+    // mutateDoc bumps docRevision -> CanvasStage re-renders #c + overlay.
   },
 
   onPointerUp(_p: PointerInfo, ctx: ModeContext) {

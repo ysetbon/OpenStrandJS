@@ -70,10 +70,7 @@ export function AngleAdjustDialog(): JSX.Element | null {
   if (!target || !session) return null;
 
   const apply = (a: number, l: number) => {
-    // Hot path: deep-clone only the moving set (== dragMoving), share the rest.
-    // applyStrandAngleLength writes only the target + its end-children, all ⊆ dragMoving.
-    const st = useEditorStore.getState();
-    st.mutateDocDuringDrag((d) => applyStrandAngleLength(d, target, a, l, session), st.dragMoving);
+    useEditorStore.getState().mutateDoc((d) => applyStrandAngleLength(d, target, a, l, session));
   };
   const onAngle = (v: number) => {
     const a = Math.max(-360, Math.min(360, v));

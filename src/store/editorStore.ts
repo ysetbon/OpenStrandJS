@@ -216,10 +216,6 @@ export interface EditorState {
   loadDocument: (doc: EditorDocument) => void;
   setDoc: (doc: EditorDocument) => void;
   mutateDoc: (fn: (draft: EditorDocument) => void) => void;
-  // Per-frame drag mutate that deep-clones only the `moving` strands (== dragMoving)
-  // and shares the rest — O(moving) instead of O(all strands). The mutator MUST write
-  // only to `moving`. See the implementation for the safety guard.
-  mutateDocDuringDrag: (fn: (draft: EditorDocument) => void, moving: readonly string[] | Set<string>) => void;
   beginGesture: () => void;
   commit: () => void;
   cancelGesture: () => void;
@@ -296,29 +292,6 @@ const HISTORY_CAP = 100;
 // because StrandRecord holds no object cross-references).
 export function cloneDoc(doc: EditorDocument): EditorDocument {
   return JSON.parse(JSON.stringify(doc)) as EditorDocument;
-}
-
-function readonlyWriteTrap<T extends object>(
-  value: T,
-  path: string,
-  fail: (path: string) => never,
-  cache: WeakMap<object, unknown>,
-): T {
-  const cached = cache.get(value);
-  if (cached) return cached as T;
-  const proxy = new Proxy(value, {
-    get(target, prop, receiver) {
-      const child = Reflect.get(target, prop, receiver);
-      return child && typeof child === 'object'
-        ? readonlyWriteTrap(child, `${path}.${String(prop)}`, fail, cache)
-        : child;
-    },
-    set(_target, prop) { fail(`${path}.${String(prop)}`); },
-    deleteProperty(_target, prop) { fail(`${path}.${String(prop)}`); },
-    defineProperty(_target, prop) { fail(`${path}.${String(prop)}`); },
-  });
-  cache.set(value, proxy);
-  return proxy as T;
 }
 
 // Transient interaction state cleared whenever a tab action swaps the live
@@ -507,57 +480,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const draft = cloneDoc(s.doc);
     fn(draft);
     return { doc: draft, docRevision: s.docRevision + 1 };
-  }),
-
-  // Hot-path live edit for the per-frame drag mutate (move/rotate/angle). cloneDoc
-  // deep-clones the ENTIRE document (JSON round-trip) on every pointer-move, which is
-  // O(all strands) and the dominant per-frame cost on dense scenes. During a drag only
-  // the `moving` set (== store.dragMoving) is written, so we deep-clone JUST those
-  // strands (same JSON semantics as cloneDoc) and SHARE every other strand + order/
-  // groups/locks by reference — making the per-frame clone O(moving), flat as the scene
-  // grows. The renderer's drag fast-path already redraws only `moving` over a static
-  // bake, so the shared strands are never re-touched. Safe iff the mutator writes ONLY
-  // to `moving`; in DEV a lazy proxy traps accidental out-of-set writes without doing
-  // an O(all strands) JSON stringify on every drag frame. NOT used by the offline
-  // oracle (live path only).
-  mutateDocDuringDrag: (fn, moving) => set((s) => {
-    const movingSet = moving instanceof Set ? moving : new Set(moving);
-    const strands: Record<string, StrandRecord> = { ...s.doc.strands };
-    for (const name of movingSet) {
-      const cur = strands[name];
-      if (cur) strands[name] = JSON.parse(JSON.stringify(cur)) as StrandRecord;
-    }
-    let draftStrands = strands;
-    if (import.meta.env?.DEV) {
-      const cache = new WeakMap<object, unknown>();
-      const fail = (path: string): never => {
-        throw new Error(`[OpenStrandJS] mutateDocDuringDrag wrote outside dragMoving: ${path}`);
-      };
-      draftStrands = new Proxy(strands, {
-        get(target, prop, receiver) {
-          const value = Reflect.get(target, prop, receiver);
-          if (typeof prop === 'string' && !movingSet.has(prop) && value && typeof value === 'object') {
-            return readonlyWriteTrap(value, `strands.${prop}`, fail, cache);
-          }
-          return value;
-        },
-        set(target, prop, value, receiver) {
-          if (typeof prop === 'string' && !movingSet.has(prop)) fail(`strands.${prop}`);
-          return Reflect.set(target, prop, value, receiver);
-        },
-        deleteProperty(target, prop) {
-          if (typeof prop === 'string' && !movingSet.has(prop)) fail(`strands.${prop}`);
-          return Reflect.deleteProperty(target, prop);
-        },
-        defineProperty(target, prop, descriptor) {
-          if (typeof prop === 'string' && !movingSet.has(prop)) fail(`strands.${prop}`);
-          return Reflect.defineProperty(target, prop, descriptor);
-        },
-      });
-    }
-    const draft: EditorDocument = { ...s.doc, strands: draftStrands };
-    fn(draft);
-    return { doc: { ...draft, strands }, docRevision: s.docRevision + 1 };
   }),
 
   // Snapshot present as the gesture baseline (first call of a gesture wins).
