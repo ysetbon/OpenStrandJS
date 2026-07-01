@@ -6,7 +6,7 @@
 import { useEditorStore } from '../store/editorStore';
 import { callRender, callRenderDragBackground, callRenderDragFrame, callEndDrag } from './rendererBridge';
 import { buildMeta, toRenderArray } from './toRenderArray';
-import type { EditorDocument, Point, Selection } from '../model/types';
+import type { EditorDocument, Point, Selection, ViewState } from '../model/types';
 
 let scheduled = false;
 // True when the queued frame must do a FULL render (#c via renderFixture), not just
@@ -64,6 +64,63 @@ let dispEma = 0;
 // the baked scale; forceSettle makes the next frame ignore the motion downscale.
 let settleTimer: ReturnType<typeof setTimeout> | null = null;
 let forceSettle = false;
+
+// --- PAN fast-path (canvas drag / hand tool) ---------------------------------------------
+// A pan is a PURE rigid screen translation of the whole scene, so instead of re-rendering
+// (4.6 MP Paper raster + a boolean per mask, 100s of ms on a slow masked knot) we snapshot
+// the already-rendered #c ONCE at pan-start (a ~1-2ms canvas copy — shadows already baked
+// in, exactly correct under translation) and BLIT it shifted by the pan delta each move —
+// O(1), zero Paper work. #c keeps its full size so the existing syncOverlay re-aligns the
+// handles from the live view (no overlay change). The revealed leading edge is white (matches
+// the renderer backdrop) and is filled by one crisp full render on RELEASE (endPanGesture).
+// Oracle-safe: this is entirely in the live scheduler; renderFixture / web/strand-renderer.js
+// are never touched. Pan takes precedence over the drag branch (see runFrame).
+let panning = false;
+let panSnap: HTMLCanvasElement | null = null;   // snapshot of #c taken at pan-start
+let panSnapPan = { x: 0, y: 0 };                // view.panX/panY when the snapshot was taken
+let panSnapView = { w: 0, h: 0, zoom: 1 };      // size+zoom the snapshot is valid for
+
+// Capture the current crisp #c as the pan translation base (called at pan-start and after any
+// stale-forced full re-render mid-pan). Records the pan/size/zoom the snapshot is valid for.
+function snapshotPanBase(view: ViewState): void {
+  const c = document.getElementById('c') as HTMLCanvasElement | null;
+  if (!c || c.width === 0 || c.height === 0) { panSnap = null; return; }
+  if (!panSnap) panSnap = document.createElement('canvas');
+  panSnap.width = c.width; panSnap.height = c.height;
+  const ctx = panSnap.getContext('2d');
+  if (!ctx) { panSnap = null; return; }
+  ctx.drawImage(c, 0, 0);
+  panSnapPan = { x: view.panX, y: view.panY };
+  panSnapView = { w: Math.round(view.width), h: Math.round(view.height), zoom: view.zoom };
+}
+
+// Blit the snapshot translated by the pan delta. Returns false (→ caller does a full render +
+// re-snapshot) when the snapshot is missing or the view SIZE/ZOOM changed since it was taken
+// (wheel-zoom or window/panel resize mid-pan — translation is only valid at constant size+zoom).
+function panBlit(view: ViewState): boolean {
+  const c = document.getElementById('c') as HTMLCanvasElement | null;
+  if (!panSnap || !c) return false;
+  if (panSnapView.w !== Math.round(view.width) || panSnapView.h !== Math.round(view.height)
+      || panSnapView.zoom !== view.zoom) return false;
+  const ctx = c.getContext('2d');
+  if (!ctx) return false;
+  if (dragBaked) { callEndDrag(); dragBaked = false; bakedKey = null; } // drop a stale drag bake
+  ctx.fillStyle = 'white';
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(panSnap, view.panX - panSnapPan.x, view.panY - panSnapPan.y);
+  return true;
+}
+
+// Called by InteractionHost on pan-start / pan-end.
+export function beginPanGesture(): void {
+  panning = true;
+  snapshotPanBase(useEditorStore.getState().view);
+}
+export function endPanGesture(): void {
+  panning = false;
+  panSnap = null;
+  requestRender(); // one crisp full render: shadows + z-order + fills the revealed edge
+}
 try {
   const p = JSON.parse(localStorage.getItem(DRAG_PERF_KEY) || 'null');
   if (p && typeof p.scale === 'number') {
@@ -187,6 +244,14 @@ function runFrame(): void {
   if (full) {
     const { doc, view, settings, dragging, dragMoving, selection, mode } = useEditorStore.getState();
     try {
+      // PAN FAST-PATH (takes precedence over the drag branch): a pan is a pure rigid screen
+      // translation, so blit the pan-start snapshot of #c shifted by the pan delta — O(1), no
+      // Paper raster / no mask booleans. panBlit returns false when the snapshot is stale (a
+      // wheel-zoom or window/panel resize mid-pan changed size/zoom); then we fall through to a
+      // full render below and re-snapshot it as the new base. The crisp shadowed render is
+      // deferred to RELEASE (endPanGesture) — never mid-pan. syncOverlay (below) re-aligns the
+      // handles from the live view either way.
+      if (!(panning && panBlit(view))) {
       // During an endpoint/group drag, highlight every strand that moves with the
       // grabbed handle (weld group + attached/mask peers from movingStrandSet), so a
       // moving junction reddens on both sides like OSS — not just the grabbed strand.
@@ -204,7 +269,7 @@ function runFrame(): void {
       // and the offline oracle / PNG export — which never set this — stay byte-identical.
       const viewHideHighlight = mode === 'view' && settings.view_hide_highlight;
       const arr = toRenderArray(doc, selection.layerName, highlightSet, viewHideHighlight);
-      if (dragging && dragMoving.length) {
+      if (!panning && dragging && dragMoving.length) {
         // DRAG FAST-PATH (mirrors the original's draw-only-affected-strand path).
         // Render at native resolution with shadows off: bake every STATIC strand
         // once into a cached bitmap, then each frame draw ONLY the moving strands
@@ -294,14 +359,18 @@ function runFrame(): void {
           }, 130);
         }
       } else {
-        // NOT DRAGGING (release, selection click, undo, …): one full render at the
-        // editor supersample (1×). At 1× shadows + correct z-order are restored in
-        // ~30ms instead of the ~260ms a full ss2 render costs, so pointer-up no
-        // longer hangs. Drop any drag background first so the next gesture re-bakes.
+        // NOT the drag fast-path: a release / selection click / undo / … OR a STALE-pan
+        // re-render (wheel-zoom / resize mid-pan). One full render at the editor supersample
+        // (1×) restores shadows + z-order in ~30ms vs ~260ms at ss2, so pointer-up no longer
+        // hangs. Drop any drag bake first; drop a stale pan base on a non-pan render; and when
+        // panning (the stale case), re-snapshot the fresh #c as the new pan translation base.
+        if (!panning && panSnap) panSnap = null;
         if (dragBaked) { callEndDrag(); dragBaked = false; bakedKey = null; }
         if (settleTimer !== null) { clearTimeout(settleTimer); settleTimer = null; }
         forceSettle = false;
         callRender(arr, { ...buildMeta(doc, view, settings), supersample: EDITOR_SUPERSAMPLE });
+        if (panning) snapshotPanBase(view);
+      }
       }
     } catch (err) {
       // Surface renderer errors without killing the rAF loop.

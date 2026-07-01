@@ -5,7 +5,7 @@
 
 import { useEditorStore } from '../store/editorStore';
 import { screenToWorld, worldToScreen } from './viewTransform';
-import { requestOverlay, requestRender } from '../renderer/renderScheduler';
+import { requestOverlay, requestRender, beginPanGesture, endPanGesture } from '../renderer/renderScheduler';
 import { modes } from '../modes';
 import { SelectMode } from '../modes/SelectMode';
 import { addDeletionRect } from '../store/actions';
@@ -137,7 +137,7 @@ export class InteractionHost {
   // Abort whatever single-finger action is in flight (pan / mask erase / mode
   // gesture) WITHOUT committing, so a starting two-finger gesture leaves no trace.
   private abortForGesture = () => {
-    if (this.panning) { this.panning = false; return; }
+    if (this.panning) { this.panning = false; endPanGesture(); return; }
     if (this.maskErase) { this.maskErase = null; useEditorStore.getState().setEraser(null); requestOverlay(); return; }
     this.mode().onCancel?.(this.ctx());
   };
@@ -159,10 +159,14 @@ export class InteractionHost {
     const panTool = useEditorStore.getState().panMode;   // hand tool active
     const isPan = e.button === 1 || e.button === 2 || (e.button === 0 && (this.spaceHeld || panTool));
     if (isPan) {
+      // A pan starting mid strand-drag: cancel that drag so it can't keep store.dragging=true
+      // (pan takes precedence in the scheduler) and its armed gesture doesn't linger.
+      if (useEditorStore.getState().dragging) this.mode().onCancel?.(this.ctx());
       const view = useEditorStore.getState().view;
       this.panning = true;
       this.panStart = this.toScreen(e);
       this.panOrigin = { x: view.panX, y: view.panY };
+      beginPanGesture();     // snapshot the current crisp #c as the pan translation base
       this.updateCursor();   // OSS ClosedHandCursor on pan press
       return;
     }
@@ -217,7 +221,7 @@ export class InteractionHost {
       if (this.touchPointers.size === 0) { this.multiTouched = false; this.gestureAborting = false; }
       return;
     }
-    if (this.panning) { this.panning = false; this.updateCursor(); return; }   // OSS OpenHandCursor on pan release
+    if (this.panning) { this.panning = false; endPanGesture(); this.updateCursor(); return; }   // pan release -> crisp render + OpenHandCursor
     // Finalize an Edit Mask erase: commit one deletion rectangle (one undo step),
     // OSS mouseReleaseEvent appends to deletion_rectangles + subtracts the path.
     if (this.maskErase) {
@@ -248,7 +252,7 @@ export class InteractionHost {
       if (this.touchPointers.size === 0) { this.multiTouched = false; this.gestureAborting = false; }
       return;
     }
-    if (this.panning) { this.panning = false; this.updateCursor(); return; }
+    if (this.panning) { this.panning = false; endPanGesture(); this.updateCursor(); return; }
     if (this.maskErase) { this.maskErase = null; useEditorStore.getState().setEraser(null); requestOverlay(); return; }
     this.mode().onCancel?.(this.ctx());
     this.updateCursor();
