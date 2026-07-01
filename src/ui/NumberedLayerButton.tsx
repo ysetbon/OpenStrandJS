@@ -71,9 +71,18 @@ function hsvToRgb(h: number, s: number, v: number): [number, number, number] {
 }
 function qtLighter(c: RGBA | undefined | null, factor = 150): string {
   if (!c) return rgbaCss(c);
-  const [h, s, v] = rgbToHsv(c.r, c.g, c.b);
-  const nv = Math.min(255, (v * factor) / 100);
-  const [r, g, b] = hsvToRgb(h, s, nv);
+  const [h, s, v] = rgbToHsv(c.r, c.g, c.b);   // s in 0..1, v in 0..255
+  // Qt QColor::lighter: v *= factor/100; when v overflows the max it does NOT
+  // just clamp — it bleeds the overflow OUT of saturation, so bright colours pale
+  // toward white instead of staying fully saturated (qcolor.cpp: s -= v-USHRT_MAX;
+  // v = USHRT_MAX, both in the 0..0xFFFF scale => here Δs01 = overflow255/255).
+  let nv = (v * factor) / 100;
+  let ns = s;
+  if (nv > 255) {
+    ns = Math.max(0, s - (nv - 255) / 255);
+    nv = 255;
+  }
+  const [r, g, b] = hsvToRgb(h, ns, nv);
   const a = c.a > 1 ? c.a / 255 : c.a;
   return `rgba(${r}, ${g}, ${b}, ${a})`;
 }
