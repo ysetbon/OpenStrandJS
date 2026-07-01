@@ -1800,11 +1800,40 @@ function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg, topo) {
     const hc = hasCircles.get(s.layer_name);
     if (hc) s.has_circles = hc;
   }
-  SHADOW_ENABLED = false; // no shadows while dragging (restored by renderFixture on release)
+  // Shadows: OFF on the interactive drag fast-path (its meta.shadow_enabled is false — a per-frame
+  // shadow cast would be far too costly). The PAN over-render is different: it is a ONE-TIME capture
+  // at pan-start and sets meta.shadow_enabled = doc.shadow_enabled, so a pan taken with Shadow mode
+  // ON keeps its shadows visible while panning (each subsequent move is still an O(1) blit of this
+  // capture). When enabled we run the SAME cast-then-body loop as renderFixture so lower strands
+  // receive the shadow; when disabled (drag) every shadow branch below is gated off, so the loop is
+  // byte-identical to the previous body-only pass.
+  const shadowEnabled = !!meta.shadow_enabled;
+  SHADOW_ENABLED = shadowEnabled;
+  const maskPairs = new Set();
+  if (shadowEnabled) {
+    SHADOW_PAINT = toColor(SHADOW_COLOR);
+    SHADOW_OVERRIDES = meta.shadow_overrides || {};
+    // Two components of the same mask don't shadow each other (mirrors renderFixture).
+    for (const s of strands) {
+      if (s.type !== 'MaskedStrand') continue;
+      const p = (s.layer_name || '').split('_');
+      if (p.length >= 4) {
+        maskPairs.add(p[0] + '_' + p[1] + '|' + p[2] + '_' + p[3]);
+        maskPairs.add(p[2] + '_' + p[3] + '|' + p[0] + '_' + p[1]);
+      }
+    }
+  }
   for (let i = 0; i < strands.length; i++) {
     const s = strands[i];
     if (!shouldDraw(s.layer_name)) continue;
-    if (s.type === 'MaskedStrand') { drawMasked(s, byLayer, P, enableThird, S); continue; }
+    const casts = shadowEnabled && s.is_hidden !== true;
+    if (s.type === 'MaskedStrand') {
+      if (casts) castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i);
+      drawMasked(s, byLayer, P, enableThird, S, shadowEnabled && s.shadow_only === true);
+      continue;
+    }
+    if (casts) castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i);
+    if (shadowEnabled && s.shadow_only) continue;
     drawStrand(s, strands, P, enableThird, S);
   }
   paper.view.update();

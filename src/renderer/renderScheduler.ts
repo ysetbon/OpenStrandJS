@@ -40,7 +40,7 @@ const EDITOR_SUPERSAMPLE = 1;
 // (4.6 MP Paper raster + a boolean per mask, 100s of ms on a slow masked knot) we capture the
 // scene ONCE at pan-start and BLIT it shifted by the pan delta each move — O(1), zero Paper work
 // per move. #c keeps its full size so the existing syncOverlay re-aligns the handles from the
-// live view (no overlay change). One crisp full render on RELEASE restores shadows/z-order.
+// live view (no overlay change). One crisp full render on RELEASE restores crisp z-order + live shadows.
 //
 // The capture is an OVER-RENDER: the whole scene — every strand, INCLUDING those off-screen —
 // drawn into an offscreen that covers the content bounds + a margin (capped at PAN_MAX_DIM), at
@@ -49,7 +49,8 @@ const EDITOR_SUPERSAMPLE = 1;
 // memory. Panning then reveals real off-screen strands instead of white. Falls back to a plain
 // #c snapshot (viewport only, white beyond it) when the over-render renderer is unavailable.
 // Oracle-safe: renderPanImage is editor-only; renderFixture is untouched. Pan takes precedence
-// over the drag branch (see runFrame). Shadows are off during the pan and return on release.
+// over the drag branch (see runFrame). Shadows ARE baked into the capture at pan-start when Shadow
+// mode is on, so they stay visible while panning; the release render restores them live + crisp.
 const PAN_MARGIN_FRAC = 0.5;   // over-render margin as a fraction of the viewport, each side
 const PAN_MAX_DIM = 8000;      // hard ceiling on the offscreen dimension (memory safety)
 const PAN_PX_BUDGET = 40e6;    // HD: only regions larger than this (very zoomed-in) get downscaled
@@ -113,7 +114,11 @@ function renderPanOverImage(doc: EditorDocument, view: ViewState, settings: Sett
     ...buildMeta(doc, view, settings),
     image_width: lw, image_height: lh,
     x_offset: (view.panX - rx0) * sc, y_offset: (view.panY - ry0) * sc, zoom: zoom * sc,
-    supersample: 1, shadow_enabled: false,
+    supersample: 1,
+    // Capture shadows INTO the pan snapshot when Shadow mode is on, so they stay visible while
+    // panning instead of vanishing until release. Affordable: this over-render is a one-time cost
+    // at pan-start; each subsequent move is still an O(1) blit of the (now shadowed) capture.
+    shadow_enabled: doc.shadow_enabled,
     // Full quality: no sample_step / mask_simple overrides -> default fine sampling + full masks
     // (the crossings keep their dark borders), so the capture matches the static view.
     drag: { moving: [] as string[] },
