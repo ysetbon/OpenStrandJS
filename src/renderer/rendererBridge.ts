@@ -19,6 +19,7 @@ declare global {
     renderDragBackground?: (strands: RenderStrand[], meta: RenderMeta) => unknown;
     renderDragFrame?: (strands: RenderStrand[], meta: RenderMeta) => unknown;
     endDrag?: () => void;
+    renderPanImage?: (strands: RenderStrand[], meta: RenderMeta) => HTMLCanvasElement;
   }
 }
 
@@ -43,6 +44,12 @@ export function callRenderDragFrame(strands: RenderStrand[], meta: RenderMeta): 
 
 export function callEndDrag(): void {
   if (typeof window.endDrag === 'function') window.endDrag();
+}
+
+// Render the whole scene into a larger-than-viewport offscreen for the pan over-render.
+// Returns null when the renderer predates this function (caller falls back to a #c snapshot).
+export function callRenderPanImage(strands: RenderStrand[], meta: RenderMeta): HTMLCanvasElement | null {
+  return typeof window.renderPanImage === 'function' ? window.renderPanImage(strands, meta) : null;
 }
 
 export function extractStrands(data: unknown, step?: number): unknown[] {

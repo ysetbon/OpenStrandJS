@@ -1962,6 +1962,42 @@ window.renderDragFrame = function (strands, meta) {
 // Drop the cached background at the end of a gesture (or before any full render).
 window.endDrag = function () { DRAG_BG = null; };
 
+// PAN over-render: render the WHOLE scene (white backdrop + grid + every strand, shadows off)
+// into a NEW offscreen canvas sized by meta — larger than the viewport, so off-screen strands
+// are captured and the pan blit reveals them instead of white. Draft-capable via
+// meta.drag.sample_step / mask_simple (kept for exactly this). Returns the offscreen; the
+// caller owns it. Editor-only — the oracle never calls this, so renderFixture is untouched.
+window.renderPanImage = function (strands, meta) {
+  const W = meta.image_width, H = meta.image_height;
+  // Strands into a transparent layer (shouldDraw = everything).
+  const layer = document.createElement('canvas');
+  _dragPaint(layer, strands, meta, () => true, false, computeDragTopology(strands));
+  paper.project.remove();
+  const out = document.createElement('canvas');
+  out.width = W; out.height = H;
+  const ctx = out.getContext('2d');
+  ctx.fillStyle = 'white';
+  ctx.fillRect(0, 0, W, H);
+  // Reference grid under the strands (same gating + look as renderFixture / renderDragFrame).
+  if (meta.show_grid && meta.grid_size > 0) {
+    const zoom = meta.zoom || 1;
+    const step = meta.grid_size * zoom;
+    if (step >= 4) {
+      const ox = meta.x_offset, oy = meta.y_offset;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let k = Math.ceil(-ox / step); k <= Math.floor((W - ox) / step); k++) { const x = ox + k * step; ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+      for (let k = Math.ceil(-oy / step); k <= Math.floor((H - oy) / step); k++) { const y = oy + k * step; ctx.moveTo(0, y); ctx.lineTo(W, y); }
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+  ctx.drawImage(layer, 0, 0);
+  return out;
+};
+
 // Extract the flat strands array from a fixture file (handles the
 // OpenStrandStudioHistory wrapper). Mirrors js_render.mjs / reference_render.py.
 window.extractStrands = function (data, step) {

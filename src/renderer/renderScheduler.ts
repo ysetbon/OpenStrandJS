@@ -4,9 +4,10 @@
 // pixel-aligned.
 
 import { useEditorStore } from '../store/editorStore';
-import { callRender, callRenderDragBackground, callRenderDragFrame, callEndDrag } from './rendererBridge';
+import { callRender, callRenderDragBackground, callRenderDragFrame, callEndDrag, callRenderPanImage } from './rendererBridge';
 import { buildMeta, toRenderArray } from './toRenderArray';
-import type { ViewState } from '../model/types';
+import { contentBounds } from '../interaction/viewTransform';
+import type { EditorDocument, Settings, ViewState } from '../model/types';
 
 let scheduled = false;
 // True when the queued frame must do a FULL render (#c via renderFixture), not just
@@ -35,22 +36,31 @@ let bakedKey: string | null = null;
 const EDITOR_SUPERSAMPLE = 1;
 
 // --- PAN fast-path (canvas drag / hand tool) ---------------------------------------------
-// A pan is a PURE rigid screen translation of the whole scene, so instead of re-rendering
-// (4.6 MP Paper raster + a boolean per mask, 100s of ms on a slow masked knot) we snapshot
-// the already-rendered #c ONCE at pan-start (a ~1-2ms canvas copy — shadows already baked
-// in, exactly correct under translation) and BLIT it shifted by the pan delta each move —
-// O(1), zero Paper work. #c keeps its full size so the existing syncOverlay re-aligns the
-// handles from the live view (no overlay change). The revealed leading edge is white (matches
-// the renderer backdrop) and is filled by one crisp full render on RELEASE (endPanGesture).
-// Oracle-safe: this is entirely in the live scheduler; renderFixture / web/strand-renderer.js
-// are never touched. Pan takes precedence over the drag branch (see runFrame).
+// A pan is a PURE rigid screen translation, so instead of re-rendering the scene every move
+// (4.6 MP Paper raster + a boolean per mask, 100s of ms on a slow masked knot) we capture the
+// scene ONCE at pan-start and BLIT it shifted by the pan delta each move — O(1), zero Paper work
+// per move. #c keeps its full size so the existing syncOverlay re-aligns the handles from the
+// live view (no overlay change). One crisp full render on RELEASE restores shadows/z-order.
+//
+// The capture is an OVER-RENDER: the whole scene — every strand, INCLUDING those off-screen —
+// drawn into an offscreen that covers the content bounds + a margin (capped at PAN_MAX_DIM), at
+// FULL (HD) resolution with full masks so the panned image is as crisp as the static view. Only
+// a genuinely enormous region (zoomed far in) is downscaled, past PAN_PX_BUDGET, to stay within
+// memory. Panning then reveals real off-screen strands instead of white. Falls back to a plain
+// #c snapshot (viewport only, white beyond it) when the over-render renderer is unavailable.
+// Oracle-safe: renderPanImage is editor-only; renderFixture is untouched. Pan takes precedence
+// over the drag branch (see runFrame). Shadows are off during the pan and return on release.
+const PAN_MARGIN_FRAC = 0.5;   // over-render margin as a fraction of the viewport, each side
+const PAN_MAX_DIM = 8000;      // hard ceiling on the offscreen dimension (memory safety)
+const PAN_PX_BUDGET = 40e6;    // HD: only regions larger than this (very zoomed-in) get downscaled
 let panning = false;
-let panSnap: HTMLCanvasElement | null = null;   // snapshot of #c taken at pan-start
-let panSnapPan = { x: 0, y: 0 };                // view.panX/panY when the snapshot was taken
-let panSnapView = { w: 0, h: 0, zoom: 1 };      // size+zoom the snapshot is valid for
+let panSnap: HTMLCanvasElement | null = null;   // captured scene (over-render OR viewport snapshot)
+let panSnapPan = { x: 0, y: 0 };                // view.panX/panY when captured
+let panSnapView = { w: 0, h: 0, zoom: 1 };      // size+zoom the capture is valid for
+let panSnapOrigin = { x: 0, y: 0 };             // backing-px offset of the capture's top-left (0,0 for a #c snapshot)
+let panSnapScale = 1;                           // draft scale the capture was rendered at (1 for a #c snapshot)
 
-// Capture the current crisp #c as the pan translation base (called at pan-start and after any
-// stale-forced full re-render mid-pan). Records the pan/size/zoom the snapshot is valid for.
+// Plain fallback: copy the current crisp #c (viewport only) as the pan base.
 function snapshotPanBase(view: ViewState): void {
   const c = document.getElementById('c') as HTMLCanvasElement | null;
   if (!c || c.width === 0 || c.height === 0) { panSnap = null; return; }
@@ -61,11 +71,51 @@ function snapshotPanBase(view: ViewState): void {
   ctx.drawImage(c, 0, 0);
   panSnapPan = { x: view.panX, y: view.panY };
   panSnapView = { w: Math.round(view.width), h: Math.round(view.height), zoom: view.zoom };
+  panSnapOrigin = { x: 0, y: 0 };
+  panSnapScale = 1;
 }
 
-// Blit the snapshot translated by the pan delta. Returns false (→ caller does a full render +
-// re-snapshot) when the snapshot is missing or the view SIZE/ZOOM changed since it was taken
-// (wheel-zoom or window/panel resize mid-pan — translation is only valid at constant size+zoom).
+// Over-render the whole scene (off-screen strands included) into a larger offscreen at draft
+// quality. Region = union(viewport, contentBounds) + margin, capped at PAN_MAX_DIM, drawn at
+// PAN_PX_BUDGET pixels. Returns true on success.
+function renderPanOverImage(doc: EditorDocument, view: ViewState, settings: Settings, selLayer: string | null): boolean {
+  const W = Math.round(view.width), H = Math.round(view.height), zoom = view.zoom;
+  // Region in backing px = union(viewport [0..W,0..H], content bounds) + margin.
+  let rx0 = 0, ry0 = 0, rx1 = W, ry1 = H;
+  const b = contentBounds(doc);
+  if (b) {
+    rx0 = Math.min(rx0, b.minX * zoom + view.panX); ry0 = Math.min(ry0, b.minY * zoom + view.panY);
+    rx1 = Math.max(rx1, b.maxX * zoom + view.panX); ry1 = Math.max(ry1, b.maxY * zoom + view.panY);
+  }
+  rx0 -= W * PAN_MARGIN_FRAC; ry0 -= H * PAN_MARGIN_FRAC; rx1 += W * PAN_MARGIN_FRAC; ry1 += H * PAN_MARGIN_FRAC;
+  let regionW = rx1 - rx0, regionH = ry1 - ry0;
+  if (regionW > PAN_MAX_DIM) { const c = (rx0 + rx1) / 2; rx0 = c - PAN_MAX_DIM / 2; regionW = PAN_MAX_DIM; }
+  if (regionH > PAN_MAX_DIM) { const c = (ry0 + ry1) / 2; ry0 = c - PAN_MAX_DIM / 2; regionH = PAN_MAX_DIM; }
+  const sc = Math.min(1, Math.sqrt(PAN_PX_BUDGET / Math.max(1, regionW * regionH)));
+  const lw = Math.max(1, Math.round(regionW * sc)), lh = Math.max(1, Math.round(regionH * sc));
+  const arr = toRenderArray(doc, selLayer, undefined, false);
+  const meta = {
+    ...buildMeta(doc, view, settings),
+    image_width: lw, image_height: lh,
+    x_offset: (view.panX - rx0) * sc, y_offset: (view.panY - ry0) * sc, zoom: zoom * sc,
+    supersample: 1, shadow_enabled: false,
+    // Full quality: no sample_step / mask_simple overrides -> default fine sampling + full masks
+    // (the crossings keep their dark borders), so the capture matches the static view.
+    drag: { moving: [] as string[] },
+  };
+  const canvas = callRenderPanImage(arr, meta);
+  if (!canvas) return false;
+  panSnap = canvas;
+  panSnapPan = { x: view.panX, y: view.panY };
+  panSnapView = { w: W, h: H, zoom };
+  panSnapOrigin = { x: rx0, y: ry0 };
+  panSnapScale = sc;
+  return true;
+}
+
+// Blit the captured scene translated by the pan delta. Returns false (→ full render + re-capture)
+// when the capture is missing or the view SIZE/ZOOM changed (wheel-zoom / resize mid-pan —
+// translation is only valid at constant size+zoom).
 function panBlit(view: ViewState): boolean {
   const c = document.getElementById('c') as HTMLCanvasElement | null;
   if (!panSnap || !c) return false;
@@ -74,16 +124,27 @@ function panBlit(view: ViewState): boolean {
   const ctx = c.getContext('2d');
   if (!ctx) return false;
   if (dragBaked) { callEndDrag(); dragBaked = false; bakedKey = null; } // drop a stale drag bake
+  const dx = view.panX - panSnapPan.x, dy = view.panY - panSnapPan.y;
   ctx.fillStyle = 'white';
   ctx.fillRect(0, 0, c.width, c.height);
-  ctx.drawImage(panSnap, view.panX - panSnapPan.x, view.panY - panSnapPan.y);
+  // The capture covers backing region [origin, origin+region] rendered at panSnapScale; draw it
+  // back to backing size at (origin + panDelta). At full scale (sc=1) this is a 1:1 blit with
+  // smoothing OFF (crisp / HD); smoothing is only enabled when a very-zoomed-in capture was
+  // downscaled and must be upscaled. Round the destination to whole pixels to avoid sub-pixel blur.
+  ctx.imageSmoothingEnabled = panSnapScale < 1;
+  ctx.drawImage(panSnap, 0, 0, panSnap.width, panSnap.height,
+    Math.round(panSnapOrigin.x + dx), Math.round(panSnapOrigin.y + dy),
+    Math.round(panSnap.width / panSnapScale), Math.round(panSnap.height / panSnapScale));
   return true;
 }
 
 // Called by InteractionHost on pan-start / pan-end.
 export function beginPanGesture(): void {
   panning = true;
-  snapshotPanBase(useEditorStore.getState().view);
+  const { doc, view, settings, selection } = useEditorStore.getState();
+  // Over-render the whole scene (off-screen strands included) at pan-start; fall back to a plain
+  // viewport snapshot of the crisp #c if the over-render renderer isn't available.
+  if (!renderPanOverImage(doc, view, settings, selection.layerName)) snapshotPanBase(view);
 }
 export function endPanGesture(): void {
   panning = false;
