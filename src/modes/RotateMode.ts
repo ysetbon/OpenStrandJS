@@ -10,7 +10,7 @@
 
 import { useEditorStore } from '../store/editorStore';
 import { rotateStrandEndpoint } from '../store/actions';
-import { movingStrandSet } from '../interaction/connections';
+import { movingStrandSet, addMasksForMoving } from '../interaction/connections';
 import type { EditorDocument, Point, Selection } from '../model/types';
 import type { Mode, ModeContext, PointerInfo } from './Mode';
 
@@ -73,6 +73,9 @@ export const RotateMode: Mode = {
       if (c && c.type === 'AttachedStrand' && c.attached_to === hit.layer
           && Math.abs(c.start.x - moving.x) + Math.abs(c.start.y - moving.y) < 0.5) movingSet.add(n);
     }
+    // Re-run the mask pass AFTER unioning the extra children: a mask built on one of those
+    // newly-added children would otherwise stay baked-static while its component rotates.
+    addMasksForMoving(st.doc, movingSet);
     st.setDragMoving([...movingSet]);
     ctx.requestRender();        // selection highlight is drawn in #c (under the body)
   },

@@ -1726,21 +1726,20 @@ let DRAG_BG = null; // { bands, W, H, ox, oy, zoom, topo }
 // position-INDEPENDENT and so identical on every frame of an endpoint/CP drag
 // (welded children move rigidly with their parent endpoint, so the attachment a
 // child registers at its parent's endpoint never changes within the gesture).
-// byLayer / enableThird are likewise topology, not position. Computing them ONCE
-// at bake — instead of re-running the O(N^2) computeHasCircles pass every frame —
-// is the per-frame win. Returns { hasCircles: Map<layer_name,[bool,bool]>,
-// byLayer, enableThird }; has_circles is stored in the Map, NOT mutated onto s,
-// so the bake/frame callers apply it only to the strands they actually draw.
+// enableThird is likewise topology. Computing has_circles ONCE at bake — instead of
+// re-running the O(N^2) computeHasCircles pass every frame — is the per-frame win.
+// NOTE: byLayer (layer_name -> strand object) is deliberately NOT cached here — it is
+// POSITION-dependent (a moving mask reads its components through it), so _dragPaint
+// rebuilds it from the LIVE strands each frame. has_circles is returned in the Map, not
+// mutated onto s, so callers apply it only to the strands they draw.
 function computeDragTopology(strands) {
   const enableThird = strands.some((s) => s.control_point_center != null);
-  const byLayer = {};
-  for (const s of strands) byLayer[s.layer_name] = s;
   const hasCircles = new Map();
   for (const s of strands) {
     if (s.type === 'MaskedStrand') continue;
     hasCircles.set(s.layer_name, computeHasCircles(s, strands));
   }
-  return { hasCircles, byLayer, enableThird };
+  return { hasCircles, enableThird };
 }
 
 // Paint the strands for which shouldDraw(layer_name) is true into targetCanvas at

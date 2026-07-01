@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Modal } from '../Modal';
 import { useEditorStore } from '../../store/editorStore';
 import { applyStrandAngleLength } from '../../store/actions';
-import { movingStrandSet } from '../../interaction/connections';
+import { movingStrandSet, addMasksForMoving } from '../../interaction/connections';
 import { requestRender } from '../../renderer/renderScheduler';
 import { t } from '../i18n';
 
@@ -55,6 +55,9 @@ export function AngleAdjustDialog(): JSX.Element | null {
             && Math.abs(c.start.x - end.x) + Math.abs(c.start.y - end.y) < 1) moving.add(n);
       }
     }
+    // Re-run the mask pass after unioning the extra children (a mask built on one of them
+    // would otherwise stay baked-static while its component moves).
+    addMasksForMoving(s.doc, moving);
     s.setDragging(true);
     s.setDragMoving([...moving]);
     return () => {
