@@ -1,0 +1,16 @@
+{
+  "name": "OpenStrandJS",
+  "short_name": "OpenStrandJS",
+  "description": "Fidelity-first port of OpenStrand Studio — a knot & strand editor.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone", "minimal-ui"],
+  "orientation": "landscape",
+  "background_color": "#ECECEC",
+  "theme_color": "#ECECEC",
+  "icons": [
+    { "src": "box_stitch.png", "sizes": "256x256", "type": "image/png", "purpose": "any" },
+    { "src": "box_stitch.png", "sizes": "256x256", "type": "image/png", "purpose": "maskable" }
+  ]
+}
