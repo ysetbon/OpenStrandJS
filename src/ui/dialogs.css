@@ -184,6 +184,12 @@
   opacity: 0.6;
   font-style: italic;
 }
+/* Static section header inside the shadow list (OSS "Shadows cast via masks:"). */
+.gd-shadow-static-head {
+  opacity: 0.75;
+  font-weight: 600;
+  padding-top: 8px;
+}
 .gd-shadow-expander {
   flex: 0 0 auto;
   cursor: pointer;

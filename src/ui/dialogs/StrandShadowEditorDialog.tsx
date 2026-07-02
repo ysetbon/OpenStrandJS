@@ -6,7 +6,8 @@ import {
   setAllowFullShadow,
   setSubtractedLayers,
 } from '../../store/actions';
-import { t, isRTL } from '../i18n';
+import { maskComponents } from '../../model/layerName';
+import { t, tf, isRTL } from '../i18n';
 
 // OSS-faithful per-strand Shadow Editor (shadow_editor_dialog.py). Opened from a
 // layer button's "Edit Shadows" item; edits the shadows the CASTING strand throws
@@ -15,8 +16,15 @@ import { t, isRTL } from '../i18n';
 // casting strand, one row per receiver (Visible / Full Shadow / Subtract), then help.
 // Non-modal, applies immediately, bracketed by one undo step.
 //
+// Masks whose over-strand is this layer own the shadow drawn at each crossing, so
+// their rows are surfaced here too under a "Shadows cast via masks" header (OSS
+// _collect_mask_proxy_rows): each row "mask → receiver (via mask)" reads and writes
+// the overrides keyed under the MASK's layer name — the same settings the renderer's
+// crossing-shadow gate and the mask's own dialog consume.
+//
 // Per (casting -> receiving) shadow_overrides:
-//   * Visible      — WIRED to the renderer (meta.shadow_overrides skips the pair).
+//   * Visible      — WIRED to the renderer (meta.shadow_overrides skips the pair;
+//                    for mask rows it also gates the crossing shading in drawMasked).
 //   * Full Shadow  — STORED-ONLY (OSS-shape field; renderer geometry not yet ported).
 //   * Subtract     — STORED-ONLY (subtracted_layers persisted; not yet consumed).
 export function StrandShadowEditorDialog(props: {
@@ -52,16 +60,43 @@ export function StrandShadowEditorDialog(props: {
     return out;
   };
 
+  // Mask-proxy rows (OSS _collect_mask_proxy_rows): for each visible mask whose
+  // OVER-strand (first component) is this dialog's strand, one row per visible
+  // strand below the mask in z-order — excluding the caster itself (the over-strand
+  // shadowing itself is noise) and, like receiversOf, masked receivers. Receivers
+  // are listed top-to-bottom to match the regular section's display order.
+  const maskRowsOf = (): { mask: string; recv: string }[] => {
+    const rows: { mask: string; recv: string }[] = [];
+    for (const maskName of live.order) {
+      const m = live.strands[maskName];
+      if (!m || m.type !== 'MaskedStrand' || m.is_hidden) continue;
+      const comp = maskComponents(maskName);
+      if (!comp || comp.first !== casting) continue;
+      const mi = live.order.indexOf(maskName);
+      for (let i = mi - 1; i >= 0; i--) {
+        const nm = live.order[i];
+        if (nm === casting) continue;
+        const s = live.strands[nm];
+        if (!s || s.type === 'MaskedStrand' || s.is_hidden) continue;
+        rows.push({ mask: maskName, recv: nm });
+      }
+    }
+    return rows;
+  };
+
   const availableSubtract = (receiving: string): string[] =>
     live.order.filter((nm) => {
       const s = live.strands[nm];
       return s && s.type !== 'MaskedStrand' && !s.is_hidden && nm !== receiving;
     });
 
-  const ovOf = (r: string) => (live.shadow_overrides[casting] || {})[r] || {};
-  const isVisible = (r: string) => ovOf(r).visibility !== false;
-  const isFull = (r: string) => ovOf(r).allow_full_shadow === true;
-  const subsOf = (r: string) => ovOf(r).subtracted_layers ?? [];
+  // Every override helper takes the row's caster: regular rows edit (casting -> r),
+  // mask-proxy rows edit (mask -> r) — the mask's own override dict (OSS keys them
+  // identically, so both dialogs and the renderer stay in sync).
+  const ovOf = (caster: string, r: string) => (live.shadow_overrides[caster] || {})[r] || {};
+  const isVisible = (caster: string, r: string) => ovOf(caster, r).visibility !== false;
+  const isFull = (caster: string, r: string) => ovOf(caster, r).allow_full_shadow === true;
+  const subsOf = (caster: string, r: string) => ovOf(caster, r).subtracted_layers ?? [];
 
   const cssColor = (n: string): string => {
     const c = live.strands[n]?.color;
@@ -72,23 +107,96 @@ export function StrandShadowEditorDialog(props: {
   const preview = (fn: (d: typeof live) => void) => useEditorStore.getState().mutateDoc(fn);
 
   const recvs = receiversOf();
+  const maskRows = maskRowsOf();
+  // Header batch toggles cover every row of the dialog — regular AND mask-proxy —
+  // mirroring OSS's dialog-wide Show All, whose handler resolves each item's own
+  // caster (shadow_editor_dialog.py:954).
+  const allPairs: { caster: string; recv: string }[] = [
+    ...recvs.map((r) => ({ caster: casting, recv: r })),
+    ...maskRows.map((m) => ({ caster: m.mask, recv: m.recv })),
+  ];
 
-  // Header batch toggles over every receiver of this casting strand.
-  const setSectionVisible = (v: boolean) => preview((d) => recvs.forEach((r) => setShadowVisibility(d, casting, r, v)));
-  const setSectionFull = (v: boolean) => preview((d) => recvs.forEach((r) => setAllowFullShadow(d, casting, r, v)));
+  const setSectionVisible = (v: boolean) =>
+    preview((d) => allPairs.forEach((p) => setShadowVisibility(d, p.caster, p.recv, v)));
+  const setSectionFull = (v: boolean) =>
+    preview((d) => allPairs.forEach((p) => setAllowFullShadow(d, p.caster, p.recv, v)));
   const setSectionSubtract = (v: boolean) =>
-    preview((d) => recvs.forEach((r) => setSubtractedLayers(d, casting, r, v ? availableSubtract(r) : [])));
-  const sectionVisibleAll = () => recvs.length > 0 && recvs.every((r) => isVisible(r));
-  const sectionFullAll = () => recvs.length > 0 && recvs.every((r) => isFull(r));
-  const sectionSubtractAll = () => recvs.length > 0 && recvs.every((r) => subsOf(r).length > 0);
+    preview((d) => allPairs.forEach((p) => setSubtractedLayers(d, p.caster, p.recv, v ? availableSubtract(p.recv) : [])));
+  const sectionVisibleAll = () => allPairs.length > 0 && allPairs.every((p) => isVisible(p.caster, p.recv));
+  const sectionFullAll = () => allPairs.length > 0 && allPairs.every((p) => isFull(p.caster, p.recv));
+  const sectionSubtractAll = () => allPairs.length > 0 && allPairs.every((p) => subsOf(p.caster, p.recv).length > 0);
 
   const infoParts = t('shadow_editor_info', lang).replace(/<\/?b>/g, '').split('{0}');
+  // OSS shadow_via_mask: '{0} → {1} (via mask)'.
+  const viaMaskText = (mask: string, recv: string) => tf('shadow_via_mask', lang, mask, recv);
 
   const ToggleBtn = (p: { active: boolean; label: string; onClick: () => void; title?: string }) => (
     <button type="button" className={'gd-toggle-btn' + (p.active ? ' active' : '')} onClick={p.onClick} title={p.title}>
       {p.label}
     </button>
   );
+
+  // One editable override row for the (caster -> recv) shadow. Regular rows show
+  // the receiver's name; mask-proxy rows carry the mask as caster and a
+  // "mask → receiver (via mask)" label (OSS _add_shadow_row display_text).
+  const renderRow = (caster: string, recv: string, displayText?: string) => {
+    const key = `${caster}|${recv}`;
+    const subs = subsOf(caster, recv);
+    const isOpen = expanded[key] ?? subs.length > 0;
+    return (
+      <div key={key} className="gd-shadow-row">
+        <div className="gd-shadow-row-main">
+          <span className="gd-swatch" style={{ background: cssColor(recv) }} />
+          <span className="gd-member-name" title={displayText ?? recv}>{displayText ?? recv}</span>
+          <label className="gd-check">
+            <input
+              type="checkbox"
+              checked={isVisible(caster, recv)}
+              onChange={(e) => preview((d) => setShadowVisibility(d, caster, recv, e.target.checked))}
+            />
+            <span>{t('shadow_visible_on', lang)}</span>
+          </label>
+          <label className="gd-check" title={t('shadow_stored_only_note', lang)}>
+            <input
+              type="checkbox"
+              checked={isFull(caster, recv)}
+              onChange={(e) => preview((d) => setAllowFullShadow(d, caster, recv, e.target.checked))}
+            />
+            <span>{t('shadow_full_on', lang)}</span>
+          </label>
+          <button
+            type="button"
+            className="gd-shadow-expander"
+            onClick={() => setExpanded((m) => ({ ...m, [key]: !isOpen }))}
+            title={t('shadow_stored_only_note', lang)}
+          >
+            {(isOpen ? '▼ ' : '▶ ') + t('shadow_subtract_on', lang)}
+          </button>
+        </div>
+        {isOpen && (
+          <div className="gd-shadow-subtract">
+            {availableSubtract(recv).length === 0 ? (
+              <span className="gd-member-name">{t('shadow_no_layers', lang)}</span>
+            ) : (
+              availableSubtract(recv).map((layer) => (
+                <label key={layer} className="gd-check">
+                  <input
+                    type="checkbox"
+                    checked={subs.includes(layer)}
+                    onChange={(e) => {
+                      const next = e.target.checked ? [...subs, layer] : subs.filter((l) => l !== layer);
+                      preview((d) => setSubtractedLayers(d, caster, recv, next));
+                    }}
+                  />
+                  <span>{layer}</span>
+                </label>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <Modal
@@ -117,68 +225,25 @@ export function StrandShadowEditorDialog(props: {
               <ToggleBtn active={sectionSubtractAll()} label={t('shadow_subtract_on', lang)} title={t('shadow_stored_only_note', lang)} onClick={() => setSectionSubtract(!sectionSubtractAll())} />
             </div>
 
-            {recvs.length === 0 ? (
+            {recvs.map((recv) => renderRow(casting, recv))}
+
+            {/* Shadows this strand casts THROUGH its masks (OSS via-mask section):
+                a bold static header, then one row per (mask, receiver) pair. */}
+            {maskRows.length > 0 && (
+              <>
+                <div className="gd-shadow-row gd-shadow-static-head">
+                  <span className="gd-member-name">{t('shadow_via_mask_section', lang)}</span>
+                </div>
+                {maskRows.map((m) => renderRow(m.mask, m.recv, viaMaskText(m.mask, m.recv)))}
+              </>
+            )}
+
+            {/* OSS shadow_no_casters empty state: shown only when the dialog has NO
+                rows at all — nothing below the strand and no mask uses it on top. */}
+            {allPairs.length === 0 && (
               <div className="gd-shadow-row gd-shadow-empty">
-                <span className="gd-member-name">{t('shadow_no_layers', lang)}</span>
+                <span className="gd-member-name">{t('shadow_no_casters', lang)}</span>
               </div>
-            ) : (
-              recvs.map((recv) => {
-                const subs = subsOf(recv);
-                const isOpen = expanded[recv] ?? subs.length > 0;
-                return (
-                  <div key={recv} className="gd-shadow-row">
-                    <div className="gd-shadow-row-main">
-                      <span className="gd-swatch" style={{ background: cssColor(recv) }} />
-                      <span className="gd-member-name">{recv}</span>
-                      <label className="gd-check">
-                        <input
-                          type="checkbox"
-                          checked={isVisible(recv)}
-                          onChange={(e) => preview((d) => setShadowVisibility(d, casting, recv, e.target.checked))}
-                        />
-                        <span>{t('shadow_visible_on', lang)}</span>
-                      </label>
-                      <label className="gd-check" title={t('shadow_stored_only_note', lang)}>
-                        <input
-                          type="checkbox"
-                          checked={isFull(recv)}
-                          onChange={(e) => preview((d) => setAllowFullShadow(d, casting, recv, e.target.checked))}
-                        />
-                        <span>{t('shadow_full_on', lang)}</span>
-                      </label>
-                      <button
-                        type="button"
-                        className="gd-shadow-expander"
-                        onClick={() => setExpanded((m) => ({ ...m, [recv]: !isOpen }))}
-                        title={t('shadow_stored_only_note', lang)}
-                      >
-                        {(isOpen ? '▼ ' : '▶ ') + t('shadow_subtract_on', lang)}
-                      </button>
-                    </div>
-                    {isOpen && (
-                      <div className="gd-shadow-subtract">
-                        {availableSubtract(recv).length === 0 ? (
-                          <span className="gd-member-name">{t('shadow_no_layers', lang)}</span>
-                        ) : (
-                          availableSubtract(recv).map((layer) => (
-                            <label key={layer} className="gd-check">
-                              <input
-                                type="checkbox"
-                                checked={subs.includes(layer)}
-                                onChange={(e) => {
-                                  const next = e.target.checked ? [...subs, layer] : subs.filter((l) => l !== layer);
-                                  preview((d) => setSubtractedLayers(d, casting, recv, next));
-                                }}
-                              />
-                              <span>{layer}</span>
-                            </label>
-                          ))
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })
             )}
           </div>
         </div>

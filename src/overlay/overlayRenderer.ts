@@ -190,18 +190,29 @@ function drawMoveOverlays(ctx: CanvasRenderingContext2D, st: OverlayState): void
   // strand's squares (its grabbed handle pale-yellow, its other handles idle). At
   // rest/hover we still show every strand's squares.
   const affected = dragging ? selection.layerName : null;
+  // Family filter (OSS strand_drawing_canvas.py:2335 + 2477): move_selected_only
+  // hides ALL selection squares for non-family strands; show_cp_selected_only hides
+  // only their control-point squares, keeping start/end squares visible. "Family"
+  // is strictly the selected strand (is_strand_in_selected_family); with a filter
+  // active and nothing selected, everything it gates is hidden.
+  const inFamily = (name: string) => selection.layerName === name;
+  const hideAll = (name: string) => st.settings.move_selected_only && !inFamily(name);
+  const hideCp = (name: string) =>
+    (st.settings.move_selected_only || st.settings.show_cp_selected_only) && !inFamily(name);
   // Endpoint (120px) squares first, then control-point (50px) squares on top, so
   // a cp1 square sitting on a fresh strand's start isn't hidden by the big square.
   for (const name of doc.order) {
     const s = doc.strands[name];
     if (!interactable(s, doc)) continue;
     if (affected && name !== affected) continue;
+    if (hideAll(name)) continue;
     for (const h of strandHandles(s, st.settings.enable_third_control_point)) if (isEndpoint(h.handle)) draw(name, h);
   }
   for (const name of doc.order) {
     const s = doc.strands[name];
     if (!interactable(s, doc)) continue;
     if (affected && name !== affected) continue;
+    if (hideCp(name)) continue;
     for (const h of strandHandles(s, st.settings.enable_third_control_point)) if (!isEndpoint(h.handle)) draw(name, h);
   }
 }
@@ -507,10 +518,17 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, st: OverlayState): vo
   // independent of the global show_control_points toggle, exactly like OSS.
   if (doc.show_control_points && !(mode === 'view' && st.settings.view_hide_control_points)) {
     const affected = st.dragging && mode === 'move' && selection.handle ? selection.layerName : null;
+    // Family filter (OSS draw_control_points, strand_drawing_canvas.py:6053):
+    // hide CP glyphs for non-selected strands when show_cp_selected_only is on
+    // (any mode), or when move_selected_only is on in move mode. Strictly the
+    // selected strand passes; with a filter active and nothing selected, all hide.
+    const cpFamilyFilter = st.settings.show_cp_selected_only
+      || (st.settings.move_selected_only && mode === 'move');
     for (const name of doc.order) {
       const s = doc.strands[name];
       if (!interactable(s, doc)) continue;
       if (affected && name !== affected) continue;
+      if (cpFamilyFilter && selection.layerName !== name) continue;
       drawConnectors(ctx, st, s);
       drawGlyphs(ctx, st, s);
     }

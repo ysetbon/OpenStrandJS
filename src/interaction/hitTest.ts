@@ -108,6 +108,20 @@ function moveGrabbable(s: StrandRecord | undefined): s is StrandRecord {
   return !!s && s.type !== 'MaskedStrand' && !s.is_hidden;
 }
 
+// OSS move_mode._is_strand_allowed_by_selection + is_strand_in_selected_family
+// (move_mode.py:1797, strand_drawing_canvas.py:5938): move_selected_only restricts
+// ALL move-mode interaction to the exactly-selected strand; show_cp_selected_only
+// restricts only CONTROL POINTS — other strands keep their endpoint squares and
+// stay movable. With a filter active and nothing selected, everything it gates is
+// blocked (OSS returns False when no reference strand exists).
+function allowedBySelection(
+  doc: EditorDocument, settings: Settings, name: string, forControlPoints: boolean,
+): boolean {
+  if (settings.move_selected_only) return doc.selected_strand_name === name;
+  if (forControlPoints && settings.show_cp_selected_only) return doc.selected_strand_name === name;
+  return true;
+}
+
 // OSS can_move_side: only active when lock mode is on. A locked strand is frozen;
 // an endpoint that coincides with a LOCKED neighbour's start/end is also frozen
 // (a shared joint with a locked layer can't be dragged). Control points pass
@@ -147,6 +161,7 @@ export function moveGrab(world: Point, doc: EditorDocument, settings: Settings):
   for (const name of doc.order) {
     const s = doc.strands[name];
     if (!moveGrabbable(s)) continue;
+    if (!allowedBySelection(doc, settings, name, true)) continue;
     if (doc.lock_mode && doc.locked_layers.includes(name)) continue;  // locked: no CP grab
     for (const h of moveCpHandles(s, enableThird)) {
       if (inSquare(world, h.pos, CP_HALF)) return { layerName: name, handle: h.handle };
@@ -161,6 +176,7 @@ export function moveGrab(world: Point, doc: EditorDocument, settings: Settings):
   for (const name of doc.order) {
     const s = doc.strands[name];
     if (!moveGrabbable(s)) continue;
+    if (!allowedBySelection(doc, settings, name, false)) continue;
     for (const side of [0, 1] as const) {
       const pt = side === 0 ? s.start : s.end;
       if (inSquare(world, pt, ENDPOINT_HALF) && canMoveSide(doc, s, side)) direct.push({ name, side });
@@ -179,7 +195,9 @@ export function moveGrab(world: Point, doc: EditorDocument, settings: Settings):
       // DIRECT hits above are visibility-gated), so a hidden parent can still become the
       // preferred grab root. MaskedStrands never appear in the table, so existence is enough.
       const nb = table.get(name, side);
-      if (nb && doc.strands[nb.name]) addJoint(nb.name, nb.point);
+      if (nb && doc.strands[nb.name] && allowedBySelection(doc, settings, nb.name, false)) {
+        addJoint(nb.name, nb.point);
+      }
     }
     const pick = joint.find((e) => doc.strands[e.name].type !== 'AttachedStrand') ?? joint[0];
     return { layerName: pick.name, handle: pick.side === 0 ? 'start' : 'end' };
@@ -189,6 +207,7 @@ export function moveGrab(world: Point, doc: EditorDocument, settings: Settings):
   for (const name of [...doc.order].reverse()) {
     const s = doc.strands[name];
     if (!moveGrabbable(s)) continue;
+    if (!allowedBySelection(doc, settings, name, false)) continue;
     if (inSquare(world, s.start, ENDPOINT_HALF) && canMoveSide(doc, s, 0)) return { layerName: name, handle: 'start' };
     if (inSquare(world, s.end, ENDPOINT_HALF) && canMoveSide(doc, s, 1)) return { layerName: name, handle: 'end' };
   }
@@ -238,5 +257,5 @@ export function maskStrandsAtPoint(world: Point, doc: EditorDocument, settings: 
 
 // Dev-only debug handle for hit-testing.
 if (import.meta.env?.DEV) {
-  (globalThis as Record<string, unknown>).__hit = { hitTest, maskHitTest, maskStrandsAtPoint };
+  (globalThis as Record<string, unknown>).__hit = { hitTest, moveGrab, maskHitTest, maskStrandsAtPoint };
 }

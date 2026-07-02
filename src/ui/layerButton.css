@@ -106,11 +106,29 @@
   background: rgba(255, 165, 0, 0.78);
   pointer-events: none;
 }
+/* Padlock at OSS lock_button_rect: 26px box, 3px from the edge OPPOSITE the green
+ * strip (left for LTR, right for RTL), vertically centered. Absolutely positioned
+ * so it never displaces the flex-centered label. */
 .nlb-lock {
-  position: relative;
+  position: absolute;
+  inset-inline-start: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 26px;
+  text-align: center;
   z-index: 2;
   font-size: 16px;
   pointer-events: none;
+}
+/* OSS paintEvent free-span centering: with the padlock visible (lock mode or a
+ * locked layer), the name centers between the padlock (3+26+4) and the green
+ * strip (width-9-2) — ALWAYS reserving the 9px strip so text lines up across
+ * attachable and non-attachable layers (OSS 61817dcb2). Span [33,135] on the
+ * 146px button centers 11px right of the whole-width center; a 22px start
+ * margin on the flex-centered label produces the same +11px shift. */
+.nlb.nlb-selectable .nlb-label,
+.nlb.nlb-locked .nlb-label {
+  margin-inline-start: 22px;
 }
 
 /* ---- attachable: right-edge 9px black-outlined column + 7px green inner box ----

@@ -1425,7 +1425,14 @@ function drawMasked(ms, byLayer, P, enableThird, S, shadowOnly) {
   //     shading_path (15/30 widths, 150/75 alphas, FlatCap/RoundJoin); then
   //   inner-core = stroke(first center, fw+2fsw) ∩ second_path filled SOLID at
   //     alpha 150 (no separate unclipped solid-core pass for masks).
-  if (SHADOW_ENABLED) {
+  // Gated on the (mask -> under-strand) shadow visibility (OSS masked_strand.py
+  // _intersection_shadow_visible): the crossing shading IS the over-strand's shadow
+  // on the under-strand, keyed [mask][second component] in shadow_overrides — the
+  // same key the shadow editor's "via mask" rows toggle. Default TRUE (Qt
+  // get_default_shadow_visibility only zeroes mask -> FIRST component), so only an
+  // explicit visibility:false override hides it.
+  const secondOv = (SHADOW_OVERRIDES[ms.layer_name] || {})[parts[2] + '_' + parts[3]] || null;
+  if (SHADOW_ENABLED && !(secondOv && secondOv.visibility === false)) {
     drawMaskShadow(ms, first, second, fw, fsw, sw, ssw, P, enableThird, S);
   }
 
