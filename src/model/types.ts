@@ -108,6 +108,10 @@ export interface ShadowOverride {
   visibility?: boolean;            // false => skip this (casting->receiving) shadow pair
   allow_full_shadow?: boolean;     // true => shadow ignores mask/intermediate subtraction
   subtracted_layers?: string[];    // layer names whose body is cut out of this shadow
+  // Masked-weave automation bookkeeping (mirrors OSS auto_shadow.py; both keys
+  // ride along in saves/undo verbatim and are ignored by the renderer):
+  auto?: boolean;                  // written by recomputeAutoShadowOverrides; wiped+rebuilt each run
+  pinned?: boolean;                // user re-enabled an auto-hidden pair; automation keeps hands off
 }
 export type ShadowOverrides = Record<string, Record<string, ShadowOverride>>;
 

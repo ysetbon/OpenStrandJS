@@ -2052,3 +2052,191 @@ window.extractStrands = function (data, step) {
   }
   return data.strands || [];
 };
+
+// ---- auto shadow overrides for masked weaves (editor-only analysis) ---------
+// Port of OpenStrandStudio src/auto_shadow.py (branch auto-mask-shadow-overrides).
+// A mask X_Y forces X visually OVER Y at one crossing: Y is the strand woven
+// under, and the mask machinery takes over that crossing's shading. But the
+// regular z-order shadow pass still has Y casting onto chain members buried
+// under the fabric (typically the x_1 parents); mask-blocking + intermediate
+// subtraction eat most of that region, and what's left on screen is residue —
+// edge slivers plus the Pass-B blur fringe (which is never clipped by those
+// subtractions) — painted over the strands woven on top.
+//
+// This function finds those pairs so the editor can write plain
+// shadow_overrides = {visibility:false, auto:true} data. It draws NOTHING and
+// is never called by renderFixture, so the pixel oracle is untouched.
+//
+// Rule: candidates are the SECOND components (Y) of visible masks casting onto
+// lower-z non-mask strands welded into that mask's fabric (the weld chains of
+// both components, via attached_to + knot_connections). For each candidate,
+// survival ratio = area(region after the renderer's own subtraction steps
+// (a)/(b)/(c) from castStrandShadow) / area(raw caster∩receiver overlap).
+// Below AUTO_HIDE_SURVIVAL_RATIO the pair can only contribute residue -> hide.
+// Measured on fixtures/mask_shadow_weave.json (same split as the Qt side):
+// residue pairs <= ~0.37, real exposed crossings >= ~0.60.
+const AUTO_HIDE_SURVIVAL_RATIO = 0.45;
+const AUTO_MIN_RAW_AREA = 150; // world px^2 — ignore grazing overlaps
+
+window.computeAutoShadowHiddenPairs = function (strands, meta) {
+  if (meta && meta.curve_params) CURVE = meta.curve_params;
+  SAMPLE_STEP = 1;
+  DRAG_SIMPLE_MASK = false;
+
+  // Shallow-copy so the has_circles recompute below never mutates the caller's
+  // array (the live editor passes its render array).
+  strands = strands.map((s) => ({ ...s }));
+  if (meta && Array.isArray(meta.layer_order) && meta.layer_order.length) {
+    const rank = new Map(meta.layer_order.map((name, idx) => [name, idx]));
+    if (strands.every((s) => rank.has(s.layer_name))) {
+      strands.sort((a, b) => rank.get(a.layer_name) - rank.get(b.layer_name));
+    }
+  }
+
+  const cv = document.createElement('canvas');
+  cv.setAttribute('hidpi', 'off');
+  cv.width = 8;
+  cv.height = 8;
+  paper.setup(cv);
+  try {
+    const S = 1;                                          // world units; ratios are scale-invariant
+    const P = (pt) => new paper.Point(pt.x, pt.y);
+    const byLayer = {};
+    for (const s of strands) byLayer[s.layer_name] = s;
+    for (const s of strands) {
+      if (s.type !== 'MaskedStrand') s.has_circles = computeHasCircles(s, strands);
+    }
+    const enableThird = strands.some((s) => s.control_point_center != null);
+    const overrides = (meta && meta.shadow_overrides) || {};
+
+    const masks = strands.filter((s) => s.type === 'MaskedStrand' && s.is_hidden !== true);
+    if (!masks.length) return [];
+
+    // Weld chains: union-find over attached_to (child->parent) and
+    // knot_connections (end-to-end welds), non-mask strands only.
+    const parent = {};
+    const find = (x) => {
+      while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+      return x;
+    };
+    const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[ra] = rb; };
+    const bodies = strands.filter((s) => s.type !== 'MaskedStrand');
+    for (const s of bodies) parent[s.layer_name] = s.layer_name;
+    for (const s of bodies) {
+      if (s.attached_to && parent[s.attached_to] != null) union(s.layer_name, s.attached_to);
+      for (const info of Object.values(s.knot_connections || {})) {
+        const other = info && info.connected_strand_name;
+        if (other && parent[other] != null) union(s.layer_name, other);
+      }
+    }
+
+    // caster layer_name -> Set of fabric receiver names; plus the visible-mask
+    // component-pair skip (those pairs never shadow each other — the mask owns
+    // that crossing, mirroring castStrandShadow's maskPairs gate).
+    const candidateReceivers = new Map();
+    const maskComponentPairs = new Set();
+    for (const m of masks) {
+      const p = (m.layer_name || '').split('_');
+      if (p.length < 4) continue;
+      const first = p[0] + '_' + p[1];
+      const second = p[2] + '_' + p[3];
+      maskComponentPairs.add(first + '|' + second);
+      maskComponentPairs.add(second + '|' + first);
+      if (parent[first] == null || parent[second] == null) continue;
+      const chains = new Set([find(first), find(second)]);
+      let recvs = candidateReceivers.get(second);
+      if (!recvs) { recvs = new Set(); candidateReceivers.set(second, recvs); }
+      for (const name of Object.keys(parent)) {
+        if (chains.has(find(name))) recvs.add(name);
+      }
+    }
+
+    const area = (p) => (p && p.area ? Math.abs(p.area) : 0);
+    const results = [];
+
+    for (const [casting, fabric] of candidateReceivers) {
+      const s = byLayer[casting];
+      if (!s || s.type === 'MaskedStrand' || s.is_hidden === true) continue;
+      const i = strands.indexOf(s);
+      if (i < 0) continue;
+
+      // Caster footprint, built lazily once per caster. NOTE: this mirrors the
+      // Qt ANALYSIS geometry (calculate_shadow_for_layer_pair), not the render-
+      // time caster: the core is inflated by the blur radius (stroker width
+      // w + 2*sw + 2*MAX_BLUR, build_shadow_geometry with extension=30) so the
+      // fringe zone — the residue driver — is part of the measured overlap.
+      // That keeps the JS ratios on the same scale as auto_shadow.py's, so both
+      // apps derive the same pairs from the same scene.
+      let footprint = null, core = null, circles = null;
+      const buildFootprint = () => {
+        const w = s.width || 0, sw = s.stroke_width || 0;
+        core = strokedBodyAtWidth(s, P, enableThird, (w + 2 * sw + 2 * MAX_BLUR) * S);
+        if (!core) return null;
+        circles = buildShadowCasterCircles(s, strands, P, enableThird, S);
+        let fp = core.clone();
+        if (circles) { const u = fp.unite(circles); fp.remove(); fp = u; }
+        return fp;
+      };
+
+      for (let j = 0; j < i; j++) {
+        const o = strands[j];
+        if (o.type === 'MaskedStrand' || o.is_hidden === true) continue;
+        if (!fabric.has(o.layer_name)) continue;
+        if (maskComponentPairs.has(casting + '|' + o.layer_name)) continue;
+        const ov = (overrides[casting] || {})[o.layer_name] || null;
+        if (ov && !ov.auto) continue; // user-authored (incl. pinned) — hands off
+
+        if (footprint === null) {
+          footprint = buildFootprint();
+          if (!footprint) break; // caster has no geometry at all
+        }
+        const recv = buildShadowReceiverGeom(o, strands, P, enableThird, S);
+        if (!recv) continue;
+        const raw = footprint.intersect(recv);
+        const rawArea = area(raw);
+        if (rawArea < AUTO_MIN_RAW_AREA) { raw && raw.remove(); recv.remove(); continue; }
+
+        // Survivor: the same subtraction sequence castStrandShadow applies —
+        // (a) subtracted_layers (defaults: none for a non-mask caster),
+        // (b) every visible mask strictly above the caster, (c) every layer
+        // strictly between receiver and caster.
+        let region = raw.clone();
+        const subNames = (ov && ov.subtracted_layers) || defaultSubtracted(s, o, byLayer);
+        region = subtractLayers(region, subNames, byLayer, strands, P, enableThird, S);
+        if (region && Math.abs(region.area || 0) > 0.5) {
+          for (let k = i + 1; k < strands.length; k++) {
+            const m = strands[k];
+            if (m.type !== 'MaskedStrand' || m.is_hidden === true) continue;
+            if (m.layer_name === o.layer_name) continue;
+            const blk = buildShadowBlockerPath(m, byLayer, P, enableThird, S);
+            if (blk) { const r = region.subtract(blk); blk.remove(); region.remove(); region = r; }
+            if (!region || Math.abs(region.area || 0) <= 0.5) break;
+          }
+        }
+        if (region && Math.abs(region.area || 0) > 0.5) {
+          const interNames = [];
+          for (let m = j + 1; m < i; m++) interNames.push(strands[m].layer_name);
+          region = subtractLayers(region, interNames, byLayer, strands, P, enableThird, S);
+        }
+
+        const ratio = area(region) / rawArea;
+        results.push({
+          casting,
+          receiving: o.layer_name,
+          ratio,
+          raw_area: rawArea,
+          hide: ratio < AUTO_HIDE_SURVIVAL_RATIO,
+        });
+        region && region.remove();
+        raw.remove();
+        recv.remove();
+      }
+      footprint && footprint.remove();
+      core && core.remove();
+      circles && circles.remove();
+    }
+    return results;
+  } finally {
+    paper.project.remove();
+  }
+};

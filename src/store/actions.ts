@@ -7,6 +7,7 @@ import type { EditorDocument, GroupRecord, HandleKind, KnotConnection, Point, RG
 import { gestureConnTable, connectedMovers } from '../interaction/connections';
 import { makeAttachedStrand, makeStrand } from '../model/factory';
 import { formatLayerName, maskComponents, nextFreeSet, nextIndexInSet, parseLayerName } from '../model/layerName';
+import { recomputeAutoShadowOverrides } from './autoShadow';
 import { resolveGroupMembers } from '../model/group';
 import { strandsCross, strandBodiesOverlap, maskCentroid } from '../interaction/hitGeometry';
 
@@ -562,6 +563,10 @@ export function deleteStrand(draft: EditorDocument, name: string): void {
   draft.order = draft.order.filter((n) => !toRemove.has(n));
   draft.locked_layers = draft.locked_layers.filter((n) => !toRemove.has(n));
   if (draft.selected_strand_name && toRemove.has(draft.selected_strand_name)) draft.selected_strand_name = null;
+
+  // Masks may have gone with the strand: refresh the auto-managed shadow
+  // overrides (also prunes entries referencing the deleted layers).
+  recomputeAutoShadowOverrides(draft);
 }
 
 export function deleteAllStrands(draft: EditorDocument): void {
@@ -1149,7 +1154,8 @@ export function setShadowOverride(
   const isEmpty =
     (override.visibility === undefined || override.visibility === true) &&
     (override.allow_full_shadow === undefined || override.allow_full_shadow === false) &&
-    (override.subtracted_layers === undefined || override.subtracted_layers.length === 0);
+    (override.subtracted_layers === undefined || override.subtracted_layers.length === 0) &&
+    override.pinned !== true; // a pinned all-default entry must survive (blocks re-auto-hiding)
   if (isEmpty) {
     removeShadowOverride(draft, casting, receiving);
     return;
@@ -1178,7 +1184,16 @@ export function setShadowVisibility(
   visible: boolean,
 ): void {
   const cur = getShadowOverride(draft, casting, receiving) ?? {};
-  setShadowOverride(draft, casting, receiving, { ...cur, visibility: visible });
+  const next: ShadowOverride = { ...cur, visibility: visible };
+  // Toggling an auto-hidden pair (masked-weave automation) is the user
+  // overruling it: drop the auto tag so recomputes keep hands off, and pin a
+  // re-enable so the pair is never auto-hidden again (mirrors OSS
+  // shadow_editor_dialog).
+  if (next.auto) {
+    delete next.auto;
+    if (visible) next.pinned = true;
+  }
+  setShadowOverride(draft, casting, receiving, next);
 }
 
 export function setAllowFullShadow(
@@ -1430,5 +1445,8 @@ export function createMask(
   };
   draft.strands[layer_name] = mask;
   draft.order.push(layer_name);
+  // The weave changed: hide the masked-under strand's residue shadows onto the
+  // fabric (auto-managed shadow_overrides; user-authored entries untouched).
+  recomputeAutoShadowOverrides(draft, curve);
   return layer_name;
 }

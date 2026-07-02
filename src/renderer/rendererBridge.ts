@@ -20,6 +20,10 @@ declare global {
     renderDragFrame?: (strands: RenderStrand[], meta: RenderMeta) => unknown;
     endDrag?: () => void;
     renderPanImage?: (strands: RenderStrand[], meta: RenderMeta) => HTMLCanvasElement;
+    // Masked-weave auto shadow analysis (editor-only; see src/store/autoShadow.ts).
+    computeAutoShadowHiddenPairs?: (strands: RenderStrand[], meta: Partial<RenderMeta>) => Array<{
+      casting: string; receiving: string; ratio: number; raw_area: number; hide: boolean;
+    }>;
   }
 }
 

@@ -9,6 +9,7 @@ import { useEditorStore } from '../store/editorStore';
 import { moveGrab } from '../interaction/hitTest';
 import { movingStrandSet, beginWeldGesture, endWeldGesture } from '../interaction/connections';
 import { moveHandle, snapMove, autoAdjustCp1OnGrab, resetStraightCurveFlags, seedMaskCenters } from '../store/actions';
+import { recomputeAutoShadowOverrides } from '../store/autoShadow';
 import type { HandleKind, Point, Selection, StrandRecord } from '../model/types';
 import type { Mode, ModeContext, PointerInfo } from './Mode';
 
@@ -112,7 +113,12 @@ export const MoveMode: Mode = {
       st.setDragMoving([]);      // end the gesture's moving set
       endWeldGesture();          // drop the per-gesture connection-table cache
       // Re-hide cp2/center if the curve returned to straight (OSS mouseReleaseEvent:1620).
-      st.mutateDoc((draft) => resetStraightCurveFlags(draft, layer));
+      // Geometry changed: refresh the auto-managed masked-weave shadow overrides
+      // BEFORE commit so the undo snapshot carries them (OSS enhanced_mouse_release).
+      st.mutateDoc((draft) => {
+        resetStraightCurveFlags(draft, layer);
+        recomputeAutoShadowOverrides(draft, st.settings.curve_params);
+      });
       st.commit();               // one drag = one undo step (no-op if nothing changed)
       ctx.requestRender();       // dragging=false -> one full-quality render (shadows + supersample)
     }
