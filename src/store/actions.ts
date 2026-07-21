@@ -9,6 +9,7 @@ import { makeAttachedStrand, makeStrand } from '../model/factory';
 import { formatLayerName, maskComponents, nextFreeSet, nextIndexInSet, parseLayerName } from '../model/layerName';
 import { resolveGroupMembers } from '../model/group';
 import { strandsCross, strandBodiesOverlap, maskCentroid } from '../interaction/hitGeometry';
+import { recomputeAutoShadowOverrides } from './autoShadow';
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 
@@ -383,6 +384,9 @@ export function deleteStrand(draft: EditorDocument, name: string): void {
   draft.order = draft.order.filter((n) => !toRemove.has(n));
   draft.locked_layers = draft.locked_layers.filter((n) => !toRemove.has(n));
   if (draft.selected_strand_name && toRemove.has(draft.selected_strand_name)) draft.selected_strand_name = null;
+  // Masks / layers changed: refresh the auto shadow overrides (also prunes
+  // entries referencing the deleted layers) — OSS delete paths do the same.
+  recomputeAutoShadowOverrides(draft);
 }
 
 export function deleteAllStrands(draft: EditorDocument): void {
@@ -390,6 +394,8 @@ export function deleteAllStrands(draft: EditorDocument): void {
   draft.order = [];
   draft.locked_layers = [];
   draft.selected_strand_name = null;
+  // No strands -> every override references a deleted layer; drop them all.
+  draft.shadow_overrides = {};
 }
 
 // Move order[from] to position `to` (both are indices into doc.order = z-order).
@@ -856,7 +862,10 @@ export function getShadowOverride(
 }
 
 // Whole-inner-dict replace (OSS set_shadow_override). Empty dicts are pruned so an
-// all-default override doesn't bloat the doc / undo comparison.
+// all-default override doesn't bloat the doc / undo comparison. An override that
+// still carries auto_shadow bookkeeping (auto/pinned) is NEVER pruned — pinned
+// in particular must survive with all-default rendering keys, or the auto
+// recompute would re-hide a pair the user explicitly re-enabled.
 export function setShadowOverride(
   draft: EditorDocument,
   casting: string,
@@ -866,7 +875,8 @@ export function setShadowOverride(
   const isEmpty =
     (override.visibility === undefined || override.visibility === true) &&
     (override.allow_full_shadow === undefined || override.allow_full_shadow === false) &&
-    (override.subtracted_layers === undefined || override.subtracted_layers.length === 0);
+    (override.subtracted_layers === undefined || override.subtracted_layers.length === 0) &&
+    override.auto !== true && override.pinned !== true;
   if (isEmpty) {
     removeShadowOverride(draft, casting, receiving);
     return;
@@ -895,6 +905,24 @@ export function setShadowVisibility(
   visible: boolean,
 ): void {
   const cur = getShadowOverride(draft, casting, receiving) ?? {};
+  setShadowOverride(draft, casting, receiving, { ...cur, visibility: visible });
+}
+
+// User-driven visibility toggle from the per-strand Shadow Editor (OSS 1.109
+// shadow_editor_dialog._on_visibility_changed): if the pair was auto-hidden by
+// the masked-weave automation, the user is overruling it — drop the `auto` tag
+// so recomputes keep hands off, and PIN a re-enable so the pair is never
+// auto-hidden again.
+export function setShadowVisibilityUser(
+  draft: EditorDocument,
+  casting: string,
+  receiving: string,
+  visible: boolean,
+): void {
+  const cur: ShadowOverride = { ...(getShadowOverride(draft, casting, receiving) ?? {}) };
+  const wasAuto = cur.auto === true;
+  delete cur.auto;
+  if (wasAuto && visible) cur.pinned = true;
   setShadowOverride(draft, casting, receiving, { ...cur, visibility: visible });
 }
 
@@ -1004,8 +1032,8 @@ if (import.meta.env?.DEV) {
     createGroupFromSet, createGroup, renameGroup, duplicateGroup,
     deleteGroup, translateGroup, rotateGroup, setGroupShadowOnly, createMaskGrid,
     getShadowOverride, setShadowOverride, removeShadowOverride,
-    getShadowVisibility, setShadowVisibility, setAllowFullShadow,
-    getSubtractedLayers, setSubtractedLayers,
+    getShadowVisibility, setShadowVisibility, setShadowVisibilityUser, setAllowFullShadow,
+    getSubtractedLayers, setSubtractedLayers, setHideShadow, recomputeAutoShadowOverrides,
   };
 }
 
@@ -1147,5 +1175,9 @@ export function createMask(
   };
   draft.strands[layer_name] = mask;
   draft.order.push(layer_name);
+  // The weave changed: refresh the auto-managed shadow overrides so the
+  // masked-under strand stops casting residue onto the fabric (OSS
+  // create_masked_layer tail -> recompute_auto_shadow_overrides).
+  recomputeAutoShadowOverrides(draft, curve ? { curve_params: curve } : undefined);
   return layer_name;
 }

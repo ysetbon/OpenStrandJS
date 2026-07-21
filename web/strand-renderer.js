@@ -521,6 +521,64 @@ function shadowBlurSteps() {
 //     the computed width/alpha table.
 // Both passes reuse the same `combined`. Drawn BEFORE the caster's own body so
 // the body covers the inner shadow and only the fringe over lower strands shows.
+// Per-pair survivor region for caster `s` (rank i) onto receiver `o` (rank j):
+// receiver rendered geometry, caster∩receiver, then the renderer's subtractions
+// IN ORDER (Qt: subtracted_layers -> mask-blocking -> intermediate). Shared by
+// castStrandShadow and the auto_shadow probe so the two can never diverge.
+// Returns {region, recv, clipBlocker} — any may be null; the CALLER removes all
+// three paths. `rejectBounds` (optional) short-circuits far-away receivers.
+function buildPairShadowRegion(s, i, o, j, strands, byLayer, P, enableThird, S, casterFootprint, ov, allowFull, rejectBounds) {
+  // A mask receiver uses its crossing FILL region (get_proper_masked_strand_path
+  // = get_mask_path); a regular/attached receiver uses its rendered body+circles.
+  const recv = o.type === 'MaskedStrand'
+    ? buildMaskPath(o, byLayer, P, enableThird, S)
+    : buildShadowReceiverGeom(o, strands, P, enableThird, S);
+  if (!recv) return { region: null, recv: null, clipBlocker: null };
+  if (rejectBounds && !rejectBounds.intersects(recv.bounds)) {
+    recv.remove();
+    return { region: null, recv: null, clipBlocker: null };
+  }
+  let region = casterFootprint.intersect(recv);
+  let clipBlocker = null; // this pair's subtracted-layer union (Qt clip_blocker_path)
+  if (region && region.area && Math.abs(region.area) > 0.5) {
+    // (a) subtracted_layers (UNGATED). Default = masked-caster second-component
+    //     branch when no override key is present.
+    const subNames = (ov && ov.subtracted_layers) || defaultSubtracted(s, o, byLayer);
+    const subAcc = { path: null };
+    region = subtractLayers(region, subNames, byLayer, strands, P, enableThird, S, subAcc);
+    clipBlocker = subAcc.path; // fed into the Pass B clip (shader_utils.py:985-987)
+
+    // (b) mask-blocking (gated !allowFull): subtract every VISIBLE mask whose
+    //     layer rank is strictly ABOVE the caster (k > i) and that is not the
+    //     receiver itself. Same blocker geometry covers the visible-component
+    //     mask-coverage case for our corpus (single mask above both indices).
+    if (!allowFull && region && Math.abs(region.area || 0) > 0.5) {
+      for (let k = i + 1; k < strands.length; k++) {
+        const m = strands[k];
+        if (m.type !== 'MaskedStrand' || m.is_hidden === true) continue;
+        if (m.layer_name === o.layer_name) continue; // self-block guard
+        const blk = buildShadowBlockerPath(m, byLayer, P, enableThird, S);
+        if (blk) {
+          const r = region.subtract(blk);
+          blk.remove();
+          region.remove();
+          region = r;
+        }
+        if (!region || Math.abs(region.area || 0) <= 0.5) break;
+      }
+    }
+
+    // (c) intermediate subtraction (gated !allowFull): subtract every layer
+    //     strictly between receiver rank j and caster rank i.
+    if (!allowFull && region && Math.abs(region.area || 0) > 0.5) {
+      const interNames = [];
+      for (let m = j + 1; m < i; m++) interNames.push(strands[m].layer_name);
+      region = subtractLayers(region, interNames, byLayer, strands, P, enableThird, S);
+    }
+  }
+  return { region, recv, clipBlocker };
+}
+
 function castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i) {
   // Caster footprint. A MaskedStrand caster uses its mask-crossing region as the
   // core and casts NO circles (Qt get_proper_masked_strand_path excludes circles);
@@ -579,54 +637,9 @@ function castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i) 
     }
     const allowFull = !!(ov && ov.allow_full_shadow);
 
-    // A mask receiver uses its crossing FILL region (get_proper_masked_strand_path
-    // = get_mask_path); a regular/attached receiver uses its rendered body+circles.
-    const recv = o.type === 'MaskedStrand'
-      ? buildMaskPath(o, byLayer, P, enableThird, S)
-      : buildShadowReceiverGeom(o, strands, P, enableThird, S);
+    const { region, recv, clipBlocker } = buildPairShadowRegion(
+      s, i, o, j, strands, byLayer, P, enableThird, S, casterFootprint, ov, allowFull, rejectBounds);
     if (!recv) continue;
-    if (!rejectBounds.intersects(recv.bounds)) { recv.remove(); continue; }
-    let region = casterFootprint.intersect(recv);
-    let clipBlocker = null; // this pair's subtracted-layer union (Qt clip_blocker_path)
-    if (region && region.area && Math.abs(region.area) > 0.5) {
-      // Subtractions applied to `region` IN ORDER (Qt: subtracted_layers ->
-      // mask-blocking -> intermediate). Each step may empty the region, in which
-      // case the pair becomes a non-survivor.
-      // (a) subtracted_layers (UNGATED). Default = masked-caster second-component
-      //     branch when no override key is present.
-      const subNames = (ov && ov.subtracted_layers) || defaultSubtracted(s, o, byLayer);
-      const subAcc = { path: null };
-      region = subtractLayers(region, subNames, byLayer, strands, P, enableThird, S, subAcc);
-      clipBlocker = subAcc.path; // fed into the Pass B clip below (shader_utils.py:985-987)
-
-      // (b) mask-blocking (gated !allowFull): subtract every VISIBLE mask whose
-      //     layer rank is strictly ABOVE the caster (k > i) and that is not the
-      //     receiver itself. Same blocker geometry covers the visible-component
-      //     mask-coverage case for our corpus (single mask above both indices).
-      if (!allowFull && region && Math.abs(region.area || 0) > 0.5) {
-        for (let k = i + 1; k < strands.length; k++) {
-          const m = strands[k];
-          if (m.type !== 'MaskedStrand' || m.is_hidden === true) continue;
-          if (m.layer_name === o.layer_name) continue; // self-block guard
-          const blk = buildShadowBlockerPath(m, byLayer, P, enableThird, S);
-          if (blk) {
-            const r = region.subtract(blk);
-            blk.remove();
-            region.remove();
-            region = r;
-          }
-          if (!region || Math.abs(region.area || 0) <= 0.5) break;
-        }
-      }
-
-      // (c) intermediate subtraction (gated !allowFull): subtract every layer
-      //     strictly between receiver rank j and caster rank i.
-      if (!allowFull && region && Math.abs(region.area || 0) > 0.5) {
-        const interNames = [];
-        for (let m = j + 1; m < i; m++) interNames.push(strands[m].layer_name);
-        region = subtractLayers(region, interNames, byLayer, strands, P, enableThird, S);
-      }
-    }
 
     if (region && region.area && Math.abs(region.area) > 0.5) {
       // survivor — accumulate into combined (union)
@@ -1535,6 +1548,91 @@ window.renderDragFrame = function (strands, meta) {
 
 // Drop the cached background at the end of a gesture (or before any full render).
 window.endDrag = function () { DRAG_BG = null; };
+
+// ---- auto_shadow geometry probe (OSS auto_shadow.py, 1.109) ---------------
+// For each requested {casting, receiving} pair, compute the RAW caster∩receiver
+// overlap area and the SURVIVAL ratio after the renderer's own per-pair
+// subtractions — via the same buildPairShadowRegion castStrandShadow uses, so
+// the probe can never diverge from what actually renders. Pure computation:
+// paper is set up on a throwaway offscreen canvas and nothing is kept (the next
+// renderFixture call does its own paper.setup). Areas are returned in WORLD
+// units² — call with meta.supersample = 1 and no zoom (S = 1) or they scale.
+// The pair's own `visibility` override is intentionally NOT applied: the caller
+// wipes auto entries first and skips user-authored pairs, matching
+// recompute_auto_shadow_overrides.
+window.computeShadowPairAreas = function (strands, meta, pairs) {
+  if (meta.curve_params) CURVE = meta.curve_params;
+  SAMPLE_STEP = 1;
+  const ss = meta.supersample || 1;
+  const zoom = meta.zoom || 1;
+  const S = ss * zoom;
+  const hi = document.createElement('canvas');
+  hi.setAttribute('hidpi', 'off');
+  hi.width = 8; hi.height = 8;
+  paper.setup(hi);
+
+  const ox = meta.x_offset || 0, oy = meta.y_offset || 0;
+  const P = (pt) => new paper.Point(pt.x * S + ox * ss, pt.y * S + oy * ss);
+  const enableThird = strands.some((s) => s.control_point_center != null);
+
+  const byLayer = {};
+  for (const s of strands) byLayer[s.layer_name] = s;
+  if (Array.isArray(meta.layer_order) && meta.layer_order.length) {
+    const rank = new Map(meta.layer_order.map((name, idx) => [name, idx]));
+    if (strands.every((s) => rank.has(s.layer_name))) {
+      strands = strands.slice().sort((a, b) => rank.get(a.layer_name) - rank.get(b.layer_name));
+    }
+  }
+  for (const s of strands) {
+    if (s.type === 'MaskedStrand') continue;
+    s.has_circles = computeHasCircles(s, strands);
+  }
+  SHADOW_OVERRIDES = meta.shadow_overrides || {};
+
+  const unit = S * S; // px² per world-unit²
+  const idxOf = (name) => strands.findIndex((s) => s.layer_name === name);
+  const out = [];
+  for (const pr of pairs) {
+    const i = idxOf(pr.casting), j = idxOf(pr.receiving);
+    const res = { casting: pr.casting, receiving: pr.receiving, rawArea: 0, ratio: 0 };
+    out.push(res);
+    if (i < 0 || j < 0 || j >= i) continue;
+    const s = strands[i], o = strands[j];
+    if (s.type === 'MaskedStrand') continue; // candidates are body strands
+
+    const core = buildShadowCasterCore(s, P, enableThird, S);
+    if (!core) continue;
+    const circles = buildShadowCasterCircles(s, strands, P, enableThird, S);
+    let footprint = core.clone();
+    if (circles) { const u = footprint.unite(circles); footprint.remove(); footprint = u; }
+
+    // RAW overlap: caster footprint ∩ receiver rendered geometry, before any
+    // gating/subtraction (auto_shadow.py "raw" / shader_utils.py:1950-1969).
+    const recvRaw = o.type === 'MaskedStrand'
+      ? buildMaskPath(o, byLayer, P, enableThird, S)
+      : buildShadowReceiverGeom(o, strands, P, enableThird, S);
+    if (recvRaw) {
+      const raw = footprint.intersect(recvRaw);
+      res.rawArea = Math.abs(raw.area || 0) / unit;
+      raw.remove(); recvRaw.remove();
+    }
+
+    if (res.rawArea > 0) {
+      const ov = (SHADOW_OVERRIDES[s.layer_name] || {})[o.layer_name] || null;
+      const allowFull = !!(ov && ov.allow_full_shadow);
+      const r = buildPairShadowRegion(
+        s, i, o, j, strands, byLayer, P, enableThird, S, footprint, ov, allowFull, null);
+      const survArea = r.region ? Math.abs(r.region.area || 0) / unit : 0;
+      r.region && r.region.remove();
+      r.recv && r.recv.remove();
+      r.clipBlocker && r.clipBlocker.remove();
+      res.ratio = survArea / res.rawArea;
+    }
+
+    footprint.remove(); core.remove(); circles && circles.remove();
+  }
+  return out;
+};
 
 // Extract the flat strands array from a fixture file (handles the
 // OpenStrandStudioHistory wrapper). Mirrors js_render.mjs / reference_render.py.

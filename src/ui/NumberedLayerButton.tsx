@@ -8,6 +8,7 @@ import {
 import { maskComponents } from '../model/layerName';
 import type { RGBA } from '../model/types';
 import { ContextMenu, type MenuItem, type MenuRowButton } from './ContextMenu';
+import { StrandShadowEditorDialog } from './dialogs/StrandShadowEditorDialog';
 import { t } from './i18n';
 import './layerButton.css';
 
@@ -140,6 +141,7 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
   const exitMaskEdit = useEditorStore((s) => s.exitMaskEdit);
 
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [shadowEditor, setShadowEditor] = useState(false);
   const [colorPick, setColorPick] = useState<'fill' | 'stroke' | null>(null);
   const colorInputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -260,8 +262,7 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
       // OSS 1.109 per-layer Hide Shadow (numbered_layer_button.py:776-789):
       // sits between Shadow Only and Edit Shadows, ✓-prefixed when active.
       { label: (hideShadow ? '✓ ' : '') + t('hide_shadow', lang), onClick: doToggleHideShadow },
-      // TODO(oss-fidelity): open_shadow_editor per-strand dialog not ported.
-      { label: t('edit_shadows', lang), disabled: true },
+      { label: t('edit_shadows', lang), onClick: () => setShadowEditor(true) },
       { label: '', separator: true },
     );
 
@@ -473,6 +474,10 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
           y={menu.y}
           onClose={() => setMenu(null)}
         />
+      )}
+
+      {shadowEditor && (
+        <StrandShadowEditorDialog layerName={name} onClose={() => setShadowEditor(false)} />
       )}
     </>
   );

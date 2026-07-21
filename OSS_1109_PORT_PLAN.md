@@ -195,6 +195,15 @@ renderer is inert.
   Verified live: 6 deterministic checks. Residuals: side-line bands are covered
   only by the 0.5px tolerance; mask hover in select mode draws no highlight
   (regular-strand hover band unchanged).
+- **§4 DONE** (this commit): per-strand Edit Shadows dialog (with the 1.109
+  "via mask" proxy rows writing under the mask's key) + the auto_shadow.py port.
+  The geometry probe (`window.computeShadowPairAreas`) runs through the SAME
+  `buildPairShadowRegion` the renderer casts with (extracted, byte-identical on
+  4 fixtures incl. box_stitch_maskblock), thresholds verbatim (0.45 / 150).
+  Recompute triggers: createMask, deleteStrand, deleteAllStrands (undo restores
+  overrides via doc snapshots, so no undo hook needed). setShadowVisibilityUser
+  implements the auto→pinned interplay; the override pruner keeps auto/pinned
+  entries alive. Verified live: 10 deterministic checks.
 - **§5 DONE** (commit 58c7eb0): show_cp_selected_only / move_selected_only are now
   honored with the corrected 1.109 semantics (CP-only vs everything filters, in
   overlay glyphs, move-mode squares, and moveGrab), plus the never-moved cp1
