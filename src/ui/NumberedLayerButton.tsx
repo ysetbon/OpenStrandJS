@@ -9,6 +9,11 @@ import { maskComponents } from '../model/layerName';
 import type { RGBA } from '../model/types';
 import { ContextMenu, type MenuItem, type MenuRowButton } from './ContextMenu';
 import { StrandShadowEditorDialog } from './dialogs/StrandShadowEditorDialog';
+import {
+  COPY_PROPERTIES, clipboardPropertyCount, pasteStrandData, snapshotStrandData,
+  type CopyProperty,
+} from '../store/strandClipboard';
+import { Modal } from './Modal';
 import { t } from './i18n';
 import './layerButton.css';
 
@@ -142,6 +147,10 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
 
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [shadowEditor, setShadowEditor] = useState(false);
+  const [copyPanel, setCopyPanel] = useState(false);
+  const [badgeMenu, setBadgeMenu] = useState<{ x: number; y: number } | null>(null);
+  const strandClipboard = useEditorStore((s) => s.strandClipboard);
+  const setStrandClipboard = useEditorStore((s) => s.setStrandClipboard);
   const [colorPick, setColorPick] = useState<'fill' | 'stroke' | null>(null);
   const colorInputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -211,6 +220,25 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
     });
   };
 
+  // ---- Copy/Paste Strand Data (1.109 strand_data_menu.py) ----
+  // Menu paste targets the ticked layers only; chip paste targets the ticked
+  // set when this layer is ticked, else this layer alone
+  // (paste_strand_data_via_chip). One undo step per paste.
+  const doPaste = (anchor: 'start' | 'end', targetsOverride: string[] | null) => {
+    const snap = useEditorStore.getState().strandClipboard;
+    if (!snap) return;
+    const targets = targetsOverride ?? useEditorStore.getState().multiSelectedLayers;
+    if (!targets.length) return;
+    commitEdit((d) => { pasteStrandData(d, snap, targets, anchor); });
+  };
+  const doChipPaste = (anchor: 'start' | 'end') => {
+    const ticked = useEditorStore.getState().multiSelectedLayers;
+    doPaste(anchor, ticked.includes(name) ? ticked : [name]);
+  };
+  const isCopySource = !!strandClipboard && strandClipboard.source_layer_name === name;
+  const isPasteTarget =
+    !!strandClipboard && !!strand && strand.type !== 'MaskedStrand' && !locked;
+
   // ---- circle / line gating by scanning children attached to this strand ----
   const childSides = (): { start: boolean; end: boolean } => {
     let start = false, end = false;
@@ -226,7 +254,8 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
   const menuItems = (): MenuItem[] => {
     const items: MenuItem[] = [];
 
-    // ---- multi-select menu: exactly two items over the selected set ----
+    // ---- multi-select menu: batch items over the selected set + the 1.109
+    //      Copy/Paste Strand Data entries (strand_data_menu.py) ----
     if (multiSelectMode) {
       const S = multiSelectedLayers.includes(name)
         ? multiSelectedLayers
@@ -249,7 +278,31 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
             for (const n of S) { const sd = d.strands[n]; if (sd) sd.shadow_only = next; }
           }),
         },
+        { label: '', separator: true },
       );
+      // Paste sits above Copy (OSS add_strand_data_menu_actions). Menu paste
+      // targets the ticked layers only (paste_copied_strand_data with no
+      // explicit targets), anchored from the start or the end point.
+      if (strandClipboard) {
+        items.push({
+          label: '',
+          rowLabel: t('paste_copied_data', lang),
+          buttons: [
+            { label: t('angle_from_start_point', lang), onClick: () => doPaste('start', null) },
+            { label: t('angle_from_end_point', lang), onClick: () => doPaste('end', null) },
+          ],
+        });
+      } else {
+        items.push({ label: t('paste_copied_data', lang), disabled: true });
+      }
+      items.push({ label: '', separator: true });
+      // Copy from the right-clicked layer; masked strands cannot be copied.
+      const copyAllowed = !!strand && strand.type !== 'MaskedStrand';
+      items.push({
+        label: t('copy_strand_data', lang),
+        disabled: !copyAllowed,
+        onClick: copyAllowed ? () => setCopyPanel(true) : undefined,
+      });
       return items;
     }
 
@@ -455,6 +508,38 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
             {locked ? '🔒' : '🔓'}
           </button>
         )}
+
+        {/* Copy/Paste Strand Data indicators (1.109, redesigned in 75f8e8e5):
+            copy badge on the source layer (click = hint + Clear popup),
+            hover-only ⇤/⇥ one-click paste chips on eligible targets. */}
+        {isCopySource && (
+          <button
+            type="button"
+            className="nlb-copybadge"
+            aria-label="strand data clipboard"
+            onClick={(e) => { e.stopPropagation(); setBadgeMenu({ x: e.clientX, y: e.clientY }); }}
+          >
+            📋
+          </button>
+        )}
+        {isPasteTarget && (
+          <span className="nlb-chips">
+            <button
+              type="button"
+              title={t('angle_from_start_point', lang)}
+              onClick={(e) => { e.stopPropagation(); doChipPaste('start'); }}
+            >
+              ⇤
+            </button>
+            <button
+              type="button"
+              title={t('angle_from_end_point', lang)}
+              onClick={(e) => { e.stopPropagation(); doChipPaste('end'); }}
+            >
+              ⇥
+            </button>
+          </span>
+        )}
       </div>
 
       {/* Hidden native color input driven by the menu "Change (Stroke) Color" items. */}
@@ -479,6 +564,95 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
       {shadowEditor && (
         <StrandShadowEditorDialog layerName={name} onClose={() => setShadowEditor(false)} />
       )}
+
+      {/* Copy-badge popup: clipboard hint + Clear (show_strand_data_badge_popup). */}
+      {badgeMenu && strandClipboard && (
+        <ContextMenu
+          items={[
+            {
+              label: t('strand_data_clipboard_hint', lang)
+                .replace('{count}', String(clipboardPropertyCount(strandClipboard)))
+                .replace('{source}', strandClipboard.source_layer_name),
+              disabled: true,
+            },
+            { label: '', separator: true },
+            { label: t('clear', lang), onClick: () => setStrandClipboard(null) },
+          ]}
+          x={badgeMenu.x}
+          y={badgeMenu.y}
+          onClose={() => setBadgeMenu(null)}
+        />
+      )}
+
+      {copyPanel && strand && (
+        <CopyStrandDataPanel layerName={name} onClose={() => setCopyPanel(false)} />
+      )}
     </>
+  );
+}
+
+// Copy panel (OSS _build_strand_copy_panel, rendered as a small dialog): one
+// checkbox per copyable property + Select All, and a Copy button that snapshots
+// the ticked properties into the clipboard. Checkbox choices are remembered for
+// the session (OSS strand_data_copy_options, default all ticked).
+function CopyStrandDataPanel(props: { layerName: string; onClose: () => void }): JSX.Element {
+  const { layerName, onClose } = props;
+  const lang = useEditorStore((s) => s.settings.language);
+  const strand = useEditorStore((s) => s.doc.strands[layerName]);
+  const options = useEditorStore((s) => s.strandDataCopyOptions);
+  const setOption = useEditorStore((s) => s.setStrandDataCopyOption);
+  const setStrandClipboard = useEditorStore((s) => s.setStrandClipboard);
+
+  const labelOf: Record<CopyProperty, string> = {
+    start_point: t('strand_data_start_point', lang),
+    end_point: t('strand_data_end_point', lang),
+    control_points: t('strand_data_control_points', lang),
+    width: t('strand_data_width', lang),
+    strand_color: t('strand_data_strand_color', lang),
+    stroke_color: t('strand_data_stroke_color', lang),
+  };
+  const isOn = (k: CopyProperty) => options[k] !== false; // default true
+  const allOn = COPY_PROPERTIES.every(isOn);
+  const selected = COPY_PROPERTIES.filter(isOn);
+
+  const doCopy = () => {
+    if (!strand) return;
+    const snap = snapshotStrandData(strand, selected);
+    if (snap) setStrandClipboard(snap);
+    onClose();
+  };
+
+  return (
+    <Modal
+      title={`${t('copy_strand_data', lang)} - ${layerName}`}
+      onClose={onClose}
+      lang={lang}
+      onEnter={doCopy}
+      footer={
+        <>
+          <button onClick={onClose}>{t('close', lang)}</button>
+          <button autoFocus disabled={selected.length === 0} onClick={doCopy}>
+            {t('copy', lang)}
+          </button>
+        </>
+      }
+    >
+      <div className="nlb-copy-panel">
+        <label className="gd-check">
+          <input
+            type="checkbox"
+            checked={allOn}
+            onChange={(e) => COPY_PROPERTIES.forEach((k) => setOption(k, e.target.checked))}
+          />
+          <span>{t('select_all', lang)}</span>
+        </label>
+        {COPY_PROPERTIES.map((k) => (
+          <label key={k} className="gd-check">
+            <input type="checkbox" checked={isOn(k)} onChange={(e) => setOption(k, e.target.checked)} />
+            <span>{labelOf[k]}</span>
+          </label>
+        ))}
+      </div>
+    </Modal>
   );
 }

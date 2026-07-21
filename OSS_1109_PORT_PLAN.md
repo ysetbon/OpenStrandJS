@@ -195,7 +195,16 @@ renderer is inert.
   Verified live: 6 deterministic checks. Residuals: side-line bands are covered
   only by the 0.5px tolerance; mask hover in select mode draws no highlight
   (regular-strand hover band unchanged).
-- **§4 DONE** (this commit): per-strand Edit Shadows dialog (with the 1.109
+- **§6 DONE** (this commit): Copy/Paste Strand Data — strandClipboard.ts ports
+  snapshot/apply verbatim (translation-only re-anchor from start/end, attached
+  start pinned, children glued recursively, 1/3-2/3 CP rebuild when only
+  endpoints copied); multi-select menu grows Paste (two anchor buttons) + Copy
+  (checkbox panel dialog); copy badge with hint+Clear popup and hover ⇤/⇥ paste
+  chips on eligible targets (locked/masked skipped). Bonus fix: lock-state
+  changes now create undo steps (areVisuallyEqual compares lock_mode +
+  locked_layers, matching OSS's forced saves). Verified live: 17 checks.
+  Deferred: bias_control fields (renderer doesn't draw bias controls).
+- **§4 DONE** (commit 5a861b7): per-strand Edit Shadows dialog (with the 1.109
   "via mask" proxy rows writing under the mask's key) + the auto_shadow.py port.
   The geometry probe (`window.computeShadowPairAreas`) runs through the SAME
   `buildPairShadowRegion` the renderer casts with (extracted, byte-identical on

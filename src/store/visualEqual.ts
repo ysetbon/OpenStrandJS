@@ -61,5 +61,9 @@ export function areVisuallyEqual(a: EditorDocument, b: EditorDocument): boolean 
     if (!sa || !sb || !strandVisualEqual(sa, sb)) return false;
   }
   if (JSON.stringify(a.shadow_overrides ?? {}) !== JSON.stringify(b.shadow_overrides ?? {})) return false;
+  // Lock state IS undoable (OSS 1.109 toggle_layer_lock / toggle_lock_mode
+  // force an undo save), so a lock-only commit must create a history step.
+  if (!!a.lock_mode !== !!b.lock_mode) return false;
+  if ([...(a.locked_layers ?? [])].sort().join('|') !== [...(b.locked_layers ?? [])].sort().join('|')) return false;
   return true; // shadow_enabled / show_control_points intentionally excluded
 }
