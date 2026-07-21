@@ -187,7 +187,15 @@ renderer is inert.
   on the selected button, RTL mirroring for chip + attachable strip. Verified
   live: 14 deterministic Playwright checks (padlock counts, lock/unlock,
   selection, stash/restore on exit/re-enter, delete gating), zero page errors.
-- **§5 DONE** (this commit): show_cp_selected_only / move_selected_only are now
+- **§3 DONE** (this commit): select-mode + mask-mode hit-testing resolve against
+  the exact rendered footprint, topmost first — body at width+2·stroke with
+  end-cap circles, masks selectable via their drawn crossing region minus
+  deletion rects, the invisible 60px endpoint / 25px CP grab circles removed,
+  and mask mode picks the topmost strand instead of canceling on overlap.
+  Verified live: 6 deterministic checks. Residuals: side-line bands are covered
+  only by the 0.5px tolerance; mask hover in select mode draws no highlight
+  (regular-strand hover band unchanged).
+- **§5 DONE** (commit 58c7eb0): show_cp_selected_only / move_selected_only are now
   honored with the corrected 1.109 semantics (CP-only vs everything filters, in
   overlay glyphs, move-mode squares, and moveGrab), plus the never-moved cp1
   triangle is hidden during endpoint drags (ab5f5597). Verified live: 10

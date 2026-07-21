@@ -1,11 +1,11 @@
 // Mask mode is OSS's two-click CREATE flow and nothing else (mask_mode.py):
 //   - move the pointer -> the strand under it gets a yellow HOVER highlight
-//   - click a strand where it is the ONLY strand at that point -> pick it
-//   - click a second (different) strand the same way -> create an over/under
-//     MaskedStrand at their crossing (first = OVER, second = UNDER)
-// Clicking the same strand twice, or empty space, or a spot where two strands
-// overlap, clears the pending pick (OSS only selects when EXACTLY ONE strand is
-// at the point). Masked strands are never pickable/hoverable here.
+//   - click a strand -> pick the TOPMOST strand at that point (1.109 96448f0c;
+//     overlaps no longer cancel)
+//   - click a second (different) strand -> create an over/under MaskedStrand
+//     at their crossing (first = OVER, second = UNDER)
+// Clicking the same strand twice is a no-op; clicking empty space clears the
+// pending pick. Masked strands are never pickable/hoverable here.
 //
 // Erasing parts of a mask (deletion rectangles) is NOT part of mask mode — that
 // is the separate per-mask "Edit Mask" session (store.maskEditTarget), entered
@@ -24,9 +24,10 @@ export const MaskMode: Mode = {
     const st = useEditorStore.getState();
     const at = maskStrandsAtPoint(p.world, st.doc, st.settings);
 
-    // OSS handle_mouse_press: select only when exactly one strand is at the point;
-    // otherwise clear the pending pick (clicking empty space OR an overlap resets).
-    if (at.length !== 1) {
+    // OSS 1.109 (96448f0c): overlapping strands no longer cancel the click —
+    // the TOPMOST strand is picked, same as select mode. Only empty space
+    // clears the pending pick.
+    if (at.length === 0) {
       if (st.maskPending.length) st.setMaskPending([]);
       ctx.requestOverlay();
       return;

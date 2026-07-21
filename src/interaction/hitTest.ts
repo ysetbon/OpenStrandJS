@@ -1,8 +1,11 @@
-// Shared hit-testing in WORLD space. Two passes:
-//   1. handles (control points then endpoints), topmost strand first — so a
-//      handle stays grabbable even when it sits under another strand's body.
-//   2. bodies, topmost first — first centerline within (half-width+stroke) wins.
-// Masked strands and hidden layers are skipped (not body-selectable in Phase 1).
+// Shared hit-testing in WORLD space.
+//
+// Select-mode hits (hitTest) follow OSS 1.109 (96448f0c / selection_utils.py):
+// clicks resolve against the EXACT rendered geometry, topmost strand first —
+// body at full visible thickness (width + 2*stroke, flat caps), end-cap circles
+// as rendered, and MASKS via their drawn crossing region (minus deletion
+// rects). The old invisible 60px-endpoint / 25px-CP grab circles are gone: they
+// stole clicks from strands visually under the cursor.
 // Locked layers ARE selectable (OSS 1.109 lock rework: select_mode has no lock
 // checks — locks only block moving/attaching, enforced elsewhere).
 
@@ -16,8 +19,6 @@ export type HitResult =
   | { kind: 'body'; layerName: string }
   | null;
 
-const ENDPOINT_R = 60;     // world px grab radius for start/end (OSS 120px area, half 60)
-const CP_R = 25;           // world px grab radius for control points (OSS 50px square, half 25)
 const CP_SEP = 6;          // a control point is grabbable once this far from both endpoints
 
 const near = (a: Point, b: Point, r: number) => Math.hypot(a.x - b.x, a.y - b.y) <= r;
@@ -54,26 +55,64 @@ export function strandHandles(s: StrandRecord, enableThird = false): { handle: H
   return out;
 }
 
-export function hitTest(world: Point, doc: EditorDocument, settings: Settings): HitResult {
-  const rev = [...doc.order].reverse();
+// A click is a pixel, not a point (OSS selection_utils._HIT_TOLERANCE).
+const HIT_TOL = 0.5;
 
-  // Pass 1: handles.
-  for (const name of rev) {
-    const s = doc.strands[name];
-    if (!isInteractable(s, doc)) continue;
-    for (const h of strandHandles(s, settings.enable_third_control_point)) {
-      const r = h.handle === 'start' || h.handle === 'end' ? ENDPOINT_R : CP_R;
-      if (near(world, h.pos, r)) return { kind: 'handle', layerName: name, handle: h.handle };
-    }
+function pointInDeletionRect(p: Point, r: import('../model/types').DeletionRect): boolean {
+  if (Array.isArray(r.top_left) && Array.isArray(r.bottom_right)) {
+    const xs = [r.top_left[0], r.bottom_right[0]].sort((a, b) => a - b);
+    const ys = [r.top_left[1], r.bottom_right[1]].sort((a, b) => a - b);
+    return p.x >= xs[0] && p.x <= xs[1] && p.y >= ys[0] && p.y <= ys[1];
   }
+  if (typeof r.x === 'number' && typeof r.y === 'number') {
+    return p.x >= r.x && p.x <= r.x + (r.width ?? 0) && p.y >= r.y && p.y <= r.y + (r.height ?? 0);
+  }
+  return false;
+}
 
-  // Pass 2: bodies.
-  for (const name of rev) {
+// Rendered-footprint hit for a regular/attached strand: the stroked body plus
+// end-cap circles where a cap is actually drawn (junction circles /
+// closed-connection circles / the attached-strand start fill). Side-line bands
+// protrude only ~2px past the flat end and are covered by the tolerance.
+function strandFootprintHit(world: Point, s: StrandRecord, settings: Settings): boolean {
+  const reach = s.width / 2 + s.stroke_width + HIT_TOL;
+  const poly = sampleCenterline(s, settings.curve_params);
+  if (distToPolyline(world, poly) <= reach) return true;
+  const cc = (s.extra?.closed_connections as [boolean, boolean] | undefined) ?? [false, false];
+  for (const side of [0, 1] as const) {
+    if ((s.has_circles[side] || cc[side]) && near(world, side === 0 ? s.start : s.end, reach)) return true;
+  }
+  return false;
+}
+
+// Rendered-footprint hit for a MaskedStrand: the drawn mask (stroke layer ∪
+// fill layer, approximated as first-body ∩ expanded-second-body) minus its
+// deletion rectangles — so the mask's stroke edge is clickable (96448f0c).
+function maskFootprintHit(world: Point, ms: StrandRecord, doc: EditorDocument, settings: Settings): boolean {
+  const comp = maskComponents(ms.layer_name);
+  if (!comp) return false;
+  const a = doc.strands[comp.first], b = doc.strands[comp.second];
+  if (!a || !b) return false;
+  const dA = distToPolyline(world, sampleCenterline(a, settings.curve_params));
+  const dB = distToPolyline(world, sampleCenterline(b, settings.curve_params));
+  const strokeLayer = dA <= a.width / 2 + a.stroke_width + HIT_TOL && dB <= b.width / 2 + b.stroke_width + HIT_TOL;
+  const fillLayer = dA <= a.width / 2 + HIT_TOL && dB <= b.width / 2 + b.stroke_width + 2 + HIT_TOL;
+  if (!strokeLayer && !fillLayer) return false;
+  for (const r of ms.deletion_rectangles ?? []) if (pointInDeletionRect(world, r)) return false;
+  return true;
+}
+
+export function hitTest(world: Point, doc: EditorDocument, settings: Settings): HitResult {
+  // Topmost first over the exact rendered footprints — the topmost strand is
+  // always picked, and what you see is what a click selects.
+  for (const name of [...doc.order].reverse()) {
     const s = doc.strands[name];
-    if (!isInteractable(s, doc)) continue;
-    const poly = sampleCenterline(s, settings.curve_params);
-    const reach = s.width / 2 + s.stroke_width + 2;
-    if (distToPolyline(world, poly) <= reach) return { kind: 'body', layerName: name };
+    if (!s || s.is_hidden) continue;
+    if (s.type === 'MaskedStrand') {
+      if (maskFootprintHit(world, s, doc, settings)) return { kind: 'body', layerName: name };
+      continue;
+    }
+    if (strandFootprintHit(world, s, settings)) return { kind: 'body', layerName: name };
   }
   return null;
 }
@@ -236,22 +275,18 @@ export function maskHitTest(world: Point, doc: EditorDocument, settings: Setting
   return null;
 }
 
-// All non-masked strands whose body OR endpoint-selection circle contains the
-// point, topmost first — the mask-mode picker (OSS mask_mode.find_strands_at_point).
-// OSS endpoint paths are circles of radius max(width/2, 15); the body is the
-// stroked selection path (approximated by distToPolyline <= width/2+stroke+2).
-// Mask mode never selects/hovers MaskedStrands; we also skip hidden (a hidden
-// strand has no visible body to click). Used to enforce OSS's "select only
-// when EXACTLY ONE strand is at the point, else clear" rule and the hover target.
+// All non-masked strands whose RENDERED footprint contains the point, topmost
+// first — the mask-mode picker. OSS 1.109 (96448f0c) unified this with select
+// mode's hit-test (selection_utils): same body + end-cap footprint, hidden
+// strands skipped, and the TOPMOST strand is picked (the old "exactly one
+// strand at the point, else cancel" rule is gone). Hover uses out[0] too, so
+// highlight and clickability agree.
 export function maskStrandsAtPoint(world: Point, doc: EditorDocument, settings: Settings): string[] {
   const out: string[] = [];
   for (const name of [...doc.order].reverse()) {
     const s = doc.strands[name];
     if (!isInteractable(s, doc)) continue;
-    const endR = Math.max(s.width / 2, 15);
-    if (near(world, s.start, endR) || near(world, s.end, endR)) { out.push(name); continue; }
-    const poly = sampleCenterline(s, settings.curve_params);
-    if (distToPolyline(world, poly) <= s.width / 2 + s.stroke_width + 2) out.push(name);
+    if (strandFootprintHit(world, s, settings)) out.push(name);
   }
   return out;
 }
