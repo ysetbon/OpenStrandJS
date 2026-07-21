@@ -110,6 +110,21 @@ function moveGrabbable(s: StrandRecord | undefined): s is StrandRecord {
   return !!s && s.type !== 'MaskedStrand' && !s.is_hidden;
 }
 
+// "Selected only" gating for move-mode grabs (OSS 1.109
+// _is_strand_allowed_by_selection, move_mode.py:1800): move_selected_only
+// restricts ALL move interaction to the selected strand; show_cp_selected_only
+// restricts only control points — endpoints stay grabbable (a1ccbf0e). With a
+// filter active and nothing selected, everything is blocked.
+function allowedByMoveSelection(
+  doc: EditorDocument, settings: Settings, name: string, forCp: boolean,
+): boolean {
+  const checkMove = settings.move_selected_only;
+  const checkCp = forCp && settings.show_cp_selected_only;
+  if (!checkMove && !checkCp) return true;
+  const sel = doc.selected_strand_name;
+  return sel != null && name === sel;
+}
+
 // OSS can_move_side: only active when lock mode is on. A locked strand is frozen;
 // an endpoint that coincides with a LOCKED neighbour's start/end is also frozen
 // (a shared joint with a locked layer can't be dragged). Control points pass
@@ -150,6 +165,7 @@ export function moveGrab(world: Point, doc: EditorDocument, settings: Settings):
     const s = doc.strands[name];
     if (!moveGrabbable(s)) continue;
     if (doc.lock_mode && doc.locked_layers.includes(name)) continue;  // locked: no CP grab
+    if (!allowedByMoveSelection(doc, settings, name, true)) continue;
     for (const h of moveCpHandles(s, enableThird)) {
       if (inSquare(world, h.pos, CP_HALF)) return { layerName: name, handle: h.handle };
     }
@@ -163,6 +179,7 @@ export function moveGrab(world: Point, doc: EditorDocument, settings: Settings):
   for (const name of doc.order) {
     const s = doc.strands[name];
     if (!moveGrabbable(s)) continue;
+    if (!allowedByMoveSelection(doc, settings, name, false)) continue;
     for (const side of [0, 1] as const) {
       const pt = side === 0 ? s.start : s.end;
       if (inSquare(world, pt, ENDPOINT_HALF) && canMoveSide(doc, s, side)) direct.push({ name, side });
@@ -191,6 +208,7 @@ export function moveGrab(world: Point, doc: EditorDocument, settings: Settings):
   for (const name of [...doc.order].reverse()) {
     const s = doc.strands[name];
     if (!moveGrabbable(s)) continue;
+    if (!allowedByMoveSelection(doc, settings, name, false)) continue;
     if (inSquare(world, s.start, ENDPOINT_HALF) && canMoveSide(doc, s, 0)) return { layerName: name, handle: 'start' };
     if (inSquare(world, s.end, ENDPOINT_HALF) && canMoveSide(doc, s, 1)) return { layerName: name, handle: 'end' };
   }
@@ -240,5 +258,5 @@ export function maskStrandsAtPoint(world: Point, doc: EditorDocument, settings: 
 
 // Dev-only debug handle for hit-testing.
 if (import.meta.env?.DEV) {
-  (globalThis as Record<string, unknown>).__hit = { hitTest, maskHitTest, maskStrandsAtPoint };
+  (globalThis as Record<string, unknown>).__hit = { hitTest, moveGrab, maskHitTest, maskStrandsAtPoint };
 }

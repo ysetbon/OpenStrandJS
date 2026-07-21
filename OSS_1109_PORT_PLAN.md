@@ -187,6 +187,11 @@ renderer is inert.
   on the selected button, RTL mirroring for chip + attachable strip. Verified
   live: 14 deterministic Playwright checks (padlock counts, lock/unlock,
   selection, stash/restore on exit/re-enter, delete gating), zero page errors.
+- **§5 DONE** (this commit): show_cp_selected_only / move_selected_only are now
+  honored with the corrected 1.109 semantics (CP-only vs everything filters, in
+  overlay glyphs, move-mode squares, and moveGrab), plus the never-moved cp1
+  triangle is hidden during endpoint drags (ab5f5597). Verified live: 10
+  deterministic checks incl. overlay pixel sampling of the triangle gating.
 
 ## Suggested order & verification
 

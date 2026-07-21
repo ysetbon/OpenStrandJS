@@ -73,6 +73,21 @@ function interactable(s: StrandRecord | undefined, doc: EditorDocument): s is St
     !(doc.lock_mode && doc.locked_layers.includes(s.layer_name));
 }
 
+// Family filter for the "selected only" settings (OSS 1.109
+// is_strand_in_selected_family, strict single-strand form — canvas.py:5951).
+// move_selected_only hides EVERYTHING for non-selected strands (move mode);
+// show_cp_selected_only hides ONLY control points (glyphs + CP squares) —
+// endpoints stay visible and movable (a1ccbf0e). With a filter active and no
+// selection, everything is hidden. During a drag the selection stays set in
+// this store, so no affected-strand fallback is needed.
+function allowedBySelection(st: OverlayState, name: string, forCp: boolean): boolean {
+  const checkMove = st.settings.move_selected_only && st.mode === 'move';
+  const checkCp = forCp && st.settings.show_cp_selected_only;
+  if (!checkMove && !checkCp) return true;
+  const selected = st.selection.layerName ?? st.doc.selected_strand_name;
+  return selected != null && name === selected;
+}
+
 // cp2 (the circle glyph + connector lines) appears once the curve has been
 // shaped — i.e. cp1/cp2 have moved off the start, mirroring OSS's
 // `triangle_has_moved && show_small_cps` gate.
@@ -151,8 +166,14 @@ function drawGlyphs(ctx: CanvasRenderingContext2D, st: OverlayState, s: StrandRe
   const z = st.view.zoom;
   const coreCss = css(s.color);
   const [cp1, cp2] = s.control_points;
-  // Triangle (cp1) is always shown when control points are enabled.
-  drawTriangleGlyph(ctx, worldToScreen(cp1, st.view), z, coreCss);
+  // Triangle (cp1) is always shown when control points are enabled — EXCEPT
+  // while an endpoint is being dragged and the triangle has never moved: it
+  // would only appear because the drag selected the strand (OSS ab5f5597).
+  const movingEndpoint = st.dragging && st.mode === 'move' &&
+    (st.selection.handle === 'start' || st.selection.handle === 'end');
+  if (!(movingEndpoint && !s.triangle_has_moved)) {
+    drawTriangleGlyph(ctx, worldToScreen(cp1, st.view), z, coreCss);
+  }
   if (curveShaped(s)) drawCircleGlyph(ctx, worldToScreen(cp2, st.view), z, coreCss);
   if (s.control_point_center && st.settings.enable_third_control_point && s.triangle_has_moved) {
     drawSquareGlyph(ctx, worldToScreen(s.control_point_center, st.view), z, coreCss);
@@ -188,16 +209,20 @@ function drawMoveOverlays(ctx: CanvasRenderingContext2D, st: OverlayState): void
   const affected = dragging ? selection.layerName : null;
   // Endpoint (120px) squares first, then control-point (50px) squares on top, so
   // a cp1 square sitting on a fresh strand's start isn't hidden by the big square.
+  // "Selected only" gating (1.109 a1ccbf0e): endpoint squares are hidden only by
+  // move_selected_only; CP squares also by show_cp_selected_only.
   for (const name of doc.order) {
     const s = doc.strands[name];
     if (!interactable(s, doc)) continue;
     if (affected && name !== affected) continue;
+    if (!allowedBySelection(st, name, false)) continue;
     for (const h of strandHandles(s, st.settings.enable_third_control_point)) if (isEndpoint(h.handle)) draw(name, h);
   }
   for (const name of doc.order) {
     const s = doc.strands[name];
     if (!interactable(s, doc)) continue;
     if (affected && name !== affected) continue;
+    if (!allowedBySelection(st, name, true)) continue;
     for (const h of strandHandles(s, st.settings.enable_third_control_point)) if (!isEndpoint(h.handle)) draw(name, h);
   }
 }
@@ -413,6 +438,10 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, st: OverlayState): vo
       const s = doc.strands[name];
       if (!interactable(s, doc)) continue;
       if (affected && name !== affected) continue;
+      // "Selected only" family filter for the glyph layer (canvas.py:6064):
+      // show_cp_selected_only applies in every mode; move_selected_only only in
+      // move mode (both routed through allowedBySelection).
+      if (!allowedBySelection(st, name, true)) continue;
       drawConnectors(ctx, st, s);
       drawGlyphs(ctx, st, s);
     }
