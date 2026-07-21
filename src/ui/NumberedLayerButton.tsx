@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import {
-  toggleHidden, setShadowOnly, setColor, setWidth, setWidthGridUnits, resetMask,
-  setCircleStrokeColor, toggleCircleVisible, toggleLineVisible, closeKnot,
+  toggleHidden, setShadowOnly, setHideShadow, setColor, setWidth, setWidthGridUnits,
+  resetMask, setCircleStrokeColor, toggleCircleVisible, toggleLineVisible, closeKnot,
 } from '../store/actions';
 import { maskComponents } from '../model/layerName';
 import type { RGBA } from '../model/types';
@@ -154,6 +154,7 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
   const isMasked = maskComponents(name) != null;
   const hidden = !!strand?.is_hidden;
   const shadowOnly = !!strand?.shadow_only;
+  const hideShadow = !!strand?.hide_shadow;
 
   // When the user picks fill/stroke via the menu, open the native color input.
   useEffect(() => {
@@ -163,6 +164,7 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
   // ---- store-wired menu actions ----
   const doToggleHidden = () => commitEdit((d) => toggleHidden(d, name));
   const doToggleShadowOnly = () => commitEdit((d) => setShadowOnly(d, name, !shadowOnly));
+  const doToggleHideShadow = () => commitEdit((d) => setHideShadow(d, name, !hideShadow));
   // Reset Mask drops all deletion rectangles. OSS canvas.reset_mask first exits an
   // active edit session targeting this same mask (strand_drawing_canvas.py:7253-7255).
   const doResetMask = () => {
@@ -254,6 +256,9 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
       // Shadow Only: inline ✓ prefix when active (OSS prepends "✓ "). No checked
       // gutter — the ctx-check gutter is not used here.
       { label: (shadowOnly ? '✓ ' : '') + t('shadow_only', lang), onClick: doToggleShadowOnly },
+      // OSS 1.109 per-layer Hide Shadow (numbered_layer_button.py:776-789):
+      // sits between Shadow Only and Edit Shadows, ✓-prefixed when active.
+      { label: (hideShadow ? '✓ ' : '') + t('hide_shadow', lang), onClick: doToggleHideShadow },
       // TODO(oss-fidelity): open_shadow_editor per-strand dialog not ported.
       { label: t('edit_shadows', lang), disabled: true },
       { label: '', separator: true },

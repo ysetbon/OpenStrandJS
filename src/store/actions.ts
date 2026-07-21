@@ -478,6 +478,13 @@ export function setShadowOnly(draft: EditorDocument, name: string, value: boolea
   if (s) s.shadow_only = value;
 }
 
+// OSS 1.109 per-layer "Hide Shadow" (layer_panel.py toggle_layer_hide_shadow):
+// the strand casts no shadow onto other strands; it still receives.
+export function setHideShadow(draft: EditorDocument, name: string, value: boolean): void {
+  const s = draft.strands[name];
+  if (s) s.hide_shadow = value;
+}
+
 // OSS is_strand_deletable: deletable iff it has knot connections OR not all of
 // its endpoint circles are present. A strand with both circles and no knot
 // connections is a closed-on-both-ends interior strand and may not be deleted.
@@ -1120,6 +1127,7 @@ export function createMask(
     has_circles: [false, false],
     is_hidden: false,
     shadow_only: false,
+    hide_shadow: false,
     circle_stroke_color: null,
     knot_connections: {},
     deletion_rectangles: [],

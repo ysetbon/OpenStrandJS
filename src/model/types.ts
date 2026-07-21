@@ -53,6 +53,9 @@ export interface StrandRecord {
   has_circles: [boolean, boolean];
   is_hidden: boolean;
   shadow_only: boolean;
+  // OSS 1.109 per-layer "Hide Shadow": the strand casts no shadow at all (it
+  // still receives). Gates regular casting AND a mask's own crossing shadow.
+  hide_shadow: boolean;
 
   circle_stroke_color: RGBA | null;
   knot_connections: Record<string, KnotConnection>;
@@ -108,6 +111,12 @@ export interface ShadowOverride {
   visibility?: boolean;            // false => skip this (casting->receiving) shadow pair
   allow_full_shadow?: boolean;     // true => shadow ignores mask/intermediate subtraction
   subtracted_layers?: string[];    // layer names whose body is cut out of this shadow
+  // OSS 1.109 auto_shadow.py bookkeeping (masked-weave automation). `auto` marks
+  // entries written by the recompute (wiped + rewritten each run); `pinned` marks
+  // a pair the user re-enabled in the Shadow Editor (recompute never touches it).
+  // Rendering ignores both; they must survive edits and save/load verbatim.
+  auto?: boolean;
+  pinned?: boolean;
 }
 export type ShadowOverrides = Record<string, Record<string, ShadowOverride>>;
 
@@ -226,6 +235,9 @@ export interface RenderStrand {
   // its shadow contribution (it still casts onto lower strands). Absent/false ==
   // normal full body. Opt-in / absent-safe so the fidelity oracle is unchanged.
   shadow_only?: boolean;
+  // OSS 1.109 hide_shadow: the strand casts no shadow at all (regular cast AND a
+  // mask's own crossing shadow) but still receives. Absent/false == casts normally.
+  hide_shadow?: boolean;
 }
 
 export interface RenderMeta {
@@ -236,12 +248,12 @@ export interface RenderMeta {
   supersample: number;
   zoom?: number;            // content scale; absent/1 == pre-zoom behavior
   shadow_enabled: boolean;
-  // OSS per-pair shadow visibility (casting -> receiving -> {visibility}). The
+  // OSS per-pair shadow visibility (casting -> receiving -> override). The
   // renderer reads ONLY the `visibility` sub-key today (false => skip that pair);
-  // allow_full_shadow/subtracted_layers are carried for forward-compat but not yet
-  // consumed by the geometry. Absent == every pair visible (current behavior), so
-  // the fidelity oracle (which never sets it) is byte-identical.
-  shadow_overrides?: Record<string, Record<string, { visibility?: boolean }>>;
+  // allow_full_shadow/subtracted_layers/auto/pinned are carried for forward-compat
+  // but not yet consumed by the geometry. Absent == every pair visible (current
+  // behavior), so the fidelity oracle (which never sets it) is byte-identical.
+  shadow_overrides?: ShadowOverrides;
   curve_params: { base_fraction: number; dist_multiplier: number; exponent: number };
   // Interactive drag fast-path ONLY (the fidelity harness never sets this). The
   // layer_names whose geometry moves with the dragged endpoint: renderDragBackground

@@ -45,6 +45,7 @@ export function strandVisualEqual(a: StrandRecord, b: StrandRecord): boolean {
   if (!rgbaNullEq(a.circle_stroke_color, b.circle_stroke_color)) return false;
   if (a.has_circles[0] !== b.has_circles[0] || a.has_circles[1] !== b.has_circles[1]) return false;
   if (!!a.is_hidden !== !!b.is_hidden || !!a.shadow_only !== !!b.shadow_only) return false;
+  if (!!a.hide_shadow !== !!b.hide_shadow) return false;
   if ((a.attached_to ?? null) !== (b.attached_to ?? null)) return false;
   if ((a.attachment_side ?? null) !== (b.attachment_side ?? null)) return false;
   if (rectSig(a.deletion_rectangles) !== rectSig(b.deletion_rectangles)) return false;

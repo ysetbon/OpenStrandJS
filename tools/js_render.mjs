@@ -36,7 +36,11 @@ if (data && data.type === 'OpenStrandStudioHistory') {
   strands = data.strands;
 }
 
-const browser = await chromium.launch();
+// OSS_CHROMIUM: absolute path to a Chromium binary, for environments whose
+// pre-installed browser revision doesn't match this Playwright version.
+const browser = await chromium.launch(
+  process.env.OSS_CHROMIUM ? { executablePath: process.env.OSS_CHROMIUM } : {},
+);
 try {
   const page = await browser.newPage({ deviceScaleFactor: 1 });
   page.on('console', (msg) => console.log('[page]', msg.text()));

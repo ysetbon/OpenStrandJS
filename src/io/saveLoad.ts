@@ -18,7 +18,7 @@ const MODELED_KEYS = new Set([
   'type', 'index', 'layer_name', 'set_number', 'start', 'end',
   'control_points', 'control_point_center', 'control_point_center_locked',
   'width', 'stroke_width', 'color', 'stroke_color', 'has_circles',
-  'is_hidden', 'shadow_only', 'circle_stroke_color',
+  'is_hidden', 'shadow_only', 'hide_shadow', 'circle_stroke_color',
   'knot_connections', 'attached_to', 'attachment_side',
   'deletion_rectangles', 'using_absolute_coords',
   'triangle_has_moved', 'control_point2_shown', 'control_point2_activated',
@@ -97,6 +97,7 @@ function loadStrand(raw: any): StrandRecord {
     has_circles: Array.isArray(raw.has_circles) ? [!!raw.has_circles[0], !!raw.has_circles[1]] : [false, false],
     is_hidden: !!raw.is_hidden,
     shadow_only: !!raw.shadow_only,
+    hide_shadow: !!raw.hide_shadow,
     circle_stroke_color: raw.circle_stroke_color != null ? asColor(raw.circle_stroke_color, BLACK) : null,
     knot_connections: knot,
     triangle_has_moved: raw.triangle_has_moved ?? undefined,
@@ -167,6 +168,7 @@ function serializeStrand(s: StrandRecord, index: number): Record<string, unknown
   out.set_number = s.set_number;
   out.is_hidden = s.is_hidden;
   out.shadow_only = s.shadow_only;
+  out.hide_shadow = s.hide_shadow;
   out.knot_connections = s.knot_connections;
   out.circle_stroke_color = s.circle_stroke_color;
   out.control_points = [

@@ -215,8 +215,11 @@ function hasAttachedChildAt(pt, strands, self) {
 function computeHasCircles(s, strands) {
   const mcv = Array.isArray(s.manual_circle_visibility) ? s.manual_circle_visibility : [null, null];
   if (s.type === 'AttachedStrand') {
+    // 1.109 (save_load_manager.py "Fourth pass" fix): an explicit layer-menu
+    // choice for the START circle survives reload too — only default to true
+    // (the attachment point) when there is no manual override.
     const endAtt = hasAttachedChildAt(s.end, strands, s);
-    return [true, mcv[1] != null ? mcv[1] : endAtt];
+    return [mcv[0] != null ? mcv[0] : true, mcv[1] != null ? mcv[1] : endAtt];
   }
   const startAtt = hasAttachedChildAt(s.start, strands, s);
   const endAtt = hasAttachedChildAt(s.end, strands, s);
@@ -1086,7 +1089,9 @@ function drawMasked(ms, byLayer, P, enableThird, S, shadowOnly) {
   //     shading_path (15/30 widths, 150/75 alphas, FlatCap/RoundJoin); then
   //   inner-core = stroke(first center, fw+2fsw) ∩ second_path filled SOLID at
   //     alpha 150 (no separate unclipped solid-core pass for masks).
-  if (SHADOW_ENABLED) {
+  // hide_shadow also suppresses the mask's own crossing shadow (OSS
+  // masked_strand.py:516,665 gate draw_mask_strand_shadow on it).
+  if (SHADOW_ENABLED && ms.hide_shadow !== true) {
     drawMaskShadow(ms, first, second, fw, fsw, sw, ssw, P, enableThird, S);
   }
 
@@ -1254,7 +1259,9 @@ window.renderFixture = function (strands, meta) {
     // Hidden strands do not cast a shadow (Qt draw_strand_shadow early-returns on
     // is_hidden, shader_utils.py:457). Their body still routes to drawMasked/
     // drawStrand below, matching the pre-existing (unmeasured) body behavior.
-    const casts = shadowEnabled && s.is_hidden !== true;
+    // hide_shadow (OSS 1.109 per-layer "Hide Shadow", shader_utils.py:466): the
+    // strand casts nothing but still receives and paints its body normally.
+    const casts = shadowEnabled && s.is_hidden !== true && s.hide_shadow !== true;
     if (s.type === 'MaskedStrand') {
       // A mask FIRST casts its crossing shadow onto lower NON-mask strands (the
       // receiver loop skips MaskedStrand receivers and the mask's own components),

@@ -44,6 +44,7 @@ export const STRINGS: Record<string, Entry> = {
   hide_layer: { en: 'Hide Layer', fr: 'Masquer Couche', de: 'Ebene ausblenden', it: 'Nascondi Livello', es: 'Ocultar Capa', pt: 'Ocultar Camada', he: 'הסתר שכבה' },
   show_layer: { en: 'Show Layer', fr: 'Afficher Couche', de: 'Ebene einblenden', it: 'Mostra Livello', es: 'Mostrar Capa', pt: 'Mostrar Camada', he: 'הצג שכבה' },
   shadow_only: { en: 'Shadow Only', fr: 'Ombre Seulement', de: 'Nur Schatten', it: 'Solo Ombra', es: 'Solo Sombra', pt: 'Apenas Sombra', he: 'צל בלבד' },
+  hide_shadow: { en: 'Hide Shadow', fr: `Masquer l'Ombre`, de: 'Schatten ausblenden', it: 'Nascondi Ombra', es: 'Ocultar Sombra', pt: 'Ocultar Sombra', he: 'הסתר צל' },
   edit_mask: { en: 'Edit Mask', fr: 'Éditer Masque', de: 'Maske bearbeiten', it: 'Modifica Maschera', es: 'Editar Máscara', pt: 'Editar Máscara', he: 'ערוך מסכה' },
   reset_mask: { en: 'Reset Mask', fr: 'Réinit Masque', de: 'Maske zurücksetzen', it: 'Reimposta Maschera', es: 'Restablecer Máscara', pt: 'Redefinir Máscara', he: 'אפס מסכה' },
   // Per-mask "Edit Mask" interaction banner (strand_drawing_canvas mask_edit_mode).
