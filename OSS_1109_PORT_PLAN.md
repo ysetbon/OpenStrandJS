@@ -174,6 +174,20 @@ renderer is inert.
 - `100e347b`: OSS removed the deletability hover tooltip from layer buttons —
   remove the JS one if present.
 
+## Progress
+
+- **§1 DONE** (commit `e6839e0`): hide_shadow modeled + rendered + menu toggle;
+  computeHasCircles honors `manual_circle_visibility[0]` for AttachedStrand;
+  ShadowOverride carries auto/pinned. Fixtures verified byte-identical;
+  hide_shadow removes exactly the cast shadow.
+- **§2 DONE** (this commit): lock-mode padlock redesign — padlock chip toggles
+  the lock, layer click selects normally (no attach switch in lock mode), locked
+  strands selectable but frozen (move/attach gating on lock_mode), New Strand
+  enabled in lock mode, delete blocked only for locked layers, blue border only
+  on the selected button, RTL mirroring for chip + attachable strip. Verified
+  live: 14 deterministic Playwright checks (padlock counts, lock/unlock,
+  selection, stash/restore on exit/re-enter, delete gating), zero page errors.
+
 ## Suggested order & verification
 
 1. §1 quick wins (hide_shadow render+menu, circle-load fix, type widening)

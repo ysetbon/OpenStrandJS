@@ -66,7 +66,11 @@ const sepFromEnds = (cp: Point, a: Point, b: Point): boolean =>
   Math.hypot(cp.x - a.x, cp.y - a.y) > CP_SEP && Math.hypot(cp.x - b.x, cp.y - b.y) > CP_SEP;
 
 function interactable(s: StrandRecord | undefined, doc: EditorDocument): s is StrandRecord {
-  return !!s && s.type !== 'MaskedStrand' && !s.is_hidden && !doc.locked_layers.includes(s.layer_name);
+  // Locked strands hide their handles only while lock mode is ON (OSS 1.109
+  // move_mode gates every locked check on lock_mode_active; exiting lock mode
+  // stashes + clears locked_layers, so the set is normally empty then anyway).
+  return !!s && s.type !== 'MaskedStrand' && !s.is_hidden &&
+    !(doc.lock_mode && doc.locked_layers.includes(s.layer_name));
 }
 
 // cp2 (the circle glyph + connector lines) appears once the curve has been

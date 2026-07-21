@@ -61,7 +61,10 @@ function nearestFreeEndpoint(doc: EditorDocument, world: Point): FreeEnd | null 
   let bestD = ATTACH_R;
   for (const name of doc.order) {
     const s = doc.strands[name];
-    if (!s || s.type === 'MaskedStrand' || s.is_hidden || doc.locked_layers.includes(name)) continue;
+    // Locked strands are excluded from attachment only while lock mode is on
+    // (OSS attach_mode._is_strand_locked gates on layer_panel.lock_mode).
+    if (!s || s.type === 'MaskedStrand' || s.is_hidden ||
+        (doc.lock_mode && doc.locked_layers.includes(name))) continue;
     const ends: [Point, 0 | 1][] = [[s.start, 0], [s.end, 1]];
     for (const [pt, side] of ends) {
       if (s.has_circles[side]) continue; // occupied

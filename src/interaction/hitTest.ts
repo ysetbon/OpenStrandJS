@@ -2,8 +2,9 @@
 //   1. handles (control points then endpoints), topmost strand first — so a
 //      handle stays grabbable even when it sits under another strand's body.
 //   2. bodies, topmost first — first centerline within (half-width+stroke) wins.
-// Masked strands and hidden/locked layers are skipped (not body-selectable in
-// Phase 1).
+// Masked strands and hidden layers are skipped (not body-selectable in Phase 1).
+// Locked layers ARE selectable (OSS 1.109 lock rework: select_mode has no lock
+// checks — locks only block moving/attaching, enforced elsewhere).
 
 import type { EditorDocument, HandleKind, Point, Settings, StrandRecord } from '../model/types';
 import { distToPolyline, sampleCenterline } from './hitGeometry';
@@ -24,7 +25,8 @@ const sep = (cp: Point, a: Point, b: Point) =>
   Math.hypot(cp.x - a.x, cp.y - a.y) > CP_SEP && Math.hypot(cp.x - b.x, cp.y - b.y) > CP_SEP;
 
 function isInteractable(s: StrandRecord | undefined, doc: EditorDocument): s is StrandRecord {
-  return !!s && s.type !== 'MaskedStrand' && !s.is_hidden && !doc.locked_layers.includes(s.layer_name);
+  void doc;
+  return !!s && s.type !== 'MaskedStrand' && !s.is_hidden;
 }
 
 // Visible, grabbable handles of a strand in priority order. The center (third CP) is
@@ -220,8 +222,8 @@ export function maskHitTest(world: Point, doc: EditorDocument, settings: Setting
 // point, topmost first — the mask-mode picker (OSS mask_mode.find_strands_at_point).
 // OSS endpoint paths are circles of radius max(width/2, 15); the body is the
 // stroked selection path (approximated by distToPolyline <= width/2+stroke+2).
-// Mask mode never selects/hovers MaskedStrands; we also skip hidden/locked (a
-// hidden strand has no visible body to click). Used to enforce OSS's "select only
+// Mask mode never selects/hovers MaskedStrands; we also skip hidden (a hidden
+// strand has no visible body to click). Used to enforce OSS's "select only
 // when EXACTLY ONE strand is at the point, else clear" rule and the hover target.
 export function maskStrandsAtPoint(world: Point, doc: EditorDocument, settings: Settings): string[] {
   const out: string[] = [];

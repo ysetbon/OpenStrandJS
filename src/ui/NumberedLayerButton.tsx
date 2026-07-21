@@ -3,6 +3,7 @@ import { useEditorStore } from '../store/editorStore';
 import {
   toggleHidden, setShadowOnly, setHideShadow, setColor, setWidth, setWidthGridUnits,
   resetMask, setCircleStrokeColor, toggleCircleVisible, toggleLineVisible, closeKnot,
+  toggleLock,
 } from '../store/actions';
 import { maskComponents } from '../model/layerName';
 import type { RGBA } from '../model/types';
@@ -372,13 +373,14 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
   };
 
   // ---- visual state -> class + inline style ----
+  const isRtl = lang === 'he';
   const classes = ['nlb'];
   if (selected && !maskedMode) classes.push('nlb-checked');
   if (hidden) classes.push('nlb-hidden');
   if (shadowOnly) classes.push('nlb-shadow-only');
-  if (locked) classes.push('nlb-locked');
   if (attachable) classes.push('nlb-attachable');
   if (selectable) classes.push('nlb-selectable');
+  if (isRtl) classes.push('nlb-rtl');
   if (multiSelected) classes.push('nlb-multi');
   if (isMasked) classes.push('nlb-masked');
   if (maskedMode) classes.push('nlb-mask-mode');
@@ -431,7 +433,27 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
         {/* attachable green inner box (9px black outline is .nlb-attachable::before) */}
         {attachable && <span className="nlb-attach" aria-hidden />}
 
-        {locked && <span className="nlb-lock" aria-hidden>🔒</span>}
+        {/* OSS 1.109 lock rework: a small padlock toggle, vertically centered on
+            the side opposite the green attachable strip (mirrored for RTL).
+            Shown in lock mode (selectable) — and kept visible on a still-locked
+            button outside it. Clicking it locks/unlocks WITHOUT selecting the
+            layer; it only reacts in lock mode (OSS mousePress gates on
+            selectable). Open = unlocked, closed = locked (amber fill). */}
+        {(selectable || locked) && (
+          <button
+            type="button"
+            className={`nlb-padlock${locked ? ' is-locked' : ''}`}
+            aria-label={locked ? 'unlock layer' : 'lock layer'}
+            aria-pressed={locked}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!selectable || editActive) return;
+              commitEdit((d) => toggleLock(d, name));
+            }}
+          >
+            {locked ? '🔒' : '🔓'}
+          </button>
+        )}
       </div>
 
       {/* Hidden native color input driven by the menu "Change (Stroke) Color" items. */}

@@ -531,9 +531,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   drawNames: false,
   setPanMode: (panMode) => set({ panMode }),
   togglePanMode: () => set((s) => ({ panMode: !s.panMode })),
-  // Switch to attach mode and arm the next draw as a new main strand. Bypassed
-  // during lock mode (the "New Strand" button is disabled there in OSS).
-  armNewStrand: () => set((s) => (s.doc.lock_mode ? {} : { mode: 'attach', newStrandArmed: true })),
+  // Switch to attach mode and arm the next draw as a new main strand. Allowed
+  // in lock mode too (OSS 1.109: New Strand stays available; only locked layers
+  // are frozen).
+  armNewStrand: () => set({ mode: 'attach', newStrandArmed: true }),
   setNewStrandArmed: (newStrandArmed) => set({ newStrandArmed }),
   // Toggling multi-select mode (on or off) always clears the multi-selection set,
   // matching OSS which resets multi_selected_layers on both enter and exit.
