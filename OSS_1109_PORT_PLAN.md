@@ -176,6 +176,14 @@ renderer is inert.
 
 ## Progress
 
+**Status: §1–§6 are all DONE and verified — every behavioral/data feature of
+v1.109 is ported. Remaining: §7 (arrows — blocked on the renderer drawing
+arrows at all; a full renderer sub-project, do it fixture-first) and §8
+(settings-dialog cosmetics: segmented +/− spin boxes, auto-sized category
+panel; button-guide sections for arrows/multi-select/lock icons; the remaining
+guide-text i18n strings). Both are chrome/documentation — no data-model or
+rendering-correctness gaps remain vs OSS 1.109.**
+
 - **§1 DONE** (commit `e6839e0`): hide_shadow modeled + rendered + menu toggle;
   computeHasCircles honors `manual_circle_visibility[0]` for AttachedStrand;
   ShadowOverride carries auto/pinned. Fixtures verified byte-identical;
