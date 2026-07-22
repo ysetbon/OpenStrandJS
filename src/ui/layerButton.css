@@ -155,9 +155,9 @@
   border: none;
   background: rgba(255, 255, 255, 0.9);
   cursor: pointer;
-  /* Above the hover chip stack: OSS routes clicks in the badge rect to the
-   * badge popup even when the paste stack is drawn (mousePressEvent checks
-   * the badge first) — on the web the badge must therefore sit on top. */
+  /* Badge and chips never coexist on one button (the source never shows
+   * chips, per OSS), but keep the badge above the stack as a belt-and-braces
+   * click guarantee mirroring OSS's badge-first mousePressEvent routing. */
   z-index: 6;
   display: flex;
   align-items: center;
