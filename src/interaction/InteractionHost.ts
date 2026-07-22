@@ -8,7 +8,7 @@ import { screenToWorld, worldToScreen } from './viewTransform';
 import { requestOverlay, requestRender } from '../renderer/renderScheduler';
 import { modes } from '../modes';
 import { SelectMode } from '../modes/SelectMode';
-import { addDeletionRect } from '../store/actions';
+import { addDeletionRect, clearAllLocks, deleteStrand, isStrandDeletable } from '../store/actions';
 import type { Mode, ModeContext, PointerInfo } from '../modes/Mode';
 import type { Point } from '../model/types';
 
@@ -21,7 +21,6 @@ export class InteractionHost {
   private panning = false;
   private panStart: Point = { x: 0, y: 0 };
   private panOrigin: Point = { x: 0, y: 0 };
-  private spaceHeld = false;
   // Active per-mask "Edit Mask" eraser drag (OSS mask_edit_mode erase_start_pos /
   // current_erase_rect). Set on pointer-down while store.maskEditTarget is active.
   private maskErase: { start: Point } | null = null;
@@ -88,7 +87,7 @@ export class InteractionHost {
   private onPointerDown = (e: PointerEvent) => {
     try { this.el.setPointerCapture(e.pointerId); } catch { /* synthetic/no-op */ }
     const panTool = useEditorStore.getState().panMode;   // hand tool active
-    const isPan = e.button === 1 || e.button === 2 || (e.button === 0 && (this.spaceHeld || panTool));
+    const isPan = e.button === 1 || e.button === 2 || (e.button === 0 && panTool);
     if (isPan) {
       const view = useEditorStore.getState().view;
       this.panning = true;
@@ -129,9 +128,13 @@ export class InteractionHost {
       return;
     }
     this.mode().onPointerMove(this.info(e), this.ctx());
-    // Cursor feedback: crosshair during an Edit Mask session, grab over a handle.
+    // Cursor feedback: crosshair during an Edit Mask session; OpenHand while the
+    // sticky pan tool is on (OSS toggle_pan_mode cursor, strand_drawing_canvas.py
+    // :1705-1712); grab over a handle otherwise.
     const st = useEditorStore.getState();
-    this.el.style.cursor = this.editTarget() ? 'crosshair' : (st.hover.handle ? 'grab' : this.mode().cursor);
+    this.el.style.cursor = this.editTarget() ? 'crosshair'
+      : st.panMode ? 'grab'
+      : (st.hover.handle ? 'grab' : this.mode().cursor);
   };
 
   private onPointerUp = (e: PointerEvent) => {
@@ -182,7 +185,6 @@ export class InteractionHost {
   private onContextMenu = (e: MouseEvent) => { e.preventDefault(); };
 
   private onKeyDown = (e: KeyboardEvent) => {
-    if (e.code === 'Space') { this.spaceHeld = true; }
     const tag = (e.target as HTMLElement | null)?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return; // don't hijack typing
     const st = useEditorStore.getState();
@@ -195,15 +197,22 @@ export class InteractionHost {
       if (editing) { st.exitMaskEdit(); this.maskErase = null; requestRender(); return; }
       // Mid-drag ESC ABORTS the move (revert, no undo entry) — OSS cancel_movement.
       if (st.dragging) { this.mode().onCancel?.(this.ctx()); return; }
-      // Otherwise ESC clears the selection.
-      st.setSelection({ layerName: null, handle: null });
-      requestOverlay();
+      // OSS Esc does NOTHING else (main_window.py:2272-2280) — deselect is the
+      // 'A' shortcut / Deselect All button, never Esc.
       return;
     }
     // OSS disables the main-window buttons + shortcuts during an Edit Mask session
-    // (request_edit_mask -> disable_all_mainwindow_buttons). Swallow undo/redo/New
-    // Strand so they can't mutate the doc mid-erase; exit with ESC.
+    // (request_edit_mask -> disable_all_mainwindow_buttons). Swallow everything
+    // that could mutate the doc mid-erase; exit with ESC.
     if (editing) return;
+    // OSS gates every letter shortcut on !isAutoRepeat (main_window.py:2188,2230)
+    // — holding Z must not machine-gun undo.
+    if (e.repeat) return;
+    // Space TOGGLES the sticky pan tool (OSS toggle_pan_mode, main_window.py:
+    // 2211-2221 — swallowed app-wide so focused buttons never activate).
+    if (e.code === 'Space' && !ctrl) {
+      e.preventDefault(); st.togglePanMode(); return;
+    }
     // Undo: Ctrl/Cmd+Z (no shift) or bare Z. Redo: Ctrl/Cmd+Shift+Z, Ctrl+Y, or bare X.
     if ((ctrl && k === 'z' && !e.shiftKey) || (!ctrl && k === 'z')) {
       e.preventDefault(); st.undo(); requestRender(); return;
@@ -211,14 +220,45 @@ export class InteractionHost {
     if ((ctrl && k === 'z' && e.shiftKey) || (ctrl && k === 'y') || (!ctrl && k === 'x')) {
       e.preventDefault(); st.redo(); requestRender(); return;
     }
-    // 'N' (no modifiers): arm a new-strand draw, exactly like the "New Strand"
-    // button (OSS main_window.py:2201 — Key_N clicks add_new_strand_button).
-    if (!ctrl && k === 'n') {
-      e.preventDefault(); st.armNewStrand(); return;
+    if (ctrl) return;
+    // Letter shortcuts click their layer-panel buttons (main_window.py:2226-2270).
+    if (k === 'n') { e.preventDefault(); st.armNewStrand(); return; }
+    if (k === '1') { e.preventDefault(); st.toggleDrawNames(); requestRender(); return; }
+    if (k === 'l') { e.preventDefault(); st.enterExitLockMode(); return; }
+    if (k === 'a') {
+      // Deselect All — which reads "Clear Locks" (and clears them) in lock mode.
+      e.preventDefault();
+      if (st.doc.lock_mode) st.commitEdit(clearAllLocks);
+      else st.deselectAll();
+      requestOverlay();
+      return;
+    }
+    if (k === 'd') {
+      // Delete Strand, only when the button would be enabled (OSS clicks it
+      // if isEnabled(); gating mirrors LayerControlStack's delete rules).
+      e.preventDefault();
+      const sel = st.doc.selected_strand_name;
+      if (st.multiSelectMode) {
+        const ms = st.multiSelectedLayers;
+        const lockedHit = st.doc.lock_mode && ms.some((n) => st.doc.locked_layers.includes(n));
+        if (!ms.length || lockedHit) return;
+        if (!ms.every((n) => st.doc.strands[n] && isStrandDeletable(st.doc.strands[n]))) return;
+        st.commitEdit((d) => { for (const n of ms) deleteStrand(d, n); });
+        st.clearMultiSelectedLayers();
+        st.setSelection({ layerName: null, handle: null });
+        requestRender();
+        return;
+      }
+      if (!sel) return;
+      if (st.doc.lock_mode && st.doc.locked_layers.includes(sel)) return;
+      const s = st.doc.strands[sel];
+      if (!s || !isStrandDeletable(s)) return;
+      st.commitEdit((d) => deleteStrand(d, sel));
+      st.setSelection({ layerName: null, handle: null });
+      requestRender();
+      return;
     }
   };
 
-  private onKeyUp = (e: KeyboardEvent) => {
-    if (e.code === 'Space') this.spaceHeld = false;
-  };
+  private onKeyUp = (_e: KeyboardEvent) => {};
 }

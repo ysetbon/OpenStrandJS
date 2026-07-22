@@ -32,7 +32,7 @@ function handlePos(s: StrandRecord, handle: HandleKind): Point {
 
 export const MoveMode: Mode = {
   name: 'move',
-  cursor: 'crosshair',
+  cursor: 'grab', // OSS OpenHandCursor for the whole mode (strand_drawing_canvas.py:4985-4987)
 
   onPointerDown(p: PointerInfo, ctx: ModeContext) {
     const st = useEditorStore.getState();

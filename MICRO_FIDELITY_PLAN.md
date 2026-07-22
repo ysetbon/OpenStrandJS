@@ -333,7 +333,7 @@ Note: OSS Ctrl-snap no-ops when setting disabled — port already matches.
 - [ ] P1 Attach: unarmed empty-space press must be a NO-OP (OSS draws only
       when armed via New Strand/N — `attach_mode.py:603-681`; canvas branch
       `:4255-4269` is dead code); OSSJS starts drawing on any empty press.
-- [ ] P1 Esc must NOT clear selection (OSS: Esc only exits mask edit,
+- [x] P1 Esc must NOT clear selection (OSS: Esc only exits mask edit,
       `main_window.py:2272-2280`; deselect is `A`/button). Keep mid-drag abort.
 - [ ] P1 Select-mode mask hover highlight (spec: fill mask's rendered region
       rgba(255,230,160,0.667) + 2px black silhouette — same geometry as
@@ -342,7 +342,7 @@ Note: OSS Ctrl-snap no-ops when setting disabled — port already matches.
       end (center = endpoint + (stroke/2)·tangent, len width+2·stroke across,
       thickness stroke) in `strandFootprintHit` + highlight polygon
       (HIT_TOL 0.5 doesn't cover the ~4-8px bar).
-- [ ] P2 Move-mode cursor: OSS OpenHand ('grab'), never changes on hover/drag
+- [x] P2 Move-mode cursor: OSS OpenHand ('grab'), never changes on hover/drag
       (`strand_drawing_canvas.py:4985-4987`); OSSJS crosshair + hover 'grab'.
 - [x] P2 Rotate/angle mode cursors 'move' (SizeAll); view mode OpenHand.
 - [ ] P2 Move hover must use OSS hover rules, not full moveGrab: cp1 always
@@ -390,11 +390,11 @@ RTL core mirroring, translation keys of buttons.
       (`toolbar.css:38`).
 - [ ] P2 Layer State button is checkable in OSS, stays checked while dialog
       open, restores previous mode on close (`main_window.py:372,1691-1824`).
-- [ ] P2 Shortcuts missing: `1` draw names, `L` lock layers, `D` delete strand,
+- [x] P2 Shortcuts missing: `1` draw names, `L` lock layers, `D` delete strand,
       `A` deselect all (`main_window.py:2240-2270`); Space is a pan **toggle**
       in OSS, hold-to-pan in OSSJS (`:2211-2221` vs `InteractionHost.ts:221-223`);
       Ctrl-release exits masked mode (`layer_panel.py:2184-2187`).
-- [ ] P3 Auto-repeat guard on Z/X/N/1/L/D/A (`main_window.py:2188,2230` vs no
+- [x] P3 Auto-repeat guard on Z/X/N/1/L/D/A (`main_window.py:2188,2230` vs no
       `e.repeat` check). Keep OSSJS's Ctrl+Z/Y additions (web convention).
 - [ ] P2 Save doesn't export undo history (`export_history` main_window.py:2593),
       Load extracts only current step (`saveLoad.ts:46-53` vs `import_history`
@@ -513,7 +513,7 @@ samples, About page, app icon, mask-edit banner, drop line, canvas constants.
       zoom 0.5, never auto-hide (OSSJS skips when grid_size×zoom < 4).
       (Duplicate of §7 item — fix once in renderer.)
 - [ ] P2 beforeunload dirty-tab guard (dup of §7).
-- [ ] P3 Pan tool active should show grab/grabbing cursor on canvas.
+- [x] P3 Pan tool active should show grab/grabbing cursor on canvas.
 - [ ] P3 Create Group button hover/pressed states (default #A8A5A1/#7E7B77,
       light #B6B1AA/#86817A, dark #505050/#606060, `main_window.py:841-1171`).
 - [ ] P3 document.title from `main_window_title` + `<html lang>` update +
