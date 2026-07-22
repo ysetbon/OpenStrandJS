@@ -33,7 +33,84 @@ Status legend: `[ ]` open · `[x]` fixed (commit ref) · `[-]` won't fix (reason
 
 (Audit in progress — sections below are filled from the per-surface sweeps.)
 
-### 1. Translations & hardcoded strings
+### 1. Translations & hardcoded strings — AUDIT COMPLETE
+
+Counts: OSS en 488 keys; OSSJS 396 keys; shared 387; missing in OSSJS 101;
+extra in OSSJS 9. Same 7 languages both sides.
+
+**Hardcoded English where an OSS key exists (P1):**
+- [ ] P1 `tabs` (py:17) — `label: 'Tabs'` hardcoded `Toolbar.tsx:41`.
+- [ ] P1 `new_tab` (py:18) — hardcoded `TabEdge.tsx:172-173`, `TabBar.tsx:24`.
+- [ ] P1 `close_tab` (py:19 "Close tab") — hardcoded `title="Close"` `TabBar.tsx:21`.
+- [ ] P1 `duplicate_tab` (py:20) — hardcoded `TabChip.tsx:64-65`.
+- [ ] P1 Control-column tooltips fall back to English (keys absent, and OSS texts
+      differ from the fallbacks — `ControlColumn.tsx:84-96`): `reset_tooltip`
+      py:337 ('Reset:\nKeep only current state\nas first state'), `undo_tooltip`
+      py:344, `redo_tooltip` py:345, `zoom_in_tooltip` py:341 ('Zoom In', JS says
+      'Zoom in (coming soon)'), `zoom_out_tooltip` py:342, `pan_tooltip` py:343,
+      `refresh_tooltip` py:338, `center_tooltip` py:339, `hide_mode_tooltip`
+      py:340 (full multi-line 'Multi-Layer Select:…' text).
+- [ ] P1 `tab_copy_suffix` (py:26 'copy') — duplicate-tab title suffix untranslated.
+- [ ] P1 `shadow_editor_info` (py:67 'Shadows cast by <b>{0}</b> onto layers
+      below:') — info line absent from StrandShadowEditorDialog.tsx.
+
+**English values that differ on shared keys:**
+- [ ] P1 `whats_new_info` — OSSJS still ships the v1.108 content; OSS py:289 is
+      the v1.109 list (10 items: Lock Mode Redesigned … Copy & Paste Strand
+      Data, © 2026 / Version 1.109). All 7 languages one version behind.
+- [ ] P1 `lock_layers_desc` (py:222) — OSS has the long 1.109 padlock text;
+      OSSJS has pre-1.109 one-liner. All languages behind.
+- [ ] P1 `select_layers_to_lock` (py:334) — OSS 'Click a padlock to lock/unlock
+      a layer; click a layer to select it'; OSSJS pre-1.109 wording.
+- [ ] P1 `shadow_editor_help_text` (py:79) — OSS 4-part <b>Visible/Full Shadow/
+      Subtract Layers/Shadow Path</b> HTML; OSSJS invented one-liner.
+- [ ] P1 `gif_explanation_3` (py:369) + `gif_explanation_4` (py:370) — stale
+      captions in OSSJS (all languages).
+- [ ] P1 `shadow_subtract_layers` fr 'Retirer Couches' / he 'הסר שכבות' —
+      OSSJS fr/he differ (D-section of audit).
+- [-] `shadow_hide_all`, `shadow_path_hide`, `shadow_visible_on/off` (he) —
+      OSS values are duplicates/typos ('Show All' for hide-all etc.); OSSJS
+      "fixed" them. DECISION: keep the OSSJS fix unless strict parity is wanted
+      (flag to user).
+- [ ] P3 `x_grid_steps`/`y_grid_steps` case: OSS 'X Grid Steps' vs JS
+      'X grid steps'; fr 'Pas Grille X' vs 'Pas de grille X'.
+- [ ] P3 fr nits: `group_shadow_editor_title`, `precise_angle` (nbsp before
+      colon), `shadow_no_layers`; he `group_shadow_editor_title`.
+
+**Missing key groups (port with features or as text-only):**
+- [ ] P1 `main_window_title` (py:5) — title not sourced from translations.
+- [ ] P2 History clear-confirm flow missing entirely: `confirm_clear_history_title`
+      py:559, `confirm_clear_history_text` py:560, `history_cleared_text` py:564 —
+      HistoryPage.tsx:62 clears with no confirmation.
+- [ ] P2 Arrow submenu keys (16): `arrow_sizes` py:513, `adjust` py:514,
+      `arrow_color/transparency/texture/shaft_style` py:537-540,
+      `show_arrow_head` py:541, `arrow_casts_shadow` py:542, `texture_*`
+      py:543-546, `shaft_*` py:547-550.
+- [ ] P2 Dash/extension menu items: `hide/show_start/end_extension` py:494-497.
+- [ ] P2 Width-dialog extras: `restore_default_closing_knot_stroke` py:455,
+      `make_elliptical_end` py:460, `stroke_pixels_label` py:590.
+- [ ] P2 Button-guide 1.109 sections (~21 keys): multi-select batch menu
+      py:196-199, copy/paste guide py:200-207, canvas indicators py:208-213,
+      arrow guide py:189-195.
+- [ ] P2 Layer State Info panel: `layer_state_log_title` py:43,
+      `layer_state_info_title/tooltip` py:44-45, `layer_state_info_text` py:99.
+- [ ] P2 Misc: `adjust_angle_and_length` py:351, `currently_unavailable` py:346,
+      `groups` py:432, `newest_strand/layer` py:437-438, `group_replace_confirm`
+      py:554, `error` py:555, `unsaved_tabs_on_exit` py:23 (quit guard flow
+      missing), `gif_placeholder_1..4` py:371-374.
+- [ ] P3 Hardcoded strings with no OSS key: 'Drag to move' TabEdge.tsx:161,
+      load-failure alert Toolbar.tsx:74, '(missing)' LayerStateDialog.tsx:69,
+      aria-labels controls.tsx:83,93 / NumberedLayerButton.tsx:563.
+- [ ] P3 D3 fallback omissions (fr/he/de/it/es/pt entries omitted where OSS
+      value == English: `x`, `x_plus_180`, `angle` fr, `X_angle` fr,
+      `attachable` fr, `shadow_visible_on/off` fr/es) — no visible effect;
+      fill for strictness.
+- [ ] P3 OSSJS-only keys: legacy camelCase `layers/theme/language/showGrid/
+      gridSize/snap/curve` ts:126-132 (remove if unused);
+      `mask_grid_no_crossings` ts:73 and `shadow_stored_only_note` ts:64 are
+      justified JS-only additions — keep.
+- Note: `tf()` handles only positional {N}; `group_replace_confirm` uses bare
+  {} — adapt when porting. OSS dead keys (C9 list) — do not port.
 ### 2. Copy/paste (strand data) flow — AUDIT COMPLETE
 
 Translation keys are at verbatim parity in all 7 languages (`translations.py:466-478`
@@ -128,11 +205,226 @@ GroupRotateDialog gesture pattern, Modal Esc/Enter/RTL, theme tokens).
       simpler; note divergence).
 - [ ] P3 RTL: numeric inputs forced dir="ltr" inside mirrored rows.
 - [ ] P3 Delete or mount-decision for orphaned `StrandProperties.tsx`.
-### 4. Settings dialog
-### 5. Layer panel & layer buttons
+### 4. Settings dialog — AUDIT COMPLETE
+
+Parity confirmed (extensive): category list order/keys, General page controls/
+ranges/defaults/gating, Layer Panel page rows, Selected Strand page (+forced
+LTR), language list+flags (en→us, he→il), Save/Load 33-key JSON schema incl.
+OSS's field omissions, DefaultWidthDialog math, Samples (5 files incl.
+capital-I), About HTML verbatim, dark palette tokens, checkbox styling,
+persistence coverage (no dropped fields).
+
+- [ ] P1 What's New still ships 1.108 content — replace `whats_new_info` with
+      the 1.109 10-item HTML in all 7 languages (`translations.py:289-305`).
+- [ ] P1 Button Guide: multi-select/copy-paste section missing
+      (`settings_dialog.py:3161-3182`, keys py:196-207 + rendered badge/chip
+      indicator images `:5929-5955`).
+- [ ] P1 Button Guide: arrow customization submenu docs missing
+      (`settings_dialog.py:3108-3145`, 7-item ul + sizes).
+- [ ] P1 Button Guide: selection-indicators section shows pre-1.109 set; OSS
+      1.109 = red circle (in user's highlight color @alpha 60!), blue circle,
+      `yellow_circle`, `start_end_squares`, `control_point_squares` with
+      rendered icons (`settings_dialog.py:3265-3287,5906-5927`).
+- [ ] P2 History Clear All: no confirm dialog / no "cleared" info box / not
+      disabled when empty (`settings_dialog.py:6730,6766,6890-6895`, keys
+      py:559-564).
+- [ ] P2 Lock-mode icons (lock_open/lock_closed PNGs) missing from Button
+      Guide lock row (`settings_dialog.py:3049` vs ButtonGuidePage.tsx:139).
+- [-] P2 Live-apply vs OSS apply-on-OK — deliberate web deviation; keep
+      (flag to user in summary).
+- [ ] P3 Nav items not center-aligned (`settings_dialog.py:1776`).
+- [ ] P3 Theme combo lacks 26×26 rounded swatch icons (`:5814-5851`;
+      default 230,230,230 / light 255,255,255 / dark 44,44,44).
+- [ ] P3 Guide tables have 1px borders; OSS borderless (`settingsDialog.css:279`).
+- [ ] P3 Hebrew history row format `(State N) hh:mm:ss dd-MM-yyyy` right-
+      aligned, list forced LTR (`settings_dialog.py:6780-6794,3342-3343`).
+- [ ] P3 History load error shown without title (OSS `history_load_error_title`).
+- [ ] P3 DefaultWidthDialog thickness input: native spinner, should be
+      segmented stepper like the rest.
+- [ ] P3 pt translations of width-dialog labels are French copies
+      (`translations.ts:599-603`) — fix Portuguese.
+- [ ] P3 ButtonGuide heading color reads DOM class non-reactively.
+- [ ] P3 settingsJson.ts "36-key" comment → 33.
+- [ ] P3 Language combo cosmetics (flag 40px w/ theme border, item h48,
+      arrow on LEFT in OSS `:196-239`; OSSJS 28px/h40/trailing ▾).
+- [ ] P3 Tutorial entries: OSSJS adds divider borders; modal title "Tutorial N"
+      invented (harmless).
+### 5. Layer panel & layer buttons — AUDIT COMPLETE
+
+Parity confirmed (extensive): button size/colors/text (Qt lighter/darker
+reimplemented exactly), shadow-only + masked + lock-mode visuals, padlock
+geometry/gating, mask-edit visuals, menu chrome/width formula, compound-row
+styling, circular-button rows + palettes, bottom six-button stack colors/
+labels incl. lock-mode swaps, drag-reorder midpoint rule + drop line, click/
+lock/multi-select semantics, delete-all confirm (No default), chip-paste
+targeting, new-strand + group-creation flows.
+
+- [ ] P1 Arrow customization panel (known-deferred; full spec now captured in
+      audit — `numbered_layer_button.py:1070-1345`: panel bg #333/#F0F0F0 r5,
+      Arrow Color 30×20 swatch default=stroke_color, Transparency slider
+      0-100 live %, Head Texture combo none/stripes/dots/crosshatch, Shaft
+      combo solid/tiles/stripes/dots, Show Arrow Head + Arrow Casts Shadow
+      checkboxes, Arrow Sizes → Adjust submenu of six segmented spinboxes
+      (head len 0-500 d20, head w 0-500 d10, head stroke 1-30 d4, gap 0-1000
+      d10, line len 0-1000 d20, line w 0.1-100 d10) persisted on close; menu-
+      close diff force-saves undo `:1613-1645`).
+- [ ] P2 Missing menu items: `transparent_closing_knot_side` /
+      `restore_default_closing_knot_stroke` (alpha-gated, after Close-the-Knot,
+      `numbered_layer_button.py:1388-1432`).
+- [ ] P2 Missing Dash compound row: `extension` + show/hide start/end dash
+      (`numbered_layer_button.py:1435-1486`).
+- [ ] P2 Notification label missing entirely (`layer_panel.py:1048-1052`,
+      `show_notification` 2000ms `:2672-2681`): messages = persistent
+      `select_layers_to_lock` in lock mode, `exited_lock_mode`, "Please exit
+      mask edit mode first (Press ESC)" (hardcoded EN in OSS), and
+      `mask_edit_mode_exited`.
+- [ ] P2 Reset 🏠 button: OSS clears undo history keeping current state
+      (`layer_panel.py:1831-1834`); OSSJS resets view. Refresh must also
+      `reset_zoom` (`:1082-1090`).
+- [ ] P2 Right-click-and-hold CustomTooltip system (transparent, centered at
+      panel-row-4 +190px, `layer_panel.py:47-364`) vs native hover titles.
+- [ ] P2 Ctrl mask-create: OSS exits masked mode after each pair (even
+      same-layer double-click) (`layer_panel.py:2408-2418`); OSSJS stays armed.
+- [ ] P2 Attachable green strip condition: OSS `knot_connections OR not all
+      circles` (`layer_panel.py:2611-2627`); OSSJS only circle test
+      (`LayerPanel.tsx:261`).
+- [ ] P2 Bottom stack + create-group not disabled during Edit-Mask
+      (`layer_panel.py:2592-2600`).
+- [ ] P2 Multi-selected border: OSS 2px gold, no glow (`layer_panel.py:1891-1901`);
+      OSSJS 3px + box-shadow.
+- [ ] P3 Hidden-state diagonal hatch: dashed gray 2px @10px pitch, persists
+      while checked (`numbered_layer_button.py:2040-2048`); OSSJS solid
+      stripes, dropped when checked.
+- [ ] P3 Creating a new layer should exit multi-select mode
+      (`layer_panel.py:2961-2971`).
+- [ ] P3 Circle row placed before Arrow (OSS order: Line → Arrow → Full →
+      custom → Close Knot → knot-stroke → Dash → Circle).
+- [ ] P3 Undo/redo button palettes are per-theme in OSS (default green
+      #4d9958…, dark green #3d7846…, light blue #4387c2…,
+      `undo_redo_manager.py:38-126`); OSSJS hardcodes light-blue.
+- [ ] P3 Icon sizes: OSS 27/26/24px scales (`layer_panel.py:452-745`);
+      OSSJS 20/24px.
+- [ ] P3 Lock button shows pressed color when checked; OSS stays orange.
+- [ ] P3 Whole button `cursor:pointer`; OSS pointer only on padlock/badge/chips.
+- [ ] P3 Color pickers: OSS themed+translated QColorDialog with alpha; OSSJS
+      native input, no alpha edit.
+- [ ] P3 Delete dead `TabBar.tsx` (imported nowhere).
+- [ ] P3 Colors section key unused in LayerStateDialog.
+(Copy/paste-specific items live in §2; width dialog in §8.)
 ### 6. Canvas modes (move/attach/mask/rotate/select)
-### 7. Main window, toolbar, shortcuts
-### 8. Group panel & group/shadow dialogs
+### 7. Main window, toolbar, shortcuts — AUDIT COMPLETE
+
+Parity confirmed: button inventory/order/colors (all 14 hex triples exact),
+zoom limits 0.1–5, grid size 28, pan/center/reset behaviors, mask-edit banner,
+RTL core mirroring, translation keys of buttons.
+
+- [ ] P1 Startup defaults inverted: OSS grid ON (`strand_drawing_canvas.py:184`),
+      shadow OFF (`:1320`, `main_window.py:336`); OSSJS `show_grid: false`,
+      `shadow_enabled: true` (`editorStore.ts:45,34`). Flip both.
+- [ ] P2 Active mode's toolbar button should be disabled (`main_window.py:2104-2167`);
+      angle button always stays enabled (`:2172-2173`). OSSJS never disables.
+- [ ] P2 Edit Mask session must disable all toolbar buttons
+      (`main_window.py:2757-2793`); OSSJS only swallows shortcuts.
+- [ ] P2 Angle button preconditions + previous-mode restore
+      (`main_window.py:1245-1262,1209-1243`) — covered by §3 port.
+- [ ] P2 Checked button fill: OSS swaps bg to the pressed shade + 4px black
+      border (`main_window.py:1284-1289`); OSSJS only adds the border
+      (`toolbar.css:38`).
+- [ ] P2 Layer State button is checkable in OSS, stays checked while dialog
+      open, restores previous mode on close (`main_window.py:372,1691-1824`).
+- [ ] P2 Shortcuts missing: `1` draw names, `L` lock layers, `D` delete strand,
+      `A` deselect all (`main_window.py:2240-2270`); Space is a pan **toggle**
+      in OSS, hold-to-pan in OSSJS (`:2211-2221` vs `InteractionHost.ts:221-223`);
+      Ctrl-release exits masked mode (`layer_panel.py:2184-2187`).
+- [ ] P3 Auto-repeat guard on Z/X/N/1/L/D/A (`main_window.py:2188,2230` vs no
+      `e.repeat` check). Keep OSSJS's Ctrl+Z/Y additions (web convention).
+- [ ] P2 Save doesn't export undo history (`export_history` main_window.py:2593),
+      Load extracts only current step (`saveLoad.ts:46-53` vs `import_history`
+      `:1604-1624`) — round-trip the history format.
+- [ ] P2 No dirty-doc prompt before Load (`main_window.py:1567-1596`) and no
+      `beforeunload` quit guard (`:2795-2862`, keys `unsaved_tabs_on_exit`,
+      `quit_anyway`, `skip_quit_warning` opt-out; RTL-mirrored for he).
+- [ ] P2 Export image framing: OSS = current viewport × 4, transparent, with
+      selection highlight + in-progress strand + names overlays
+      (`main_window.py:1951-2026`); OSSJS = content-fit × 2, no overlays.
+- [ ] P2 Zoom in/out buttons are disabled stubs in OSSJS; OSS steps ±10% about
+      canvas center (`layer_panel.py:481-560`, canvas `:1560-1577`).
+- [ ] P3 Wheel zoom anchored at cursor in OSSJS vs canvas center in OSS.
+- [ ] P3 Grid color: OSS opaque rgb(200,200,200) w1, thickens 1.5/rgb(180,180,180)
+      below zoom 0.5 (`strand_drawing_canvas.py:3256-3276`); OSSJS
+      rgba(0,0,0,0.08) (`web/strand-renderer.js:1631-1634`, export `:1308`).
+- [ ] P3 Toolbar geometry: bar 40px/btn 32px/maxw 90/font bold 14px/radius 6/
+      spacing 10 (`main_window.py:270-293,1266-1295`) vs OSSJS 46/38/110/18px/7.
+      Gear 32×32 r18 hover rgba(200,200,200,50) vs 38×38 r19 0.55. Layer State
+      padding 8px 4px r0 (`:1447-1463`).
+- [ ] P3 Toggle Shadow tooltip "Enable/disable shadow effects for overlapping
+      strands" (`main_window.py:337`).
+- [ ] P3 Initial layer-panel width 350px min (`main_window.py:524-539,422`) vs
+      OSSJS 490 clamp 460-860. Splitter handle transparent in OSS.
+- [ ] P3 Title 'OpenStrandJS — editor' vs OSS `main_window_title`.
+- [ ] P3 Ctrl+Shift+D debug clear-suppression — skip.
+### 8. Group panel & group/shadow dialogs — AUDIT COMPLETE
+
+Parity confirmed: group context-menu content/order, collapse tree ▼/▶ +
+Hebrew RLE wrap, member auto-check of masked partners, GroupMove rows/ranges/
+grid-apply, GroupRotate rows/pivot, angle-editor table (9 cols, hold-repeat
+timings 500ms/10ms, ±1/±5 and ±0.025/±0.4), shadow receiver enumeration +
+mask-proxy rows + auto/pinned interplay, DefaultWidthDialog, mask-grid matrix
+mechanics, rename flow strings.
+
+- [ ] P1 Group creation: missing "Group Exists — replace?" confirm between
+      name and select steps (`group_layers.py:5125-5144`, key
+      `group_replace_confirm`).
+- [ ] P1 GroupMove Cancel: OSS keeps moved geometry (cancel ≈ close); OSSJS
+      reverts. Snap-to-grid: OSS snaps each strand's points to grid then
+      CLOSES (`group_layers.py:4256-4266`); OSSJS rounds the offset and stays
+      open. Also OSS lets totals exceed ±600 after grid Apply; OSSJS clamps.
+- [ ] P1 GroupRotate Esc/close: OSS ALWAYS keeps rotation + saves undo
+      (`group_layers.py:6002-6032`); OSSJS Esc reverts — destroys work.
+- [ ] P1 Angle editor: direct angle edits must re-sync all x/180+x-checked
+      rows (`update_linked_strands` `group_layers.py:7312-7338`); main-strand
+      edits back-feed the X field (`:7297-7300`).
+- [ ] P1 Shadow Path preview (both shadow editors): checkable "Shadow Path"
+      button per row (+ section/global Show All in group dialog), draws the
+      REAL clipped shadow geometry filled rgba(0,120,255,100) + 2px stroke
+      rgba(0,120,255,200) inside the canvas transform, multi-pair set,
+      cleared on dialog close (`shadow_editor_dialog.py:181-188,1199-1215`,
+      `strand_drawing_canvas.py:2788-2817,1317`; checked style #4A6FA5/#6A9FD5
+      dark, #A0C0E0/#7090C0 light; min 80×36). Also selection-driven
+      `set_highlighted_shadow` on row click (`:1139-1148`).
+- [ ] P1 Per-strand shadow editor: missing info label `shadow_editor_info` and
+      the strand-level batch toggle row (color box + bold name + Visible/Full/
+      Subtract/Show All, `shadow_editor_dialog.py:654-659,766-849`).
+- [ ] P1 Per-strand WidthConfigDialog replaces `window.prompt`
+      (`NumberedLayerButton.tsx:197-222`): title "Change Width", min 400×220,
+      grid_unit 27; thickness QDoubleSpinBox 0.5–100.0 step 1.0 1-dec +
+      "squares"; stroke-px slider 1..max(1,total//2) recalc on total change;
+      readout `stroke_pixels_label`; preview "Total {t}px | Color {c}px |
+      Stroke {s}px each side"; per-layer variant adds `make_elliptical_end`
+      checkbox → `elliptical_end_caps`; propagate whole-set; refresh dependent
+      masks (`numbered_layer_button.py:3750-4244,3546-3669`).
+- [ ] P2 Group panel drag-strand-to-group drop flow (`group_layers.py:1561-1572`).
+- [ ] P2 Group shadow dialog: global row label literally "{group} - All"
+      (`group_shadow_editor_dialog.py:200`) not "- Select All"; masks should
+      appear as casting sections; empty sections skipped not rendered
+      (`:507`); pixel-aligned toggle columns (`_sync_column_widths` `:106-163`).
+- [ ] P2 `shadow_editor_help_text` — full 4-part text (also in §1).
+- [ ] P2 Subtract candidates should include mask layers
+      (`shadow_editor_dialog.py:1015-1018` vs filter in tsx:77).
+- [ ] P2 Group/child row backgrounds: children use tree bg + lighter hover
+      (#3A3A3A/#F0F0F0/#E0E0E0), only group rows use group_bg
+      (`group_layers.py:827-878`); OSSJS paints both with --group-bg.
+- [ ] P2 Mask grid rows/cols sorted alphabetically by layer name in OSS
+      (`mask_grid_dialog.py:93-115`); OSSJS uses z-order.
+- [ ] P2 Rename: OSS input starts EMPTY, duplicate error is a separate modal
+      titled "Error" (`group_layers.py:2421-2447`); OSSJS pre-fills + inline.
+- [ ] P3 Angle-editor non-editable rows: distinct cell bgs (#252525/#F5F5F5)
+      not opacity 0.5; dialog 80% screen max 1000×700 min 800×400.
+- [ ] P3 GroupMove NaN guard on grid-step field; checkbox custom styling
+      (20px blue #4A6FA5/#A0C0E0 + painted checkmark) vs native accent.
+- [ ] P3 Delete dead FallbackSelectDialog/FallbackRenameDialog code paths.
+- [ ] FOLLOW-UP: verify auto-delete of groups when a member gets masked
+      (`update_groups_with_new_strand` `group_layers.py:4540-4576`).
 ### 9. Theme (dark mode), RTL/Hebrew, tooltips, cursors, misc chrome
 
 ## Fix phases
