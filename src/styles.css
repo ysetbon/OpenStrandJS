@@ -10,6 +10,13 @@
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
+/* Mobile: track the DYNAMIC viewport so the app resizes with the collapsing
+ * browser banner instead of leaving a gap under it (or sitting under an
+ * overlay). Desktop is unaffected (dvh == vh == 100% there). */
+@supports (height: 100dvh) {
+  body, #root { height: 100dvh; }
+}
+html { overscroll-behavior: none; }
 body {
   font: 14px/1.4 system-ui, -apple-system, sans-serif;
   color: var(--text);

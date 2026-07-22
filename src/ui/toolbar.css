@@ -37,6 +37,15 @@
 .tb-btn:active { background: var(--bgp); }
 .tb-btn.checked { border: 4px solid #000; }
 
+/* Narrow layouts (phones use an 800px pinned viewport; small desktop windows
+ * too): the row can't fit every full-size button, and flex-shrinking crushes
+ * them into unreadable slivers. Scroll the toolbar horizontally instead —
+ * every button keeps its natural size. */
+@media (max-width: 850px) {
+  .toolbar { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+  .tb-btn { flex: 0 0 auto; }
+}
+
 /* State button: square (no radius), full toolbar height, gold. */
 .tb-state {
   flex: 0 0 auto;
