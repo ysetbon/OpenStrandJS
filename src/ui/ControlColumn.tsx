@@ -2,6 +2,7 @@ import { useEditorStore } from '../store/editorStore';
 import { requestRender } from '../renderer/renderScheduler';
 import { fitPan } from '../interaction/viewTransform';
 import { STRINGS, t } from './i18n';
+import { ossIcon } from './icons';
 import type { Language } from '../model/types';
 
 // OSS left control column (main_window.py) — sits at the top of the layer panel.
@@ -33,9 +34,12 @@ function tip(key: string, fallbackEn: string, lang: Language): string {
 }
 
 function CCBtn(props: {
-  v: V; glyph: string; title: string;
+  v: V; icon: string; title: string;
   onClick?: () => void; checked?: boolean; disabled?: boolean;
 }) {
+  // OSS renders these buttons from layer_panel_icons/*.png — use the SAME
+  // assets so the glyphs look identical on every OS (native emoji fonts,
+  // notably macOS, drew completely different symbols here).
   return (
     <button
       className={`cc-btn${props.checked ? ' checked' : ''}`}
@@ -44,7 +48,7 @@ function CCBtn(props: {
       disabled={props.disabled}
       onClick={props.onClick}
     >
-      <span className="cc-glyph">{props.glyph}</span>
+      <img className="cc-icon" src={ossIcon(props.icon)} alt="" draggable={false} />
     </button>
   );
 }
@@ -77,19 +81,19 @@ export function ControlColumn() {
   return (
     <div className="control-column">
       <div className="cc-row cc-row-top">
-        <CCBtn v={PURPLE} glyph="🏠" title={tip('reset_tooltip', 'Reset states', lang)} onClick={resetStates} />
-        <CCBtn v={BLUE} glyph="⮌" title={tip('undo_tooltip', 'Undo', lang)} disabled={!canUndo} onClick={() => { undo(); requestRender(); }} />
-        <CCBtn v={BLUE} glyph="⮎" title={tip('redo_tooltip', 'Redo', lang)} disabled={!canRedo} onClick={() => { redo(); requestRender(); }} />
+        <CCBtn v={PURPLE} icon="home" title={tip('reset_tooltip', 'Reset states', lang)} onClick={resetStates} />
+        <CCBtn v={BLUE} icon="undo" title={tip('undo_tooltip', 'Undo', lang)} disabled={!canUndo} onClick={() => { undo(); requestRender(); }} />
+        <CCBtn v={BLUE} icon="redo" title={tip('redo_tooltip', 'Redo', lang)} disabled={!canRedo} onClick={() => { redo(); requestRender(); }} />
       </div>
       <div className="cc-row cc-row-mid">
-        <CCBtn v={GOLD} glyph="🔍" title={tip('zoom_in_tooltip', 'Zoom in (coming soon)', lang)} disabled />
-        <CCBtn v={GOLD} glyph="🔎" title={tip('zoom_out_tooltip', 'Zoom out (coming soon)', lang)} disabled />
-        <CCBtn v={RED} glyph="🖐" title={tip('pan_tooltip', 'Pan (hand tool)', lang)} checked={panMode} onClick={togglePanMode} />
+        <CCBtn v={GOLD} icon="zoom_in" title={tip('zoom_in_tooltip', 'Zoom in (coming soon)', lang)} disabled />
+        <CCBtn v={GOLD} icon="zoom_out" title={tip('zoom_out_tooltip', 'Zoom out (coming soon)', lang)} disabled />
+        <CCBtn v={RED} icon={panMode ? 'pan_closed' : 'pan_open'} title={tip('pan_tooltip', 'Pan (hand tool)', lang)} checked={panMode} onClick={togglePanMode} />
       </div>
       <div className="cc-row cc-row-mid">
-        <CCBtn v={GREEN} glyph="🔄" title={tip('refresh_tooltip', 'Refresh', lang)} onClick={() => requestRender()} />
-        <CCBtn v={TAN} glyph="🎯" title={tip('center_tooltip', 'Center on content', lang)} onClick={center} />
-        <CCBtn v={TAN} glyph="📄" title={tip('hide_mode_tooltip', 'Multi-select', lang)} checked={multiSel} onClick={toggleMulti} />
+        <CCBtn v={GREEN} icon="refresh" title={tip('refresh_tooltip', 'Refresh', lang)} onClick={() => requestRender()} />
+        <CCBtn v={TAN} icon="center" title={tip('center_tooltip', 'Center on content', lang)} onClick={center} />
+        <CCBtn v={TAN} icon={multiSel ? 'multi_select_on' : 'multi_select_off'} title={tip('hide_mode_tooltip', 'Multi-select', lang)} checked={multiSel} onClick={toggleMulti} />
       </div>
     </div>
   );

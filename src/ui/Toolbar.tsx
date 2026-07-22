@@ -3,6 +3,7 @@ import { useEditorStore } from '../store/editorStore';
 import { SettingsDialog } from './SettingsDialog';
 import { LayerStateDialog } from './LayerStateDialog';
 import { t } from './i18n';
+import { ossIcon } from './icons';
 import { loadProject, serializeProject } from '../io/saveLoad';
 import { downloadJSON } from '../io/fileDialog';
 import { exportPng } from '../io/exportPng';
@@ -115,7 +116,11 @@ export function Toolbar() {
       <span className="tb-spacer" />
 
       <button className="tb-state" onClick={() => setStateOpen(true)} title={t('layer_state', lang)}>{t('layer_state', lang)}</button>
-      <button className="tb-gear" onClick={() => setSettingsOpen(true)} title={t('settings', lang)}>⚙</button>
+      {/* OSS settings button uses settings_icon.png (main_window.py:296+ — the
+          ⚙ character is only its missing-file fallback). */}
+      <button className="tb-gear" onClick={() => setSettingsOpen(true)} title={t('settings', lang)}>
+        <img className="tb-gear-img" src={ossIcon('settings_icon')} alt="" draggable={false} />
+      </button>
 
       {stateOpen && <LayerStateDialog onClose={() => setStateOpen(false)} />}
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}

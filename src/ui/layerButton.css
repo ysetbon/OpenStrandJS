@@ -128,50 +128,72 @@
   background: rgba(0, 120, 215, 0.27);
 }
 .nlb-rtl .nlb-padlock { left: auto; right: 6px; }
+/* OSS lock_open/lock_closed pixmap, drawn inset 3px inside the circle. */
+.nlb-padlock-img {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
 
-/* ---- Copy/Paste Strand Data indicators (1.109) ----
- * Copy badge: small clipboard marker pinned to the top corner of the SOURCE
- * layer (click = hint + Clear popup). Paste chips: hover-only one-click paste
- * buttons (anchor start / anchor end) on eligible target layers. Both mirror
- * for RTL like the padlock. ---- */
+/* ---- Copy/Paste Strand Data indicators (1.109, OSS geometry) ----
+ * A 26px-wide indicator column on the TRAILING side (right for LTR, 13px from
+ * the edge — 4px clear of the green strip; mirrored for RTL). Copy badge =
+ * sharp 26×26 copy_badge.png vertically centered (click = hint + Clear).
+ * Paste chips = one segmented sharp rectangle on the same column, split into
+ * a ▲ start cell (top) and a ● end cell (bottom), shown while the button is
+ * hovered (numbered_layer_button.py copy_badge_rect / paste_chip_rects). ---- */
 .nlb-copybadge {
   position: absolute;
-  top: 1px;
-  left: 1px;
-  width: 16px;
-  height: 16px;
-  padding: 0;
+  right: 13px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 26px;
+  height: 26px;
+  padding: 2px;
   border: none;
-  background: rgba(255, 255, 255, 0.85);
-  border-radius: 3px;
-  font-size: 10px;
-  line-height: 16px;
+  background: rgba(255, 255, 255, 0.9);
   cursor: pointer;
-  z-index: 4;
+  /* Above the hover chip stack: OSS routes clicks in the badge rect to the
+   * badge popup even when the paste stack is drawn (mousePressEvent checks
+   * the badge first) — on the web the badge must therefore sit on top. */
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.nlb-rtl .nlb-copybadge { left: auto; right: 1px; }
+.nlb-copybadge:hover { background: rgba(0, 120, 215, 0.3); }
+.nlb-copybadge img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.nlb-rtl .nlb-copybadge { right: auto; left: 13px; }
 .nlb-chips {
   position: absolute;
-  bottom: 1px;
-  left: 1px;
+  right: 13px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 26px;
   display: none;
-  gap: 1px;
-  z-index: 4;
-}
-.nlb:hover .nlb-chips { display: inline-flex; }
-.nlb-chips button {
-  width: 16px;
-  height: 16px;
-  padding: 0;
+  flex-direction: column;
+  z-index: 5;                    /* the hover stack paints OVER the badge */
   border: 1px solid rgba(30, 30, 30, 0.5);
-  border-radius: 3px;
-  background: rgba(255, 255, 255, 0.85);
-  font-size: 10px;
-  line-height: 1;
-  cursor: pointer;
+  background: rgba(255, 255, 255, 0.92);
 }
+.nlb:hover .nlb-chips { display: flex; }
+.nlb-chips button {
+  width: 100%;
+  height: 16px;
+  padding: 1px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.nlb-chips button + button { border-top: 1px solid rgba(30, 30, 30, 0.35); }
 .nlb-chips button:hover { background: rgba(0, 120, 215, 0.25); }
-.nlb-rtl .nlb-chips { left: auto; right: 1px; }
+.nlb-chips button img { width: 12px; height: 12px; object-fit: contain; pointer-events: none; }
+.nlb-rtl .nlb-chips { right: auto; left: 13px; }
 
 .nlb-copy-panel {
   display: flex;
