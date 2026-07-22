@@ -10,7 +10,7 @@
 .theme-default {
   --window-bg: #ECECEC;
   --text: #000000;
-  --canvas-bg: #FFFFFF;
+  --canvas-bg: #ECECEC; /* OSS: canvas shows the app QWidget bg (main_window.py:1034) */
   --button-bg: #E8E8E8;
   --button-hover: #DADADA;
   --button-pressed: #C8C8C8;

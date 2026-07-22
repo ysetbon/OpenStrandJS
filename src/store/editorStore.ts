@@ -32,7 +32,7 @@ export function emptyDocument(): EditorDocument {
     selected_strand_name: null,
     locked_layers: [],
     lock_mode: false,
-    shadow_enabled: true,
+    shadow_enabled: false,   // OSS launch default: shadows OFF (strand_drawing_canvas.py:1320, main_window.py:336)
     show_control_points: true,
     shadow_overrides: {},
   };
@@ -43,7 +43,7 @@ export function emptyDocument(): EditorDocument {
 const DEFAULT_SETTINGS: Settings = {
   curve_params: { base_fraction: 1.0, dist_multiplier: 2.0, exponent: 2.0 },
   grid_size: 28,
-  show_grid: false,
+  show_grid: true,   // OSS launch default: grid ON (strand_drawing_canvas.py:184)
   snap_to_grid_enabled: true,   // OSS default; new strands draw free-angle, endpoints quantized to grid_size
   default_strand_color: DEFAULT_STRAND_COLOR,   // 200,170,230,255
   default_stroke_color: DEFAULT_STROKE_COLOR,   // 0,0,0,255
