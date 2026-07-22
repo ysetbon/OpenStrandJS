@@ -42,6 +42,7 @@ function LCBtn(props: {
 export function LayerControlStack() {
   const lang = useEditorStore((s) => s.settings.language);
   const lockMode = useEditorStore((s) => s.doc.lock_mode);
+  const lockedLayers = useEditorStore((s) => s.doc.locked_layers);
   const selected = useEditorStore((s) => s.selection.layerName);
   const strands = useEditorStore((s) => s.doc.strands);
   const multiSelectMode = useEditorStore((s) => s.multiSelectMode);
@@ -54,16 +55,20 @@ export function LayerControlStack() {
 
   const [confirmAll, setConfirmAll] = useState(false);
 
-  // Delete-enable (OSS is_strand_deletable): single-select needs a selected,
-  // existing, deletable strand; multi-select needs every selected layer
-  // deletable. Lock mode always disables delete.
+  // Delete-enable (OSS update_delete_button_state, 1.109): single-select needs a
+  // selected, existing, deletable strand; multi-select needs every selected
+  // layer deletable. Delete stays AVAILABLE in lock mode — it is blocked only
+  // when the target (any target, in multi-select) is a locked layer.
   const sel = selected ? strands[selected] : undefined;
-  const hasDeletable = !lockMode && !!sel && isStrandDeletable(sel);
+  const selLocked = lockMode && !!selected && lockedLayers.includes(selected);
+  const hasDeletable = !selLocked && !!sel && isStrandDeletable(sel);
+  const multiLocked = lockMode && multiSelectedLayers.some((n) => lockedLayers.includes(n));
   const multiDeletable =
     multiSelectMode &&
+    !multiLocked &&
     multiSelectedLayers.length > 0 &&
     multiSelectedLayers.every((n) => strands[n] && isStrandDeletable(strands[n]));
-  const deleteDisabled = lockMode ? true : (multiSelectMode ? !multiDeletable : !hasDeletable);
+  const deleteDisabled = multiSelectMode ? !multiDeletable : !hasDeletable;
 
   // OSS "New Strand" button (layer_panel.py request_new_strand): does NOT create a
   // strand immediately. It enters attach mode and arms a one-shot new-strand draw
@@ -111,7 +116,8 @@ export function LayerControlStack() {
         checked={lockMode}
         onClick={() => useEditorStore.getState().enterExitLockMode()}
       />
-      <LCBtn v={ADD} label={t('add_new_strand', lang)} disabled={lockMode} onClick={addStrand} />
+      {/* 1.109: New Strand stays available in lock mode. */}
+      <LCBtn v={ADD} label={t('add_new_strand', lang)} onClick={addStrand} />
       <LCBtn v={DELETE} label={t('delete_strand', lang)} disabled={deleteDisabled} onClick={removeSelected} />
       <LCBtn
         v={DESELECT}

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
-import { createGroup, createMask, reorderLayer, toggleLock } from '../store/actions';
+import { createGroup, createMask, reorderLayer } from '../store/actions';
 import { requestRender } from '../renderer/renderScheduler';
 import { ControlColumn } from './ControlColumn';
 import { NumberedLayerButton } from './NumberedLayerButton';
@@ -69,7 +69,6 @@ const GROUP_DIALOGS: GroupDialogs = {
 export function LayerPanel() {
   const order = useEditorStore((s) => s.doc.order);
   const strands = useEditorStore((s) => s.doc.strands);
-  const locked = useEditorStore((s) => s.doc.locked_layers);
   const lockMode = useEditorStore((s) => s.doc.lock_mode);
   const multiSelectMode = useEditorStore((s) => s.multiSelectMode);
   const multiSelectedLayers = useEditorStore((s) => s.multiSelectedLayers);
@@ -118,9 +117,8 @@ export function LayerPanel() {
   // A panel click bumps no docRevision (setSelection/setMode don't) and nothing
   // subscribes to selection changes, so CanvasStage's [docRevision,view,settings]
   // render effect never fires. We therefore repaint #c imperatively here — mirroring
-  // SelectMode.ts / ControlColumn.tsx. requestRender is rAF-coalesced, so it's
-  // harmless on the lock branch (already bumped docRevision via commitEdit) and on
-  // the locked-layer no-op early return. Covers regular Strand, AttachedStrand AND
+  // SelectMode.ts / ControlColumn.tsx. requestRender is rAF-coalesced, so double
+  // requests are harmless. Covers regular Strand, AttachedStrand AND
   // MaskedStrand (the highlight depends only on is_selected, set for all types).
   function select(name: string) {
     // OSS checks multi-select BEFORE masked_mode, so multi-select wins when both are
@@ -156,23 +154,17 @@ export function LayerPanel() {
       toggleMultiSelectLayer(name);
       return;
     }
-    // (2) Lock mode: clicking toggles that layer's lock; the clicked layer is
-    //     never left selected, but a pre-existing unrelated selection is
-    //     preserved/restored (OSS select_layer 2333-2402).
+    // (2) Lock mode (OSS 1.109 rework): clicking the layer body selects it
+    //     normally — locked or not — and does NOT switch to attach mode
+    //     (select_layer gates the attach switch on `not lock_mode`). Locking is
+    //     the padlock chip's job (NumberedLayerButton), not this click.
     if (lockMode) {
-      const prev = useEditorStore.getState().doc.selected_strand_name;
-      commitEdit((d) => toggleLock(d, name));
-      const d2 = useEditorStore.getState().doc;
-      if (prev && prev !== name && d2.strands[prev] && !d2.locked_layers.includes(prev)) {
-        setSelection({ layerName: prev, handle: null });
-      } else if (prev === name) {
-        setSelection({ layerName: null, handle: null });
-      }
+      setSelection({ layerName: name, handle: null });
       return;
     }
-    // (3) Normal selection: locked layers are inert; selecting switches the app
-    //     to Attach mode (OSS set_attach_mode tail, 2442).
-    if (locked.includes(name)) return;
+    // (3) Normal selection: selecting switches the app to Attach mode
+    //     (OSS set_attach_mode tail, 2442). Locked layers select like any other
+    //     (1.109); locks only block moving/attaching while lock mode is on.
     setSelection({ layerName: name, handle: null });
     setMode('attach');
   }

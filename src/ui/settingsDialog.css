@@ -98,17 +98,46 @@
   padding: 0 4px;
 }
 
-/* Numeric spin input. */
-.set-num {
+/* Numeric spin input — OSS 1.109 segmented [− | value | +] stepper. The value
+ * segment keeps a TIGHT gap to the steppers (406b24b9 halved it). Native
+ * spinners are hidden; the flat − / + segments do the stepping. */
+.set-num-seg {
   flex: 0 0 auto;
-  width: 90px;
-  box-sizing: border-box;
-  background: var(--set-combo-bg);
-  color: var(--text);
+  display: inline-flex;
+  align-items: stretch;
   border: 1px solid var(--set-combo-border);
   border-radius: 4px;
-  padding: 4px 6px;
+  background: var(--set-combo-bg);
+  overflow: hidden;
 }
+.set-num-seg > button {
+  flex: 0 0 auto;
+  width: 26px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.set-num-seg > button:first-child { border-right: 1px solid var(--set-combo-border); }
+.set-num-seg > button:last-child { border-left: 1px solid var(--set-combo-border); }
+.set-num-seg > button:hover { background: var(--set-list-hover); }
+.set-num {
+  flex: 0 0 auto;
+  width: 58px;
+  box-sizing: border-box;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  padding: 4px 3px;
+  text-align: center;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.set-num::-webkit-outer-spin-button,
+.set-num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 
 /* Theme/language combobox (<select>). */
 .set-combo {

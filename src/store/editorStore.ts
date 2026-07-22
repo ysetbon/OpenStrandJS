@@ -230,6 +230,13 @@ export interface EditorState {
   // Snapshot of locked_layers taken when LEAVING lock mode, restored on the next
   // entry (OSS previously_locked_layers). UI state only — not undoable.
   previouslyLockedLayers: string[];
+  // Copy/Paste Strand Data (1.109): the clipboard snapshot (OSS
+  // canvas.strand_clipboard — runtime-only, not saved, not undoable) and the
+  // remembered copy-panel checkbox states (OSS strand_data_copy_options).
+  strandClipboard: import('./strandClipboard').StrandDataSnapshot | null;
+  strandDataCopyOptions: Record<string, boolean>;
+  setStrandClipboard: (snap: import('./strandClipboard').StrandDataSnapshot | null) => void;
+  setStrandDataCopyOption: (key: string, on: boolean) => void;
   showTabs: boolean;           // tab strip visibility (Tabs toolbar toggle)
   drawNames: boolean;          // draw layer names on the canvas (renderer task: later)
   setPanMode: (b: boolean) => void;
@@ -531,9 +538,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   drawNames: false,
   setPanMode: (panMode) => set({ panMode }),
   togglePanMode: () => set((s) => ({ panMode: !s.panMode })),
-  // Switch to attach mode and arm the next draw as a new main strand. Bypassed
-  // during lock mode (the "New Strand" button is disabled there in OSS).
-  armNewStrand: () => set((s) => (s.doc.lock_mode ? {} : { mode: 'attach', newStrandArmed: true })),
+  // Switch to attach mode and arm the next draw as a new main strand. Allowed
+  // in lock mode too (OSS 1.109: New Strand stays available; only locked layers
+  // are frozen).
+  armNewStrand: () => set({ mode: 'attach', newStrandArmed: true }),
   setNewStrandArmed: (newStrandArmed) => set({ newStrandArmed }),
   // Toggling multi-select mode (on or off) always clears the multi-selection set,
   // matching OSS which resets multi_selected_layers on both enter and exit.
@@ -561,6 +569,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       get().commitEdit((d) => { d.lock_mode = false; d.locked_layers = []; });
     }
   },
+
+  strandClipboard: null,
+  strandDataCopyOptions: {},
+  setStrandClipboard: (strandClipboard) => set({ strandClipboard }),
+  setStrandDataCopyOption: (key, on) =>
+    set((s) => ({ strandDataCopyOptions: { ...s.strandDataCopyOptions, [key]: on } })),
 
   toggleTabs: () => set((s) => ({ showTabs: !s.showTabs })),
   toggleDrawNames: () => set((s) => ({ drawNames: !s.drawNames })),

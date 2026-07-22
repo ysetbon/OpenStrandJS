@@ -44,6 +44,7 @@ export const STRINGS: Record<string, Entry> = {
   hide_layer: { en: 'Hide Layer', fr: 'Masquer Couche', de: 'Ebene ausblenden', it: 'Nascondi Livello', es: 'Ocultar Capa', pt: 'Ocultar Camada', he: 'הסתר שכבה' },
   show_layer: { en: 'Show Layer', fr: 'Afficher Couche', de: 'Ebene einblenden', it: 'Mostra Livello', es: 'Mostrar Capa', pt: 'Mostrar Camada', he: 'הצג שכבה' },
   shadow_only: { en: 'Shadow Only', fr: 'Ombre Seulement', de: 'Nur Schatten', it: 'Solo Ombra', es: 'Solo Sombra', pt: 'Apenas Sombra', he: 'צל בלבד' },
+  hide_shadow: { en: 'Hide Shadow', fr: `Masquer l'Ombre`, de: 'Schatten ausblenden', it: 'Nascondi Ombra', es: 'Ocultar Sombra', pt: 'Ocultar Sombra', he: 'הסתר צל' },
   edit_mask: { en: 'Edit Mask', fr: 'Éditer Masque', de: 'Maske bearbeiten', it: 'Modifica Maschera', es: 'Editar Máscara', pt: 'Editar Máscara', he: 'ערוך מסכה' },
   reset_mask: { en: 'Reset Mask', fr: 'Réinit Masque', de: 'Maske zurücksetzen', it: 'Reimposta Maschera', es: 'Restablecer Máscara', pt: 'Redefinir Máscara', he: 'אפס מסכה' },
   // Per-mask "Edit Mask" interaction banner (strand_drawing_canvas mask_edit_mode).
@@ -52,6 +53,10 @@ export const STRINGS: Record<string, Entry> = {
   mask_edit_mode_exited: { en: 'Mask Edit Mode\nExited', fr: 'Mode Édition\nMasque Terminé', de: 'Maskenmodus\nBeendet', it: 'Modalità Mask\nTerminata', es: 'Modo Máscara\nFinalizado', pt: 'Modo Máscara\nEncerrado', he: 'מצב מסכה\nהסתיים' },
   edit_shadows: { en: 'Edit Shadows', fr: 'Modifier Ombres', de: 'Schatten Bearbeiten', it: 'Modifica Ombre', es: 'Editar Sombras', pt: 'Editar Sombras', he: 'ערוך צללים' },
   group_shadow_editor_title: { en: 'Group Shadow Editor', fr: 'Éditeur d\'Ombres de Groupe', de: 'Gruppen-Schatteneditor', it: 'Editor Ombre Gruppo', es: 'Editor de Sombras de Grupo', pt: 'Editor de Sombras de Grupo', he: 'עורך צללי קבוצה' },
+  shadow_editor_title: { en: 'Shadow Editor', fr: `Éditeur d'Ombres`, de: 'Schatten-Editor', it: 'Editor di Ombre', es: 'Editor de Sombras', pt: 'Editor de Sombras', he: 'עורך צללים' },
+  shadow_via_mask_section: { en: 'Shadows cast via masks:', fr: 'Ombres projetées via les masques :', de: 'Über Masken geworfene Schatten:', it: 'Ombre proiettate tramite maschere:', es: 'Sombras proyectadas mediante máscaras:', pt: 'Sombras projetadas através de máscaras:', he: 'צללים המוטלים דרך מסכות:' },
+  shadow_via_mask: { en: '{0} → {1} (via mask)', fr: '{0} → {1} (via masque)', de: '{0} → {1} (über Maske)', it: '{0} → {1} (tramite maschera)', es: '{0} → {1} (vía máscara)', pt: '{0} → {1} (via máscara)', he: '{0} → {1} (דרך מסכה)' },
+  shadow_no_casters: { en: 'This layer casts no shadows — no layers are below it and no mask uses it as the top strand.', fr: `Cette couche ne projette aucune ombre — aucune couche ne se trouve en dessous et aucun masque ne l'utilise comme brin supérieur.`, de: 'Diese Ebene wirft keine Schatten — keine Ebene liegt darunter und keine Maske verwendet sie als oberen Strang.', it: 'Questo livello non proietta ombre — nessun livello si trova sotto di esso e nessuna maschera lo utilizza come trefolo superiore.', es: 'Esta capa no proyecta sombras — no hay capas debajo de ella y ninguna máscara la utiliza como hebra superior.', pt: 'Esta camada não projeta sombras — não há camadas abaixo dela e nenhuma máscara a utiliza como fio superior.', he: 'שכבה זו אינה מטילה צללים — אין שכבות מתחתיה ואף מסכה אינה משתמשת בה כחוט העליון.' },
   shadow_visible: { en: 'Visible', fr: 'Visible', de: 'Sichtbar', it: 'Visibile', es: 'Visible', pt: 'Visível', he: 'גלוי' },
   shadow_full: { en: 'Full Shadow', fr: 'Ombre Complète', de: 'Voller Schatten', it: 'Ombra Completa', es: 'Sombra Completa', pt: 'Sombra Completa', he: 'צל מלא' },
   shadow_subtract_layers: { en: 'Subtract Layers', fr: 'Soustraire Calques', de: 'Ebenen Subtrahieren', it: 'Sottrai Livelli', es: 'Restar Capas', pt: 'Subtrair Camadas', he: 'החסר שכבות' },
@@ -72,6 +77,27 @@ export const STRINGS: Record<string, Entry> = {
   move_group: { en: 'Move Group', fr: 'Déplacer le Groupe', de: 'Gruppe bewegen', it: 'Sposta Gruppo', es: 'Mover Grupo', pt: 'Mover Grupo', he: 'הזז קבוצה' },
   enter_group_name: { en: 'Enter group name:', fr: 'Entrez le nom du groupe:', de: 'Gruppennamen eingeben:', it: 'Inserisci nome gruppo:', es: 'Introduce nombre del grupo:', pt: 'Digite o nome do grupo:', he: 'הזן שם קבוצה:' },
   select_all: { en: 'Select All', fr: 'Tout Sélectionner', de: 'Alle Auswählen', it: 'Seleziona Tutto', es: 'Seleccionar Todo', pt: 'Selecionar Tudo', he: 'בחר הכל' },
+  // ---- Arrows (1.109 §7) ---- (`arrow` + `show_full_arrow` already exist in
+  // the button-guide section below with identical values.)
+  show_start_arrow: { en: 'Show Start Arrow', fr: 'Afficher Flèche Départ', de: 'Startpfeil einblenden', it: 'Mostra Freccia Inizio', es: 'Mostrar Flecha Inicio', pt: 'Mostrar Flecha Início', he: 'הצג חץ התחלתי' },
+  hide_start_arrow: { en: 'Hide Start Arrow', fr: 'Masquer Flèche Départ', de: 'Startpfeil ausblenden', it: 'Nascondi Freccia Inizio', es: 'Ocultar Flecha Inicio', pt: 'Ocultar Flecha Início', he: 'הסתר חץ התחלתי' },
+  show_end_arrow: { en: 'Show End Arrow', fr: 'Afficher Flèche Fin', de: 'Endpfeil einblenden', it: 'Mostra Freccia Fine', es: 'Mostrar Flecha Fin', pt: 'Mostrar Flecha Fim', he: 'הצג חץ סופי' },
+  hide_end_arrow: { en: 'Hide End Arrow', fr: 'Masquer Flèche Fin', de: 'Endpfeil ausblenden', it: 'Nascondi Freccia Fine', es: 'Ocultar Flecha Fin', pt: 'Ocultar Flecha Fim', he: 'הסתר חץ סופי' },
+  hide_full_arrow: { en: 'Hide Full Arrow', fr: 'Masquer la flèche complète', de: 'Vollständigen Pfeil ausblenden', it: 'Nascondi freccia completa', es: 'Ocultar flecha completa', pt: 'Ocultar seta completa', he: 'הסתר חץ מלא' },
+  // ---- Copy/Paste Strand Data (1.109 93c4565b) ----
+  copy_strand_data: { en: 'Copy Strand Data', fr: 'Copier les données du brin', de: 'Strangdaten kopieren', it: 'Copia dati del filo', es: 'Copiar datos del cordón', pt: 'Copiar dados do cordão', he: 'העתק נתוני גדיל' },
+  paste_copied_data: { en: 'Paste Copied Data', fr: 'Coller les données copiées', de: 'Kopierte Daten einfügen', it: 'Incolla dati copiati', es: 'Pegar datos copiados', pt: 'Colar dados copiados', he: 'הדבק נתונים שהועתקו' },
+  angle_from_start_point: { en: 'Angle from Start Point', fr: 'Angle depuis le point de départ', de: 'Winkel vom Startpunkt', it: 'Angolo dal punto iniziale', es: 'Ángulo desde el punto inicial', pt: 'Ângulo do ponto inicial', he: 'זווית מנקודת ההתחלה' },
+  angle_from_end_point: { en: 'Angle from End Point', fr: 'Angle depuis le point final', de: 'Winkel vom Endpunkt', it: 'Angolo dal punto finale', es: 'Ángulo desde el punto final', pt: 'Ângulo do ponto final', he: 'זווית מנקודת הסיום' },
+  strand_data_start_point: { en: 'Start Point', fr: 'Point de départ', de: 'Startpunkt', it: 'Punto iniziale', es: 'Punto inicial', pt: 'Ponto inicial', he: 'נקודת התחלה' },
+  strand_data_end_point: { en: 'End Point', fr: 'Point final', de: 'Endpunkt', it: 'Punto finale', es: 'Punto final', pt: 'Ponto final', he: 'נקודת סיום' },
+  strand_data_control_points: { en: 'Control Points', fr: 'Points de contrôle', de: 'Kontrollpunkte', it: 'Punti di controllo', es: 'Puntos de control', pt: 'Pontos de controle', he: 'נקודות בקרה' },
+  strand_data_width: { en: 'Width', fr: 'Largeur', de: 'Breite', it: 'Larghezza', es: 'Ancho', pt: 'Largura', he: 'רוחב' },
+  strand_data_strand_color: { en: 'Strand Color', fr: 'Couleur du brin', de: 'Strangfarbe', it: 'Colore del filo', es: 'Color del cordón', pt: 'Cor do cordão', he: 'צבע הגדיל' },
+  strand_data_stroke_color: { en: 'Stroke Color', fr: 'Couleur du contour', de: 'Konturfarbe', it: 'Colore contorno', es: 'Color del contorno', pt: 'Cor do contorno', he: 'צבע קו המתאר' },
+  strand_data_clipboard_hint: { en: '{count} properties from {source}', fr: '{count} propriétés de {source}', de: '{count} Eigenschaften von {source}', it: '{count} proprietà da {source}', es: '{count} propiedades de {source}', pt: '{count} propriedades de {source}', he: '{count} מאפיינים מ־{source}' },
+  copy: { en: 'Copy', fr: 'Copier', de: 'Kopieren', it: 'Copia', es: 'Copiar', pt: 'Copiar', he: 'העתק' },
+  clear: { en: 'Clear', fr: 'Effacer', de: 'Leeren', it: 'Cancella', es: 'Borrar', pt: 'Limpar', he: 'נקה' },
   apply: { en: 'Apply', fr: 'Appliquer', de: 'Übernehmen', it: 'Applica', es: 'Aplicar', pt: 'Aplicar', he: 'החל' },
   ok: { en: 'OK', fr: 'OK', de: 'OK', it: 'OK', es: 'OK', pt: 'OK', he: 'אישור' },
   cancel: { en: 'Cancel', fr: 'Annuler', de: 'Abbrechen', it: 'Annulla', es: 'Cancelar', pt: 'Cancelar', he: 'ביטול' },
@@ -153,7 +179,8 @@ export const STRINGS: Record<string, Entry> = {
 
   // ---- Settings dialog: Tutorial / Button Guide / What's New / About / History / color picker (faithful from OpenStrandStudio/src/translations.py) ----
   selected_strand_settings: { en: 'Selected Strand', fr: 'Brin Sélectionné', de: 'Ausgewählter Strang', it: 'Filo Selezionato', es: 'Hebra Seleccionada', pt: 'Fio Selecionado', he: 'חוט נבחר' },
-  save_load_settings_title: { en: 'Save/Load Settings', fr: 'Enregistrer/Charger les paramètres', de: 'Einstellungen speichern/laden', it: 'Salva/Carica Impostazioni', es: 'Guardar/Cargar Configuración', pt: 'Guardar/Carregar Configurações', he: 'שמירה/טעינת הגדרות' },
+  // 1.109 (5d5b81a): shortened so the auto-sized category panel never elides.
+  save_load_settings_title: { en: 'Save/Load', fr: 'Enregistrer/Charger', de: 'Speichern/Laden', it: 'Salva/Carica', es: 'Guardar/Cargar', pt: 'Guardar/Carregar', he: 'שמירה/טעינה' },
   tutorial: { en: 'Tutorial', fr: 'Tutoriel', de: 'Tutorial', it: 'Tutorial', es: 'Tutorial', pt: 'Tutorial', he: 'מדריך' },
   button_explanations: { en: 'Button Guide', fr: 'Guide des boutons', de: 'Schaltflächen', it: 'Guida ai pulsanti', es: 'Guía de botones', pt: 'Guia de botões', he: 'מדריך כפתורים' },
   history: { en: 'History', fr: 'Historique', de: 'Verlauf', it: 'Cronologia', es: 'Historial', pt: 'Histórico', he: 'היסטוריה' },
