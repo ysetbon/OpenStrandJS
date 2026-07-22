@@ -36,11 +36,14 @@
 .cc-btn:active { background: var(--bgp); }
 .cc-btn.checked { background: var(--bgp); }
 
-.cc-glyph {
-  font-size: var(--gs);
-  color: var(--gc);
-  line-height: 1;
+/* PNG icon (OSS layer_panel_icons): sized by the same per-button --gs the old
+ * text glyphs used, so proportions match the desktop app. */
+.cc-icon {
+  width: var(--gs);
+  height: var(--gs);
+  object-fit: contain;
   pointer-events: none;
+  user-select: none;
 }
 
 .cc-btn:disabled {
@@ -48,4 +51,4 @@
   border-color: #A9A9A9;
   cursor: default;
 }
-.cc-btn:disabled .cc-glyph { color: #808080; }
+.cc-btn:disabled .cc-icon { filter: grayscale(1) opacity(0.55); }

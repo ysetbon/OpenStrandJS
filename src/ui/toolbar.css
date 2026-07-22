@@ -78,3 +78,11 @@
   justify-content: center;
 }
 .tb-gear:hover { background: rgba(200, 200, 200, 0.55); }
+.tb-gear-img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+  display: block;
+}

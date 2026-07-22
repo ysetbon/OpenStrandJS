@@ -14,6 +14,7 @@ import {
   type CopyProperty,
 } from '../store/strandClipboard';
 import { Modal } from './Modal';
+import { ossIcon } from './icons';
 import { t } from './i18n';
 import './layerButton.css';
 
@@ -534,13 +535,21 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
               commitEdit((d) => toggleLock(d, name));
             }}
           >
-            {locked ? '🔒' : '🔓'}
+            <img
+              className="nlb-padlock-img"
+              src={ossIcon(locked ? 'lock_closed' : 'lock_open')}
+              alt=""
+              draggable={false}
+            />
           </button>
         )}
 
-        {/* Copy/Paste Strand Data indicators (1.109, redesigned in 75f8e8e5):
-            copy badge on the source layer (click = hint + Clear popup),
-            hover-only ⇤/⇥ one-click paste chips on eligible targets. */}
+        {/* Copy/Paste Strand Data indicators (1.109, redesigned in 75f8e8e5),
+            drawn from the SAME OSS PNGs on the OSS geometry: a 26px indicator
+            column on the trailing side (right for LTR, mirrored for RTL) —
+            the copy badge is a 26×26 square centered on it (click = hint +
+            Clear popup); eligible paste targets show the segmented ▲/● paste
+            stack on hover (▲ top = anchor from start, ● bottom = from end). */}
         {isCopySource && (
           <button
             type="button"
@@ -548,7 +557,7 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
             aria-label="strand data clipboard"
             onClick={(e) => { e.stopPropagation(); setBadgeMenu({ x: e.clientX, y: e.clientY }); }}
           >
-            📋
+            <img src={ossIcon('copy_badge')} alt="" draggable={false} />
           </button>
         )}
         {isPasteTarget && (
@@ -558,14 +567,14 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
               title={t('angle_from_start_point', lang)}
               onClick={(e) => { e.stopPropagation(); doChipPaste('start'); }}
             >
-              ⇤
+              <img src={ossIcon('chip_start')} alt="" draggable={false} />
             </button>
             <button
               type="button"
               title={t('angle_from_end_point', lang)}
               onClick={(e) => { e.stopPropagation(); doChipPaste('end'); }}
             >
-              ⇥
+              <img src={ossIcon('chip_end')} alt="" draggable={false} />
             </button>
           </span>
         )}
