@@ -311,7 +311,63 @@ targeting, new-strand + group-creation flows.
 - [ ] P3 Delete dead `TabBar.tsx` (imported nowhere).
 - [ ] P3 Colors section key unused in LayerStateDialog.
 (Copy/paste-specific items live in §2; width dialog in §8.)
-### 6. Canvas modes (move/attach/mask/rotate/select)
+### 6. Canvas modes (move/attach/mask/rotate/select) — AUDIT COMPLETE
+
+Parity confirmed (extensive; MOVE_MODE_OSS_SPEC.md §7 gaps since fixed):
+move grab/drag/release passes + square geometry/colors + snap gating + abort;
+attach eligibility/hover colors/viewport clamp; mask two-pick flow + hover +
+banner; select click semantics + select→attach promotion; pan gestures.
+Note: OSS Ctrl-snap no-ops when setting disabled — port already matches.
+
+- [ ] P1 ROTATE MODE missing entirely (`rotate_mode.py`, full spec in audit):
+      SizeAll cursor; square grab areas side 2×strand.width per FREE endpoint
+      only (`!has_circles[side]`, masks skipped, hidden NOT skipped); pivot =
+      opposite endpoint; length-preserving chord rotation; cps rotated about
+      pivot by Δangle; attached strands rigidly translated by delta; eased
+      16ms/0.3 interpolation; one undo on release; NO visual overlay.
+- [ ] P1 `show_move_highlights`/`show_hover_highlights` settings are dead —
+      overlayRenderer never reads them (OSS gates all squares/circles/hover:
+      `strand_drawing_canvas.py:2311,2320,2706,2893,2920`, `select_mode.py:80-82`).
+- [ ] P1 Attach: unarmed empty-space press must be a NO-OP (OSS draws only
+      when armed via New Strand/N — `attach_mode.py:603-681`; canvas branch
+      `:4255-4269` is dead code); OSSJS starts drawing on any empty press.
+- [ ] P1 Esc must NOT clear selection (OSS: Esc only exits mask edit,
+      `main_window.py:2272-2280`; deselect is `A`/button). Keep mid-drag abort.
+- [ ] P1 Select-mode mask hover highlight (spec: fill mask's rendered region
+      rgba(255,230,160,0.667) + 2px black silhouette — same geometry as
+      `maskFootprintHit`; OSS `select_mode.py:70-105`).
+- [ ] P1 Side-line bands in hit/hover footprint: oriented rect per circle-less
+      end (center = endpoint + (stroke/2)·tangent, len width+2·stroke across,
+      thickness stroke) in `strandFootprintHit` + highlight polygon
+      (HIT_TOL 0.5 doesn't cover the ~4-8px bar).
+- [ ] P2 Move-mode cursor: OSS OpenHand ('grab'), never changes on hover/drag
+      (`strand_drawing_canvas.py:4985-4987`); OSSJS crosshair + hover 'grab'.
+- [ ] P2 Rotate/angle mode cursors 'move' (SizeAll); view mode OpenHand.
+- [ ] P2 Move hover must use OSS hover rules, not full moveGrab: cp1 always
+      hoverable; cp2/center only when `triangle_has_moved`; plain forward
+      endpoint scan, no connection pref/reverse pass (`move_mode.py:2234-2338`).
+- [ ] P2 Mask picked-strand border width = strand.stroke_width × 2 (not fixed
+      2px) (`mask_mode.py:264-272`).
+- [ ] P2 `maskPending`/hover must clear on mode switch (OSS activate/
+      deactivate reset; `editorStore.ts:480` keeps them).
+- [ ] P2 Attach: create AttachedStrand at PRESS (live during drag, layer
+      appears in panel; `attach_mode.py:1111-1241`) not at release.
+- [ ] P2 Attach target: first-fit in forward z-order, start before end,
+      recursing children (`attach_mode.py:989-1107`); OSSJS picks nearest.
+- [ ] P2 Select mode should block locked layers in THIS baseline
+      (`strand_drawing_canvas.py:6534-6539`) — OSSJS cites a newer rework;
+      ASK USER which baseline wins before changing.
+- [ ] P3 Armed new-strand timer path rounds direction to 45° steps + gradual
+      catch-up + cursor warp (`attach_mode.py:778-880`) — web can't warp;
+      decide whether to implement 45° quantization. Flag to user.
+- [ ] P3 Attach-child end should grid-snap via `_get_snapped_attachment_position`
+      (axis-preferred one-grid-unit anti-collapse) vs 40px min-len clamp.
+- [ ] P3 Wheel zoom center-anchored + zoom_out resets pan in OSS; pan clamp
+      to content∪8000² box; ClosedHand cursor while panning.
+- [ ] P3 cp2 idle square gate: only `control_point2_shown` (not sep>6).
+- [ ] P3 Attach: while dragging, keep the affected parent circle highlighted
+      (OSS hides others only); eraser dash pattern; banner placement in-panel.
+- [ ] P3 New-strand <8px cancel is JS-only (OSS cancels only zero-length).
 ### 7. Main window, toolbar, shortcuts — AUDIT COMPLETE
 
 Parity confirmed: button inventory/order/colors (all 14 hex triples exact),
@@ -425,7 +481,46 @@ mechanics, rename flow strings.
 - [ ] P3 Delete dead FallbackSelectDialog/FallbackRenameDialog code paths.
 - [ ] FOLLOW-UP: verify auto-delete of groups when a member gets masked
       (`update_groups_with_new_strand` `group_layers.py:4540-4576`).
-### 9. Theme (dark mode), RTL/Hebrew, tooltips, cursors, misc chrome
+### 9. Theme (dark mode), RTL/Hebrew, tooltips, cursors, misc chrome — AUDIT COMPLETE
+
+Parity confirmed: theme token transcription hex-for-hex, RTL core (dir flip,
+canvas LTR, splitter, layer-button mirror, group tree, HtmlBlock), fonts,
+samples, About page, app icon, mask-edit banner, drop line, canvas constants.
+
+- [ ] P1 Canvas background ignores theme: renderer fills opaque 'white' every
+      frame (`web/strand-renderer.js:1290-1291,1523,1621-1622`); OSS canvas bg
+      = window bg per theme — default #ECECEC / light #FFFFFF / dark #2C2C2C
+      (`main_window.py:712/871/1034`). Also `--canvas-bg` for .theme-default
+      must be #ECECEC. (OSS's own `set_theme` "Dark" branch is dead code —
+      match observed behavior.)
+- [ ] P1 Scrollbars unthemed: `--scrollbar-*` tokens defined but consumed
+      nowhere — style WebKit scrollbars for .lp-list, .gp-tree, modal bodies,
+      settings pages per theme (dark track #1A1A1A handle #2D2D2D hover
+      #4A4A4A pressed #606060; light #F5F5F5/#D4D4D4/#B0B0B0/#909090;
+      default #DADADA/#BFBFBF/#A0A0A0/#808080, `main_window.py:776-1144`).
+- [ ] P2 `color-scheme: dark` missing — native inputs/checkboxes/selects
+      render light chrome in dark theme.
+- [ ] P2 Modal footer buttons unthemed: wire dead `--dialog-btn-*` tokens
+      (dark #252525 bg / 2px #000 border / white text, hover #505050,
+      pressed #151515; min-width 80, `main_window.py:751-766,932-947,1074-1089`).
+- [ ] P2 Tab edge never mirrors for Hebrew (grip right, + left, chips RTL,
+      `tab_bar_widget.py:189-247,436-469`); mounted inside dir="ltr" wrapper.
+- [ ] P2 Dialogs missing `lang` → don't flip in Hebrew: LayerStateDialog.tsx:46,
+      TabChip.tsx:82 (unsaved confirm), LayerControlStack.tsx:129 (delete-all).
+- [ ] P2 Grid: color rgb(200,200,200) w1, thicken 1.5/rgb(180,180,180) below
+      zoom 0.5, never auto-hide (OSSJS skips when grid_size×zoom < 4).
+      (Duplicate of §7 item — fix once in renderer.)
+- [ ] P2 beforeunload dirty-tab guard (dup of §7).
+- [ ] P3 Pan tool active should show grab/grabbing cursor on canvas.
+- [ ] P3 Create Group button hover/pressed states (default #A8A5A1/#7E7B77,
+      light #B6B1AA/#86817A, dark #505050/#606060, `main_window.py:841-1171`).
+- [ ] P3 document.title from `main_window_title` + `<html lang>` update +
+      theme-color meta per theme.
+- [ ] P3 Undo/redo tooltips append "(unavailable)" when disabled
+      (`undo_redo_manager.py:2510-2537`).
+- [ ] P3 Main splitter handle transparent in OSS; OSSJS shows --panel-border.
+- [ ] P3 Dark h-scrollbar handle #181818 distinct from v #2D2D2D (token can't
+      express; optional).
 
 ## Fix phases
 
