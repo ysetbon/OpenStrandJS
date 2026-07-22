@@ -93,9 +93,15 @@ export const AttachMode: Mode = {
     if (free) {
       drag = { kind: 'attach', start: free.pos, parent: free.layer, side: free.side };
       st.setPending({ kind: 'attach', start: free.pos, end: free.pos, parent: free.layer, side: free.side });
-    } else {
+    } else if (forceNew) {
       drag = { kind: 'new', start: p.world };
       st.setPending({ kind: 'new', start: p.world, end: p.world });
+    } else {
+      // OSS: an UNARMED press over empty space in attach mode does nothing —
+      // new strands are drawn only via the New Strand button / 'N'
+      // (attach_mode.py:603-681; the canvas create branch at
+      // strand_drawing_canvas.py:4255-4269 is dead code).
+      return;
     }
     st.beginGesture();
     st.setDragging(true);

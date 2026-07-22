@@ -195,12 +195,17 @@ function overlaySquare(ctx: CanvasRenderingContext2D, c: Point, halfWorld: numbe
 
 function drawMoveOverlays(ctx: CanvasRenderingContext2D, st: OverlayState): void {
   const { doc, view, selection, hover, dragging } = st;
+  // OSS gates ALL move-mode squares on show_move_highlights
+  // (strand_drawing_canvas.py:2320,2706) and the yellow hover fill on
+  // show_hover_highlights (:2311).
+  if (!st.settings.show_move_highlights) return;
   const isEndpoint = (h: HandleKind) => h === 'start' || h === 'end';
   const draw = (name: string, h: { handle: HandleKind; pos: Point }) => {
     const p = worldToScreen(h.pos, view);
     const isEnd = isEndpoint(h.handle);
     const moving = dragging && selection.layerName === name && selection.handle === h.handle;
-    const hovered = !dragging && hover.layerName === name && hover.handle === h.handle;
+    const hovered = !dragging && st.settings.show_hover_highlights &&
+      hover.layerName === name && hover.handle === h.handle;
     const fill = moving || hovered ? FILL_HOT : isEnd ? FILL_ENDPOINT_IDLE : FILL_CP_IDLE;
     overlaySquare(ctx, p, isEnd ? ENDPOINT_HALF : CP_HALF, view.zoom, fill);
   };
@@ -248,6 +253,10 @@ function drawAttachOverlays(ctx: CanvasRenderingContext2D, st: OverlayState): vo
   // BEFORE the press, so suppress them while dragging and let drawPending be the
   // sole preview.
   if (st.dragging) return;
+  // OSS gates the attach circles on show_move_highlights too
+  // (strand_drawing_canvas.py:2893) and their yellow hover on
+  // show_hover_highlights (:2920).
+  if (!st.settings.show_move_highlights) return;
   const ends: [keyof Pick<StrandRecord, 'start' | 'end'>, 0 | 1, HandleKind][] = [
     ['start', 0, 'start'], ['end', 1, 'end'],
   ];
@@ -257,7 +266,8 @@ function drawAttachOverlays(ctx: CanvasRenderingContext2D, st: OverlayState): vo
     for (const [key, side, handle] of ends) {
       if (s.has_circles[side]) continue;                  // occupied -> not attachable
       const p = worldToScreen(s[key], view);
-      const hovered = hover.layerName === name && hover.handle === handle;
+      const hovered = st.settings.show_hover_highlights &&
+        hover.layerName === name && hover.handle === handle;
       const affected = !!pending && pending.kind === 'attach' && pending.parent === name && pending.side === side;
       const fill = hovered || affected ? FILL_ATTACH_HOT : side === 0 ? FILL_ATTACH_START : FILL_ATTACH_END;
       overlayCircle(ctx, p, ATTACH_R, view.zoom, fill);
@@ -352,7 +362,7 @@ function drawPending(ctx: CanvasRenderingContext2D, st: OverlayState): void {
 const MASK_HL_BORDER = 2;                            // OSS pen width 2 (world px ×zoom)
 function maskBodyHighlight(
   ctx: CanvasRenderingContext2D, st: OverlayState, layer: string,
-  fill: string, outline: string,
+  fill: string, outline: string, borderW?: number,
 ): void {
   const s = st.doc.strands[layer];
   if (!s || s.type === 'MaskedStrand') return;
@@ -379,7 +389,7 @@ function maskBodyHighlight(
   ctx.closePath();
   ctx.fillStyle = fill; ctx.fill();
   ctx.lineJoin = 'miter';
-  ctx.lineWidth = MASK_HL_BORDER * st.view.zoom; ctx.strokeStyle = outline; ctx.stroke();
+  ctx.lineWidth = (borderW ?? MASK_HL_BORDER) * st.view.zoom; ctx.strokeStyle = outline; ctx.stroke();
   ctx.restore();
 }
 
@@ -402,14 +412,21 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, st: OverlayState): vo
   // with the identical QColor(255,230,160,170) fill + black 2px border. In mask mode
   // it is suppressed for an already-picked strand, and each picked strand instead
   // gets the red@128 selection highlight (mask_mode.py:272-312).
-  if (mode === 'select' && st.hover.layerName) {
+  // Both hover fills are gated on show_hover_highlights (select_mode.py:80-82).
+  const hoverOn = st.settings.show_hover_highlights;
+  if (mode === 'select' && hoverOn && st.hover.layerName) {
     maskBodyHighlight(ctx, st, st.hover.layerName, MASK_HOVER_FILL, MASK_HOVER_OUTLINE);
   } else if (mode === 'mask') {
-    const hov = st.hover.layerName;
+    const hov = hoverOn ? st.hover.layerName : null;
     if (hov && !st.maskPending.includes(hov)) {
       maskBodyHighlight(ctx, st, hov, MASK_HOVER_FILL, MASK_HOVER_OUTLINE);
     }
-    for (const layer of st.maskPending) maskBodyHighlight(ctx, st, layer, MASK_PICK_FILL, MASK_PICK_OUTLINE);
+    for (const layer of st.maskPending) {
+      // OSS picked border width = strand.stroke_width * 2 (mask_mode.py:264-272).
+      const ps = st.doc.strands[layer];
+      maskBodyHighlight(ctx, st, layer, MASK_PICK_FILL, MASK_PICK_OUTLINE,
+        ps ? ps.stroke_width * 2 : undefined);
+    }
   }
 
   // Mask-EDIT eraser rectangle (OSS mask_edit_mode paint, strand_drawing_canvas.py

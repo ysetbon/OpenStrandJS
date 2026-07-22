@@ -328,10 +328,10 @@ Note: OSS Ctrl-snap no-ops when setting disabled — port already matches.
       opposite endpoint; length-preserving chord rotation; cps rotated about
       pivot by Δangle; attached strands rigidly translated by delta; eased
       16ms/0.3 interpolation; one undo on release; NO visual overlay.
-- [ ] P1 `show_move_highlights`/`show_hover_highlights` settings are dead —
+- [x] P1 `show_move_highlights`/`show_hover_highlights` settings are dead —
       overlayRenderer never reads them (OSS gates all squares/circles/hover:
       `strand_drawing_canvas.py:2311,2320,2706,2893,2920`, `select_mode.py:80-82`).
-- [ ] P1 Attach: unarmed empty-space press must be a NO-OP (OSS draws only
+- [x] P1 Attach: unarmed empty-space press must be a NO-OP (OSS draws only
       when armed via New Strand/N — `attach_mode.py:603-681`; canvas branch
       `:4255-4269` is dead code); OSSJS starts drawing on any empty press.
 - [x] P1 Esc must NOT clear selection (OSS: Esc only exits mask edit,
@@ -349,9 +349,9 @@ Note: OSS Ctrl-snap no-ops when setting disabled — port already matches.
 - [ ] P2 Move hover must use OSS hover rules, not full moveGrab: cp1 always
       hoverable; cp2/center only when `triangle_has_moved`; plain forward
       endpoint scan, no connection pref/reverse pass (`move_mode.py:2234-2338`).
-- [ ] P2 Mask picked-strand border width = strand.stroke_width × 2 (not fixed
+- [x] P2 Mask picked-strand border width = strand.stroke_width × 2 (not fixed
       2px) (`mask_mode.py:264-272`).
-- [ ] P2 `maskPending`/hover must clear on mode switch (OSS activate/
+- [x] P2 `maskPending`/hover must clear on mode switch (OSS activate/
       deactivate reset; `editorStore.ts:480` keeps them).
 - [ ] P2 Attach: create AttachedStrand at PRESS (live during drag, layer
       appears in panel; `attach_mode.py:1111-1241`) not at release.

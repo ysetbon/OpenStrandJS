@@ -483,7 +483,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   // Any explicit mode switch disarms a pending new-strand draw (matching OSS, where
   // choosing another tool exits new-strand mode). armNewStrand() sets the flag
   // separately so it survives the attach-mode switch it performs.
-  setMode: (mode) => set({ mode, newStrandArmed: false }),
+  // OSS set_mode runs the outgoing mode's deactivate() (strand_drawing_canvas.py
+  // :4973,5015-5018), which resets per-mode hover/pick state — a pending mask
+  // pick must not survive a mode round-trip.
+  setMode: (mode) => set({ mode, newStrandArmed: false, maskPending: [], hover: { layerName: null, handle: null } }),
   // Selection is ONE thing in OSS (canvas.selected_strand): the canvas highlight
   // and the layer-panel button must agree. We mirror that by keeping
   // doc.selected_strand_name in lockstep with the live selection here — the canvas
