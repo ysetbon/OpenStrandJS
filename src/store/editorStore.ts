@@ -204,6 +204,10 @@ export interface EditorState {
   setSelection: (sel: Selection) => void;
   setDragging: (b: boolean) => void;
   setDragMoving: (moving: string[]) => void;
+  // Live angle-adjust session (OSS AngleAdjustMode): the overlay draws the red
+  // angle arc + green start→end line for this strand while the dialog is open.
+  angleAdjust: { name: string; deltaDeg: number } | null;
+  setAngleAdjust: (a: { name: string; deltaDeg: number } | null) => void;
   setHover: (hover: { layerName: string | null; handle: HandleKind | null }) => void;
   setPending: (pending: PendingStrand | null) => void;
   setMaskPending: (maskPending: string[]) => void;
@@ -497,6 +501,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   )),
   setDragging: (dragging) => set({ dragging }),
   setDragMoving: (dragMoving) => set({ dragMoving }),
+  angleAdjust: null,
+  setAngleAdjust: (angleAdjust) => set({ angleAdjust }),
   setHover: (hover) => set({ hover }),
   setPending: (pending) => set({ pending }),
   setMaskPending: (maskPending) => set({ maskPending }),

@@ -190,20 +190,21 @@ OSSJS today: mode `'angle'` is a passive stub (`src/modes/index.ts:16`);
 nowhere**; building blocks exist (`setStrandAngle` actions.ts:267-282,
 GroupRotateDialog gesture pattern, Modal Esc/Enter/RTL, theme tokens).
 
-- [ ] P1 Port `AngleAdjustDialog.tsx` per the spec above (GroupRotateDialog
+- [x] P1 Port `AngleAdjustDialog.tsx` per the spec above (GroupRotateDialog
       pattern: snapshot on open, live mutateDoc preview + drag fast-path, one
       commit on OK, doc restore on Esc/close), wired from Toolbar with
       selection/mask gating + auto-unpress, return to previous mode.
-- [ ] P1 Add missing translation key `adjust_angle_and_length` (all 7 langs:
+- [x] P1 Add missing translation key `adjust_angle_and_length` (all 7 langs:
       translations.py:351/890/1531/2062/2652/3242/3841).
-- [ ] P1 CP rotation/scaling + attached-strand cp translation in the action
+- [x] P1 CP rotation/scaling + attached-strand cp translation in the action
       (deltas vs `moveHandle`/`setStrandAngle` which only carry passive cp2).
-- [ ] P2 Canvas overlay: faded strand + red arc + green line during dialog.
+- [x] P2 Canvas overlay: red arc + green line during dialog (50%-faded
+      strand redraw skipped — renderer approximation, revisit if noticed).
 - [ ] P2 `draw_only_affected_strand` wiring while dialog open.
-- [ ] P2 SizeAll cursor for the mode; Esc-revert quirk: OSS restores only the
+- [x] P2 SizeAll cursor for the mode; Esc-revert quirk: OSS restores only the
       endpoints (not cps/children) — use full-doc restore instead (better and
       simpler; note divergence).
-- [ ] P3 RTL: numeric inputs forced dir="ltr" inside mirrored rows.
+- [x] P3 RTL: numeric inputs forced dir="ltr" inside mirrored rows.
 - [ ] P3 Delete or mount-decision for orphaned `StrandProperties.tsx`.
 ### 4. Settings dialog — AUDIT COMPLETE
 
@@ -343,7 +344,7 @@ Note: OSS Ctrl-snap no-ops when setting disabled — port already matches.
       (HIT_TOL 0.5 doesn't cover the ~4-8px bar).
 - [ ] P2 Move-mode cursor: OSS OpenHand ('grab'), never changes on hover/drag
       (`strand_drawing_canvas.py:4985-4987`); OSSJS crosshair + hover 'grab'.
-- [ ] P2 Rotate/angle mode cursors 'move' (SizeAll); view mode OpenHand.
+- [x] P2 Rotate/angle mode cursors 'move' (SizeAll); view mode OpenHand.
 - [ ] P2 Move hover must use OSS hover rules, not full moveGrab: cp1 always
       hoverable; cp2/center only when `triangle_has_moved`; plain forward
       endpoint scan, no connection pref/reverse pass (`move_mode.py:2234-2338`).
@@ -382,7 +383,7 @@ RTL core mirroring, translation keys of buttons.
       angle button always stays enabled (`:2172-2173`). OSSJS never disables.
 - [ ] P2 Edit Mask session must disable all toolbar buttons
       (`main_window.py:2757-2793`); OSSJS only swallows shortcuts.
-- [ ] P2 Angle button preconditions + previous-mode restore
+- [x] P2 Angle button preconditions + previous-mode restore
       (`main_window.py:1245-1262,1209-1243`) — covered by §3 port.
 - [ ] P2 Checked button fill: OSS swaps bg to the pressed shade + 4px black
       border (`main_window.py:1284-1289`); OSSJS only adds the border

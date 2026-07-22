@@ -12,6 +12,8 @@ export const modes: Record<ModeName, Mode> = {
   attach: AttachMode,
   mask: MaskMode,
   view: passiveMode('view'),       // read-only inspect
-  rotate: passiveMode('rotate'),   // stub (OSS rotate gesture not yet ported)
-  angle: passiveMode('angle'),     // stub (OSS angle-adjust not yet ported)
+  rotate: passiveMode('rotate', 'move'), // stub gesture; OSS cursor = SizeAll (strand_drawing_canvas.py:5003-5005)
+  // Angle-adjust: interaction lives entirely in AngleAdjustDialog (opened by the
+  // toolbar button); the mode itself only sets the OSS SizeAll cursor (:4995-4998).
+  angle: passiveMode('angle', 'move'),
 };

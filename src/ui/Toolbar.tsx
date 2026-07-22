@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import { SettingsDialog } from './SettingsDialog';
 import { LayerStateDialog } from './LayerStateDialog';
+import { AngleAdjustDialog } from './dialogs/AngleAdjustDialog';
 import { t } from './i18n';
 import { ossIcon } from './icons';
 import { loadProject, serializeProject } from '../io/saveLoad';
@@ -58,6 +59,9 @@ export function Toolbar() {
   const lang = useEditorStore((s) => s.settings.language);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [stateOpen, setStateOpen] = useState(false);
+  // Angle Adjust session: the strand being adjusted + the mode to restore on
+  // close (OSS previous_mode, main_window.py:1209-1262).
+  const [angleSession, setAngleSession] = useState<{ layer: string; prevMode: ModeName } | null>(null);
 
   function applyDoc(json: unknown) {
     const doc = loadProject(json);
@@ -89,6 +93,17 @@ export function Toolbar() {
   };
 
   const onClick = (b: Btn) => {
+    if (b.mode === 'angle') {
+      // OSS handle_angle_adjust_click (main_window.py:1245-1262): needs a
+      // selected non-mask strand, else the button unpresses immediately and
+      // nothing opens. The dialog opens synchronously on entry (:43-71).
+      const st = useEditorStore.getState();
+      const sel = st.doc.selected_strand_name;
+      if (!sel || st.doc.strands[sel]?.type === 'MaskedStrand') return;
+      setAngleSession({ layer: sel, prevMode: mode });
+      setMode('angle');
+      return;
+    }
     if (b.mode) { setMode(b.mode); return; }
     if (b.toggle === 'grid') { setSettings({ show_grid: !showGrid }); return; }
     if (b.toggle === 'points') { mutateDoc((d) => { d.show_control_points = !d.show_control_points; }); return; }
@@ -122,6 +137,21 @@ export function Toolbar() {
         <img className="tb-gear-img" src={ossIcon('settings_icon')} alt="" draggable={false} />
       </button>
 
+      {angleSession && (
+        <AngleAdjustDialog
+          layerName={angleSession.layer}
+          onClose={(ok) => {
+            // OSS confirm/cancel both exit the one-shot mode: clear the
+            // selection and return to the previous mode (angle_adjust_mode.py
+            // :572-629, main_window.py unpress_angle_adjust_button).
+            const st = useEditorStore.getState();
+            st.setSelection({ layerName: null, handle: null });
+            st.setMode(angleSession.prevMode === 'angle' ? 'attach' : angleSession.prevMode);
+            setAngleSession(null);
+            void ok;
+          }}
+        />
+      )}
       {stateOpen && <LayerStateDialog onClose={() => setStateOpen(false)} />}
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
       <input ref={fileRef} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={onFile} />

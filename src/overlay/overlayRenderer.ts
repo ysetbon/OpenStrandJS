@@ -33,6 +33,8 @@ export interface OverlayState {
   eraser: { layerName: string; rect: { minX: number; minY: number; maxX: number; maxY: number } } | null;
   mode: ModeName;
   dragging: boolean;
+  // Live angle-adjust session (dialog open): red angle arc + green chord.
+  angleAdjust?: { name: string; deltaDeg: number } | null;
 }
 
 // --- OSS glyph/handle constants (canvas/world units; * zoom -> screen px) ---
@@ -453,4 +455,32 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, st: OverlayState): vo
   // Mode-specific endpoint/CP handles, drawn last (on top, translucent).
   if (mode === 'move') drawMoveOverlays(ctx, st);
   else if (mode === 'attach') drawAttachOverlays(ctx, st);
+
+  // Angle-adjust session overlay (angle_adjust_mode.py:641-676): a red angle
+  // arc centered on the pivot (start), radius min(50, 2·width), swept by the
+  // current angle delta, plus a straight green 2px start→end line.
+  if (st.angleAdjust) {
+    const s = doc.strands[st.angleAdjust.name];
+    if (s) {
+      const z = st.view.zoom;
+      const a = worldToScreen(s.start, st.view);
+      const b = worldToScreen(s.end, st.view);
+      const hc = st.settings.highlight_color;
+      const r = Math.min(50, s.width * 2) * z;
+      const cur = Math.atan2(b.y - a.y, b.x - a.x);
+      const sweep = (((st.angleAdjust.deltaDeg % 360) + 360) % 360) * (Math.PI / 180);
+      ctx.save();
+      ctx.strokeStyle = `rgba(${hc.r},${hc.g},${hc.b},${hc.a > 1 ? hc.a / 255 : hc.a})`;
+      ctx.lineWidth = 2 * z;
+      ctx.beginPath();
+      ctx.arc(a.x, a.y, r, cur - sweep, cur, false);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgb(0,255,0)';
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
 }
