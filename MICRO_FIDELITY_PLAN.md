@@ -321,7 +321,8 @@ attach eligibility/hover colors/viewport clamp; mask two-pick flow + hover +
 banner; select click semantics + select→attach promotion; pan gestures.
 Note: OSS Ctrl-snap no-ops when setting disabled — port already matches.
 
-- [ ] P1 ROTATE MODE missing entirely (`rotate_mode.py`, full spec in audit):
+- [x] P1 ROTATE MODE missing entirely (`rotate_mode.py`, full spec in audit;
+      ported minus the cosmetic 16ms/0.3 easing timer):
       SizeAll cursor; square grab areas side 2×strand.width per FREE endpoint
       only (`!has_circles[side]`, masks skipped, hidden NOT skipped); pivot =
       opposite endpoint; length-preserving chord rotation; cps rotated about
