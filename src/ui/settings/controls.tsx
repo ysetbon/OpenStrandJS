@@ -58,7 +58,11 @@ export function CheckRow(
   );
 }
 
-// Numeric spin input. `decimals` formats the displayed value; min/max/step bound it.
+// Numeric spin input — OSS 1.109 SegmentedSpinBox (segmented_spin_box.py,
+// c37da502 + the 406b24b9 gap tightening): a [− | value | +] segmented stepper
+// replacing the native spin arrows. The center stays a directly editable field
+// (typed entry clamps); the flat − / + segments step by `step` and round to
+// `decimals` so float steps don't accumulate drift.
 export function NumberInput(
   { value, onChange, min, max, step, decimals, title }:
   { value: number; onChange: (v: number) => void; min?: number; max?: number; step?: number; decimals?: number; title?: string },
@@ -70,17 +74,24 @@ export function NumberInput(
     if (max != null) n = Math.min(max, n);
     return n;
   };
+  const stepBy = (dir: 1 | -1) => {
+    const n = clamp(value + dir * (step ?? 1));
+    onChange(decimals != null ? Number(n.toFixed(decimals)) : n);
+  };
   return (
-    <input
-      type="number"
-      className="set-num"
-      title={title}
-      value={decimals != null ? Number(value).toFixed(decimals) : value}
-      min={min}
-      max={max}
-      step={step ?? 1}
-      onChange={(e) => onChange(clamp(parseFloat(e.target.value)))}
-    />
+    <span className="set-num-seg" title={title}>
+      <button type="button" tabIndex={-1} aria-label="decrease" onClick={() => stepBy(-1)}>−</button>
+      <input
+        type="number"
+        className="set-num"
+        value={decimals != null ? Number(value).toFixed(decimals) : value}
+        min={min}
+        max={max}
+        step={step ?? 1}
+        onChange={(e) => onChange(clamp(parseFloat(e.target.value)))}
+      />
+      <button type="button" tabIndex={-1} aria-label="increase" onClick={() => stepBy(1)}>+</button>
+    </span>
   );
 }
 

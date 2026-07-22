@@ -176,12 +176,19 @@ renderer is inert.
 
 ## Progress
 
-**Status: §1–§7 DONE and verified. Remaining: §8 cosmetics only
-(segmented +/− spin boxes, auto-sized settings category panel, button-guide
-arrow/multi-select sections' remaining guide-text i18n) plus the §7 tail
-(arrow color/transparency/texture/shaft-style/sizes submenu UI — the renderer
-already honors color/transparency/head, so only the menu chrome is missing;
-shaft patterns, head textures, and arrow_casts_shadow stay deferred).**
+**Status: §1–§8 DONE and verified — the v1.109 port is functionally complete.
+Remaining tails (chrome/documentation only): the arrow customization submenu UI
+(color/transparency/texture/shaft-style/Arrow Sizes — the renderer already
+honors color, transparency, and head visibility; patterns/textures/
+arrow_casts_shadow deferred) and the button-guide's new arrow/multi-select
+documentation sections with their guide-text i18n.**
+
+- **§8 DONE** (this commit): every numeric settings field is now the OSS 1.109
+  segmented [− | value | +] stepper (SegmentedSpinBox port with the tightened
+  value gap; native spinners hidden, typed entry still clamps), and the
+  Save/Load category label is shortened in all 7 languages (5d5b81a — the JS
+  nav auto-sizes already, so only the label applied). Verified live: 4 checks
+  (11 nav entries incl. "Save/Load", steppers present, +/− step and restore).
 
 - **§7 DONE** (this commit): arrow RENDERING is ported and pixel-verified
   against the real Qt oracle running in-container (PyQt5 headless +

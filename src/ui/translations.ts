@@ -179,7 +179,8 @@ export const STRINGS: Record<string, Entry> = {
 
   // ---- Settings dialog: Tutorial / Button Guide / What's New / About / History / color picker (faithful from OpenStrandStudio/src/translations.py) ----
   selected_strand_settings: { en: 'Selected Strand', fr: 'Brin Sélectionné', de: 'Ausgewählter Strang', it: 'Filo Selezionato', es: 'Hebra Seleccionada', pt: 'Fio Selecionado', he: 'חוט נבחר' },
-  save_load_settings_title: { en: 'Save/Load Settings', fr: 'Enregistrer/Charger les paramètres', de: 'Einstellungen speichern/laden', it: 'Salva/Carica Impostazioni', es: 'Guardar/Cargar Configuración', pt: 'Guardar/Carregar Configurações', he: 'שמירה/טעינת הגדרות' },
+  // 1.109 (5d5b81a): shortened so the auto-sized category panel never elides.
+  save_load_settings_title: { en: 'Save/Load', fr: 'Enregistrer/Charger', de: 'Speichern/Laden', it: 'Salva/Carica', es: 'Guardar/Cargar', pt: 'Guardar/Carregar', he: 'שמירה/טעינה' },
   tutorial: { en: 'Tutorial', fr: 'Tutoriel', de: 'Tutorial', it: 'Tutorial', es: 'Tutorial', pt: 'Tutorial', he: 'מדריך' },
   button_explanations: { en: 'Button Guide', fr: 'Guide des boutons', de: 'Schaltflächen', it: 'Guida ai pulsanti', es: 'Guía de botones', pt: 'Guia de botões', he: 'מדריך כפתורים' },
   history: { en: 'History', fr: 'Historique', de: 'Verlauf', it: 'Cronologia', es: 'Historial', pt: 'Histórico', he: 'היסטוריה' },
