@@ -23,6 +23,25 @@
   margin-top: 8px;
 }
 
+/* OSS QDialog QPushButton per theme (main_window.py:751-766 dark / 932-947
+ * light / 1074-1089 default): themed fill + 2px border, min-width 80. The
+ * --dialog-btn-* tokens existed but were never consumed — footers rendered
+ * native UA buttons (visibly wrong in dark mode). */
+.modal-footer button {
+  background: var(--dialog-btn-bg);
+  color: var(--text);
+  border: 2px solid var(--dialog-btn-border);
+  border-radius: 4px;
+  min-width: 80px;
+  padding: 8px 10px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.modal-footer button:hover:not(:disabled) { background: var(--dialog-btn-hover); }
+.modal-footer button:active:not(:disabled) { background: var(--dialog-btn-pressed); }
+.modal-footer button:disabled { opacity: 0.55; cursor: default; }
+
 /* ---- Group dialogs (Task C4) ---- */
 
 /* A labelled slider row: label, range, numeric input on one line. */

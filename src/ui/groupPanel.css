@@ -25,6 +25,12 @@
   border-radius: var(--create-group-radius);
 }
 
+/* OSS hover/pressed states (main_window.py:1156-1171 default / 1015-1030
+ * light / 841-867 dark). */
+.gp-create-btn:hover { background: var(--create-group-hover); }
+.gp-create-btn:active { background: var(--create-group-pressed);
+}
+
 .gp-tree {
   display: flex;
   flex-direction: column;

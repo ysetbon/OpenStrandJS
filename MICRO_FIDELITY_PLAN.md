@@ -495,14 +495,14 @@ samples, About page, app icon, mask-edit banner, drop line, canvas constants.
       (`main_window.py:712/871/1034`). Also `--canvas-bg` for .theme-default
       must be #ECECEC. (OSS's own `set_theme` "Dark" branch is dead code —
       match observed behavior.)
-- [ ] P1 Scrollbars unthemed: `--scrollbar-*` tokens defined but consumed
+- [x] P1 Scrollbars unthemed: `--scrollbar-*` tokens defined but consumed
       nowhere — style WebKit scrollbars for .lp-list, .gp-tree, modal bodies,
       settings pages per theme (dark track #1A1A1A handle #2D2D2D hover
       #4A4A4A pressed #606060; light #F5F5F5/#D4D4D4/#B0B0B0/#909090;
       default #DADADA/#BFBFBF/#A0A0A0/#808080, `main_window.py:776-1144`).
-- [ ] P2 `color-scheme: dark` missing — native inputs/checkboxes/selects
+- [x] P2 `color-scheme: dark` missing — native inputs/checkboxes/selects
       render light chrome in dark theme.
-- [ ] P2 Modal footer buttons unthemed: wire dead `--dialog-btn-*` tokens
+- [x] P2 Modal footer buttons unthemed: wire dead `--dialog-btn-*` tokens
       (dark #252525 bg / 2px #000 border / white text, hover #505050,
       pressed #151515; min-width 80, `main_window.py:751-766,932-947,1074-1089`).
 - [ ] P2 Tab edge never mirrors for Hebrew (grip right, + left, chips RTL,
@@ -514,7 +514,7 @@ samples, About page, app icon, mask-edit banner, drop line, canvas constants.
       (Duplicate of §7 item — fix once in renderer.)
 - [ ] P2 beforeunload dirty-tab guard (dup of §7).
 - [x] P3 Pan tool active should show grab/grabbing cursor on canvas.
-- [ ] P3 Create Group button hover/pressed states (default #A8A5A1/#7E7B77,
+- [x] P3 Create Group button hover/pressed states (default #A8A5A1/#7E7B77,
       light #B6B1AA/#86817A, dark #505050/#606060, `main_window.py:841-1171`).
 - [ ] P3 document.title from `main_window_title` + `<html lang>` update +
       theme-color meta per theme.
