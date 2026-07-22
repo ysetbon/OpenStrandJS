@@ -138,22 +138,22 @@
 }
 
 /* ---- Copy/Paste Strand Data indicators (1.109, OSS geometry) ----
- * A 26px-wide indicator column on the TRAILING side (right for LTR, 13px from
- * the edge — 4px clear of the green strip; mirrored for RTL). Copy badge =
+ * A 26px-wide indicator column on the TRAILING side (right for LTR, 15px from
+ * the edge — 9px green strip + 6px gap (_INDICATOR_EDGE_OFFSET = 15); mirrored for RTL). Copy badge =
  * sharp 26×26 copy_badge.png vertically centered (click = hint + Clear).
  * Paste chips = one segmented sharp rectangle on the same column, split into
  * a ▲ start cell (top) and a ● end cell (bottom), shown while the button is
  * hovered (numbered_layer_button.py copy_badge_rect / paste_chip_rects). ---- */
 .nlb-copybadge {
   position: absolute;
-  right: 13px;
+  right: 15px;
   top: 50%;
   transform: translateY(-50%);
   width: 26px;
   height: 26px;
-  padding: 2px;
-  border: none;
-  background: rgba(255, 255, 255, 0.9);
+  padding: 3px;
+  border: 1px solid rgba(30, 30, 30, 0.78);
+  background: rgba(255, 255, 255, 0.88);
   cursor: pointer;
   /* Badge and chips never coexist on one button (the source never shows
    * chips, per OSS), but keep the badge above the stack as a belt-and-braces
@@ -163,26 +163,33 @@
   align-items: center;
   justify-content: center;
 }
-.nlb-copybadge:hover { background: rgba(0, 120, 215, 0.3); }
+.nlb-copybadge:hover {
+  /* OSS overlays the blue tint ON the white fill (paint order), not instead of it. */
+  background:
+    linear-gradient(rgba(0, 120, 215, 0.27), rgba(0, 120, 215, 0.27)),
+    rgba(255, 255, 255, 0.88);
+}
 .nlb-copybadge img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
-.nlb-rtl .nlb-copybadge { right: auto; left: 13px; }
+.nlb-rtl .nlb-copybadge { right: auto; left: 15px; }
 .nlb-chips {
   position: absolute;
-  right: 13px;
+  right: 15px;
   top: 50%;
   transform: translateY(-50%);
   width: 26px;
   display: none;
   flex-direction: column;
   z-index: 5;                    /* the hover stack paints OVER the badge */
-  border: 1px solid rgba(30, 30, 30, 0.5);
-  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(30, 30, 30, 0.78);
+  background: rgba(255, 255, 255, 0.88);
+  box-sizing: border-box;
+  height: 32px;
 }
 .nlb:hover .nlb-chips { display: flex; }
 .nlb-chips button {
   width: 100%;
-  height: 16px;
-  padding: 1px;
+  height: 15px;
+  padding: 0;
   border: none;
   background: transparent;
   cursor: pointer;
@@ -192,15 +199,9 @@
 }
 .nlb-chips button + button { border-top: 1px solid rgba(30, 30, 30, 0.35); }
 .nlb-chips button:hover { background: rgba(0, 120, 215, 0.25); }
-.nlb-chips button img { width: 12px; height: 12px; object-fit: contain; pointer-events: none; }
-.nlb-rtl .nlb-chips { right: auto; left: 13px; }
+.nlb-chips button img { width: 10px; height: 10px; object-fit: contain; pointer-events: none; }
+.nlb-rtl .nlb-chips { right: auto; left: 15px; }
 
-.nlb-copy-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 220px;
-}
 
 /* ---- attachable: right-edge 9px black-outlined column + 7px green inner box ----
  * Outline = 2px black, 9px wide, full height, flush right (drawRect(w-9,0,9,h)).
@@ -274,4 +275,18 @@
   pointer-events: none;
   border: 0;
   padding: 0;
+}
+
+/* OSS QToolTip shown on right-click over the copy badge / paste chips
+   (numbered_layer_button.py:1772-1789). */
+.nlb-indicator-tip {
+  position: fixed;
+  z-index: 3000;
+  padding: 3px 6px;
+  background: #FFFFDC;
+  color: #000;
+  border: 1px solid #767676;
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
 }

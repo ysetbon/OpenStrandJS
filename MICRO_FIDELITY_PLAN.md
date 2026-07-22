@@ -116,45 +116,45 @@ extra in OSSJS 9. Same 7 languages both sides.
 Translation keys are at verbatim parity in all 7 languages (`translations.py:466-478`
 vs `translations.ts:79-100`); every divergence is in composed strings and layout.
 
-- [ ] P1 Copy confirm button says "Copy", OSS shows **"Copy (N)"** with live
+- [x] P1 Copy confirm button says "Copy", OSS shows **"Copy (N)"** with live
       ticked-count, disabled at 0 (`strand_data_menu.py:255-256` vs
       `NumberedLayerButton.tsx:678-680`). ← most likely the user's "copy message".
-- [ ] P1 Invented modal title "Copy Strand Data - {layerName}" — OSS copy panel
+- [x] P1 Invented modal title "Copy Strand Data - {layerName}" — OSS copy panel
       is untitled (`strand_data_menu.py:174-287` vs `NumberedLayerButton.tsx:671`).
-- [ ] P1 Invented "Close" button — OSS panel has only the "Copy (N)" button
+- [x] P1 Invented "Close" button — OSS panel has only the "Copy (N)" button
       (`strand_data_menu.py:218-233` vs `NumberedLayerButton.tsx:677`).
-- [ ] P1 Paste menu row lacks the gray clipboard hint "{count} properties from
+- [x] P1 Paste menu row lacks the gray clipboard hint "{count} properties from
       {source}" as first row of the expanded panel (`strand_data_menu.py:295,321-329`,
       key `strand_data_clipboard_hint`; OSSJS shows it only in the badge popup).
-- [ ] P1 Menu labels miss the "  ▾"/"▴" expand arrows on Paste/Copy rows
+- [x] P1 Menu labels miss the "  ▾"/"▴" expand arrows on Paste/Copy rows
       (`strand_data_menu.py:107,121,149-165` vs `NumberedLayerButton.tsx:296,309`).
-- [ ] P1 Copy UI is a backdrop Modal; OSS uses an inline expandable QWidgetAction
+- [x] P1 Copy UI is a backdrop Modal; OSS uses an inline expandable QWidgetAction
       panel inside the same context menu, Copy closes the menu
       (`strand_data_menu.py:92-172,278-284` vs `NumberedLayerButton.tsx:631-702`).
-- [ ] P1 Paste UI is an always-expanded compound row; OSS is a collapsed
+- [x] P1 Paste UI is an always-expanded compound row; OSS is a collapsed
       dropdown with indented (20px) full-width rows "Angle from Start/End Point"
       (`strand_data_menu.py:289-319` vs `NumberedLayerButton.tsx:294-301`).
-- [ ] P1 Select All checkbox not tristate — OSS shows PartiallyChecked
+- [x] P1 Select All checkbox not tristate — OSS shows PartiallyChecked
       (`strand_data_menu.py:209-210,243-254` vs `NumberedLayerButton.tsx:659,685-692`).
-- [ ] P1 Right-clicking a non-ticked layer: OSS adds it to the multi-selection
+- [x] P1 Right-clicking a non-ticked layer: OSS adds it to the multi-selection
       (gold border, included in paste targets, `layer_panel.py:1935-1938`); OSSJS
       only builds a transient list for hide/shadow — paste excludes the layer
       (`NumberedLayerButton.tsx:228-233,267-269`).
-- [ ] P1 Right-click on badge/chips: OSS shows an explanation QToolTip instead
+- [x] P1 Right-click on badge/chips: OSS shows an explanation QToolTip instead
       of the menu (`layer_panel.py:1925-1933`, `numbered_layer_button.py:1772-1789`);
       OSSJS opens the menu and adds hover title tooltips OSS deliberately removed
       (`NumberedLayerButton.tsx:507-515,573,580`).
 - [ ] P2 bias_control data (triangle/circle bias + positions) not copied within
       Control Points (`strand_data_clipboard.py:104-111,213-219` vs
       `strandClipboard.ts:13-14`).
-- [ ] P2 Disabled/hint row colors: OSS #909090 on #F0F0F0 panel (`strand_data_menu.py:84-90`);
+- [x] P2 Disabled/hint row colors: OSS #909090 on #F0F0F0 panel (`strand_data_menu.py:84-90`);
       OSSJS #888 light / #777 dark transparent (`contextMenu.css:57-68`).
-- [ ] P3 Indicator column edge offset 13px, OSS `_INDICATOR_EDGE_OFFSET = 15`
+- [x] P3 Indicator column edge offset 13px, OSS `_INDICATOR_EDGE_OFFSET = 15`
       (`numbered_layer_button.py:72-74` vs `layerButton.css:149,168,171,196`).
-- [ ] P3 Badge chrome: OSS 1px border rgba(30,30,30,200), fill rgba(255,255,255,225),
+- [x] P3 Badge chrome: OSS 1px border rgba(30,30,30,200), fill rgba(255,255,255,225),
       hover blue overlaid on fill (`numbered_layer_button.py:77-125`); OSSJS
       borderless, hover replaces fill (`layerButton.css:147-167`).
-- [ ] P3 Paste chip stack ≈35px tall / 12px glyphs; OSS 26×32 stack, ~10px glyphs,
+- [x] P3 Paste chip stack ≈35px tall / 12px glyphs; OSS 26×32 stack, ~10px glyphs,
       ● drawn as filled ellipse (`numbered_layer_button.py:128-182,1757-1770`).
 - [ ] P3 Badge popup lacks OSS `_keep_menu_on_screen` grow-reposition nuance
       (`strand_data_menu.py:20-37`; OSSJS viewport clamp is close enough — verify).
