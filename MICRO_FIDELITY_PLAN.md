@@ -21,7 +21,7 @@ Status legend: `[ ]` open · `[x]` fixed (commit ref) · `[-]` won't fix (reason
 - [ ] P2 Hidden-strand full arrow (hidden strands should still show full arrow).
 - [ ] P2 Button Guide page: arrow-details section, multi-selection section,
       lock-mode icons + fuller descriptions, canvas-indicator imagery + i18n.
-- [ ] P2 `WidthConfigDialog`: OSSJS uses `prompt()` for per-strand width —
+- [x] P2 `WidthConfigDialog`: OSSJS uses `prompt()` for per-strand width —
       port the real slider dialog.
 - [ ] P2 Per-row "Show Current Shadow" path preview in shadow editor dialogs.
 - [ ] P2 Mask hover highlight in select mode (no highlight drawn today).
@@ -454,7 +454,7 @@ mechanics, rename flow strings.
 - [ ] P1 Per-strand shadow editor: missing info label `shadow_editor_info` and
       the strand-level batch toggle row (color box + bold name + Visible/Full/
       Subtract/Show All, `shadow_editor_dialog.py:654-659,766-849`).
-- [ ] P1 Per-strand WidthConfigDialog replaces `window.prompt`
+- [x] P1 Per-strand WidthConfigDialog replaces `window.prompt`
       (`NumberedLayerButton.tsx:197-222`): title "Change Width", min 400×220,
       grid_unit 27; thickness QDoubleSpinBox 0.5–100.0 step 1.0 1-dec +
       "squares"; stroke-px slider 1..max(1,total//2) recalc on total change;
