@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import { isRTL } from './i18n';
+import { t } from './translations';
 import { Toolbar } from './Toolbar';
 import { TabEdge } from './TabEdge';
 import { CanvasStage } from './CanvasStage';
@@ -22,9 +23,12 @@ export function App() {
   useEffect(() => {
     const root = document.documentElement;
     root.dir = rtl ? 'rtl' : 'ltr';
+    root.lang = language;
     root.classList.remove('theme-default', 'theme-light', 'theme-dark');
     root.classList.add(`theme-${theme}`);
-  }, [theme, rtl]);
+    // OSS setWindowTitle(main_window_title) — same string, localized.
+    document.title = t('main_window_title', language);
+  }, [theme, rtl, language]);
 
   // Background session-history recorder (feeds the Settings → History page).
   useEffect(() => startHistoryRecorder(), []);

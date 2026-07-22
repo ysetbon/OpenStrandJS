@@ -241,8 +241,9 @@ persistence coverage (no dropped fields).
 - [ ] P3 History load error shown without title (OSS `history_load_error_title`).
 - [ ] P3 DefaultWidthDialog thickness input: native spinner, should be
       segmented stepper like the rest.
-- [ ] P3 pt translations of width-dialog labels are French copies
-      (`translations.ts:599-603`) — fix Portuguese.
+- [-] P3 pt width-dialog labels are French — verified to be OSS's OWN bug
+      (translations.py pt locale carries French for these 5 keys); verbatim
+      parity kept.
 - [ ] P3 ButtonGuide heading color reads DOM class non-reactively.
 - [ ] P3 settingsJson.ts "36-key" comment → 33.
 - [ ] P3 Language combo cosmetics (flag 40px w/ theme border, item h48,

@@ -1,5 +1,6 @@
 import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
+import { t } from './translations';
 import { TabChip } from './TabChip';
 import './tabEdge.css';
 
@@ -35,6 +36,7 @@ function anchorPoint(anchor: AnchorId, c: Size, p: Size): Pt {
 // Floating, draggable tab edge parented over the canvas (absolute inside .canvas-wrap).
 export function TabEdge(): JSX.Element {
   const tabs = useEditorStore((s) => s.tabs);
+  const lang = useEditorStore((s) => s.settings.language);
   const activeTabId = useEditorStore((s) => s.activeTabId);
   const newTab = useEditorStore((s) => s.newTab);
   const tabEdgePosition = useEditorStore((s) => s.tabEdgePosition);
@@ -169,8 +171,8 @@ export function TabEdge(): JSX.Element {
         <button
           type="button"
           className="tab-edge-plus"
-          title="New tab"
-          aria-label="New tab"
+          title={t('new_tab', lang)}
+          aria-label={t('new_tab', lang)}
           onClick={newTab}
         >
           <svg width="14" height="14" viewBox="0 0 22 22" aria-hidden focusable="false">

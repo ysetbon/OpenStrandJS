@@ -45,6 +45,7 @@ export function LayerStateDialog(props: { onClose: () => void }): JSX.Element {
   return (
     <Modal
       title={t('current_layer_state', lang)}
+      lang={lang}
       onClose={onClose}
       footer={<button onClick={onClose}>{t('close', lang)}</button>}
     >

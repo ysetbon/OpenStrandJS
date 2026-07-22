@@ -22,6 +22,7 @@ import {
   DEFAULT_STRAND_WIDTH, DEFAULT_STROKE_WIDTH,
 } from '../model/factory';
 import { areVisuallyEqual } from './visualEqual';
+import { t as tr } from '../ui/translations';
 
 export function emptyDocument(): EditorDocument {
   return {
@@ -338,7 +339,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     };
   }),
 
-  // Clone the active doc into a brand-new tab named "<name> copy". The new tab
+  // Clone the active doc into a brand-new tab named "<name> copy" (localized
+  // suffix, OSS tab_copy_suffix). The new tab
   // becomes active and starts clean (no dirty flag, fresh history).
   duplicateTab: (id) => set((s) => {
     // Persist the active doc/view into its tab first so the source is current.
@@ -348,7 +350,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const srcDoc = src.doc ?? (id === s.activeTabId ? s.doc : emptyDocument());
     const nid = s.nextTabId;
     const copyDoc = cloneDoc(srcDoc);
-    const tabs = [...persisted, { id: nid, name: `${src.name} copy`, doc: copyDoc, view: src.view }];
+    const tabs = [...persisted, { id: nid, name: `${src.name} ${tr('tab_copy_suffix', s.settings.language)}`, doc: copyDoc, view: src.view }];
     return {
       tabs, activeTabId: nid, nextTabId: nid + 1,
       doc: copyDoc, view: src.view ? { ...src.view } : { ...DEFAULT_VIEW, width: s.view.width, height: s.view.height },

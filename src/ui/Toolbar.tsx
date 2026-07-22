@@ -38,7 +38,7 @@ const BTNS: Btn[] = [
   { key: 'save_image',  c: ['#7D344D', '#B36E89', '#7D344D'], action: 'image' },
   { key: 'toggle_control_points', c: ['#4CAF50', '#81C784', '#388E3C'], toggle: 'points' },
   { key: 'toggle_shadow', c: ['rgba(176,190,197,.7)', 'rgba(196,207,212,.7)', 'rgba(156,173,182,.7)'], toggle: 'shadow' },
-  { key: 'tabs', label: 'Tabs', c: ['#a34d92', '#b85baa', '#833a75'], toggle: 'tabs' },
+  { key: 'tabs', c: ['#a34d92', '#b85baa', '#833a75'], toggle: 'tabs' },
 ];
 
 const btnVars = (c: [string, string, string]): React.CSSProperties =>
