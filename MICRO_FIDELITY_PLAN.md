@@ -39,69 +39,69 @@ Counts: OSS en 488 keys; OSSJS 396 keys; shared 387; missing in OSSJS 101;
 extra in OSSJS 9. Same 7 languages both sides.
 
 **Hardcoded English where an OSS key exists (P1):**
-- [ ] P1 `tabs` (py:17) — `label: 'Tabs'` hardcoded `Toolbar.tsx:41`.
-- [ ] P1 `new_tab` (py:18) — hardcoded `TabEdge.tsx:172-173`, `TabBar.tsx:24`.
-- [ ] P1 `close_tab` (py:19 "Close tab") — hardcoded `title="Close"` `TabBar.tsx:21`.
-- [ ] P1 `duplicate_tab` (py:20) — hardcoded `TabChip.tsx:64-65`.
-- [ ] P1 Control-column tooltips fall back to English (keys absent, and OSS texts
+- [x] P1 `tabs` (py:17) — `label: 'Tabs'` hardcoded `Toolbar.tsx:41`.
+- [x] P1 `new_tab` (py:18) — hardcoded `TabEdge.tsx:172-173`, `TabBar.tsx:24`.
+- [x] P1 `close_tab` (py:19 "Close tab") — hardcoded `title="Close"` `TabBar.tsx:21`.
+- [x] P1 `duplicate_tab` (py:20) — hardcoded `TabChip.tsx:64-65`.
+- [x] P1 Control-column tooltips fall back to English (keys absent, and OSS texts
       differ from the fallbacks — `ControlColumn.tsx:84-96`): `reset_tooltip`
       py:337 ('Reset:\nKeep only current state\nas first state'), `undo_tooltip`
       py:344, `redo_tooltip` py:345, `zoom_in_tooltip` py:341 ('Zoom In', JS says
       'Zoom in (coming soon)'), `zoom_out_tooltip` py:342, `pan_tooltip` py:343,
       `refresh_tooltip` py:338, `center_tooltip` py:339, `hide_mode_tooltip`
       py:340 (full multi-line 'Multi-Layer Select:…' text).
-- [ ] P1 `tab_copy_suffix` (py:26 'copy') — duplicate-tab title suffix untranslated.
+- [x] P1 `tab_copy_suffix` (py:26 'copy') — duplicate-tab title suffix untranslated.
 - [ ] P1 `shadow_editor_info` (py:67 'Shadows cast by <b>{0}</b> onto layers
       below:') — info line absent from StrandShadowEditorDialog.tsx.
 
 **English values that differ on shared keys:**
-- [ ] P1 `whats_new_info` — OSSJS still ships the v1.108 content; OSS py:289 is
+- [x] P1 `whats_new_info` — OSSJS still ships the v1.108 content; OSS py:289 is
       the v1.109 list (10 items: Lock Mode Redesigned … Copy & Paste Strand
       Data, © 2026 / Version 1.109). All 7 languages one version behind.
-- [ ] P1 `lock_layers_desc` (py:222) — OSS has the long 1.109 padlock text;
+- [x] P1 `lock_layers_desc` (py:222) — OSS has the long 1.109 padlock text;
       OSSJS has pre-1.109 one-liner. All languages behind.
-- [ ] P1 `select_layers_to_lock` (py:334) — OSS 'Click a padlock to lock/unlock
+- [x] P1 `select_layers_to_lock` (py:334) — OSS 'Click a padlock to lock/unlock
       a layer; click a layer to select it'; OSSJS pre-1.109 wording.
-- [ ] P1 `shadow_editor_help_text` (py:79) — OSS 4-part <b>Visible/Full Shadow/
+- [x] P1 `shadow_editor_help_text` (py:79) — OSS 4-part <b>Visible/Full Shadow/
       Subtract Layers/Shadow Path</b> HTML; OSSJS invented one-liner.
-- [ ] P1 `gif_explanation_3` (py:369) + `gif_explanation_4` (py:370) — stale
+- [x] P1 `gif_explanation_3` (py:369) + `gif_explanation_4` (py:370) — stale
       captions in OSSJS (all languages).
-- [ ] P1 `shadow_subtract_layers` fr 'Retirer Couches' / he 'הסר שכבות' —
+- [x] P1 `shadow_subtract_layers` fr 'Retirer Couches' / he 'הסר שכבות' —
       OSSJS fr/he differ (D-section of audit).
 - [-] `shadow_hide_all`, `shadow_path_hide`, `shadow_visible_on/off` (he) —
       OSS values are duplicates/typos ('Show All' for hide-all etc.); OSSJS
       "fixed" them. DECISION: keep the OSSJS fix unless strict parity is wanted
       (flag to user).
-- [ ] P3 `x_grid_steps`/`y_grid_steps` case: OSS 'X Grid Steps' vs JS
+- [x] P3 `x_grid_steps`/`y_grid_steps` case: OSS 'X Grid Steps' vs JS
       'X grid steps'; fr 'Pas Grille X' vs 'Pas de grille X'.
-- [ ] P3 fr nits: `group_shadow_editor_title`, `precise_angle` (nbsp before
+- [x] P3 fr nits: `group_shadow_editor_title`, `precise_angle` (nbsp before
       colon), `shadow_no_layers`; he `group_shadow_editor_title`.
 
 **Missing key groups (port with features or as text-only):**
-- [ ] P1 `main_window_title` (py:5) — title not sourced from translations.
+- [x] P1 `main_window_title` (py:5) — title not sourced from translations.
 - [ ] P2 History clear-confirm flow missing entirely: `confirm_clear_history_title`
       py:559, `confirm_clear_history_text` py:560, `history_cleared_text` py:564 —
       HistoryPage.tsx:62 clears with no confirmation.
-- [ ] P2 Arrow submenu keys (16): `arrow_sizes` py:513, `adjust` py:514,
+- [x] P2 Arrow submenu keys (16): `arrow_sizes` py:513, `adjust` py:514,
       `arrow_color/transparency/texture/shaft_style` py:537-540,
       `show_arrow_head` py:541, `arrow_casts_shadow` py:542, `texture_*`
       py:543-546, `shaft_*` py:547-550.
-- [ ] P2 Dash/extension menu items: `hide/show_start/end_extension` py:494-497.
-- [ ] P2 Width-dialog extras: `restore_default_closing_knot_stroke` py:455,
+- [x] P2 Dash/extension menu items: `hide/show_start/end_extension` py:494-497.
+- [x] P2 Width-dialog extras: `restore_default_closing_knot_stroke` py:455,
       `make_elliptical_end` py:460, `stroke_pixels_label` py:590.
-- [ ] P2 Button-guide 1.109 sections (~21 keys): multi-select batch menu
+- [x] P2 Button-guide 1.109 sections (~21 keys): multi-select batch menu
       py:196-199, copy/paste guide py:200-207, canvas indicators py:208-213,
       arrow guide py:189-195.
-- [ ] P2 Layer State Info panel: `layer_state_log_title` py:43,
+- [x] P2 Layer State Info panel: `layer_state_log_title` py:43,
       `layer_state_info_title/tooltip` py:44-45, `layer_state_info_text` py:99.
-- [ ] P2 Misc: `adjust_angle_and_length` py:351, `currently_unavailable` py:346,
+- [x] P2 Misc: `adjust_angle_and_length` py:351, `currently_unavailable` py:346,
       `groups` py:432, `newest_strand/layer` py:437-438, `group_replace_confirm`
       py:554, `error` py:555, `unsaved_tabs_on_exit` py:23 (quit guard flow
       missing), `gif_placeholder_1..4` py:371-374.
 - [ ] P3 Hardcoded strings with no OSS key: 'Drag to move' TabEdge.tsx:161,
       load-failure alert Toolbar.tsx:74, '(missing)' LayerStateDialog.tsx:69,
       aria-labels controls.tsx:83,93 / NumberedLayerButton.tsx:563.
-- [ ] P3 D3 fallback omissions (fr/he/de/it/es/pt entries omitted where OSS
+- [x] P3 D3 fallback omissions (fr/he/de/it/es/pt entries omitted where OSS
       value == English: `x`, `x_plus_180`, `angle` fr, `X_angle` fr,
       `attachable` fr, `shadow_visible_on/off` fr/es) — no visible effect;
       fill for strictness.
@@ -309,7 +309,7 @@ targeting, new-strand + group-creation flows.
 - [ ] P3 Whole button `cursor:pointer`; OSS pointer only on padlock/badge/chips.
 - [ ] P3 Color pickers: OSS themed+translated QColorDialog with alpha; OSSJS
       native input, no alpha edit.
-- [ ] P3 Delete dead `TabBar.tsx` (imported nowhere).
+- [x] P3 Delete dead `TabBar.tsx` (imported nowhere).
 - [ ] P3 Colors section key unused in LayerStateDialog.
 (Copy/paste-specific items live in §2; width dialog in §8.)
 ### 6. Canvas modes (move/attach/mask/rotate/select) — AUDIT COMPLETE
@@ -375,7 +375,7 @@ Parity confirmed: button inventory/order/colors (all 14 hex triples exact),
 zoom limits 0.1–5, grid size 28, pan/center/reset behaviors, mask-edit banner,
 RTL core mirroring, translation keys of buttons.
 
-- [ ] P1 Startup defaults inverted: OSS grid ON (`strand_drawing_canvas.py:184`),
+- [x] P1 Startup defaults inverted: OSS grid ON (`strand_drawing_canvas.py:184`),
       shadow OFF (`:1320`, `main_window.py:336`); OSSJS `show_grid: false`,
       `shadow_enabled: true` (`editorStore.ts:45,34`). Flip both.
 - [ ] P2 Active mode's toolbar button should be disabled (`main_window.py:2104-2167`);
@@ -407,7 +407,7 @@ RTL core mirroring, translation keys of buttons.
 - [ ] P2 Zoom in/out buttons are disabled stubs in OSSJS; OSS steps ±10% about
       canvas center (`layer_panel.py:481-560`, canvas `:1560-1577`).
 - [ ] P3 Wheel zoom anchored at cursor in OSSJS vs canvas center in OSS.
-- [ ] P3 Grid color: OSS opaque rgb(200,200,200) w1, thickens 1.5/rgb(180,180,180)
+- [x] P3 Grid color: OSS opaque rgb(200,200,200) w1, thickens 1.5/rgb(180,180,180)
       below zoom 0.5 (`strand_drawing_canvas.py:3256-3276`); OSSJS
       rgba(0,0,0,0.08) (`web/strand-renderer.js:1631-1634`, export `:1308`).
 - [ ] P3 Toolbar geometry: bar 40px/btn 32px/maxw 90/font bold 14px/radius 6/
@@ -488,7 +488,7 @@ Parity confirmed: theme token transcription hex-for-hex, RTL core (dir flip,
 canvas LTR, splitter, layer-button mirror, group tree, HtmlBlock), fonts,
 samples, About page, app icon, mask-edit banner, drop line, canvas constants.
 
-- [ ] P1 Canvas background ignores theme: renderer fills opaque 'white' every
+- [x] P1 Canvas background ignores theme: renderer fills opaque 'white' every
       frame (`web/strand-renderer.js:1290-1291,1523,1621-1622`); OSS canvas bg
       = window bg per theme — default #ECECEC / light #FFFFFF / dark #2C2C2C
       (`main_window.py:712/871/1034`). Also `--canvas-bg` for .theme-default
@@ -506,9 +506,9 @@ samples, About page, app icon, mask-edit banner, drop line, canvas constants.
       pressed #151515; min-width 80, `main_window.py:751-766,932-947,1074-1089`).
 - [ ] P2 Tab edge never mirrors for Hebrew (grip right, + left, chips RTL,
       `tab_bar_widget.py:189-247,436-469`); mounted inside dir="ltr" wrapper.
-- [ ] P2 Dialogs missing `lang` → don't flip in Hebrew: LayerStateDialog.tsx:46,
+- [x] P2 Dialogs missing `lang` → don't flip in Hebrew: LayerStateDialog.tsx:46,
       TabChip.tsx:82 (unsaved confirm), LayerControlStack.tsx:129 (delete-all).
-- [ ] P2 Grid: color rgb(200,200,200) w1, thicken 1.5/rgb(180,180,180) below
+- [x] P2 Grid: color rgb(200,200,200) w1, thicken 1.5/rgb(180,180,180) below
       zoom 0.5, never auto-hide (OSSJS skips when grid_size×zoom < 4).
       (Duplicate of §7 item — fix once in renderer.)
 - [ ] P2 beforeunload dirty-tab guard (dup of §7).
