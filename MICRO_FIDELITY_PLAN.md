@@ -79,7 +79,7 @@ extra in OSSJS 9. Same 7 languages both sides.
 
 **Missing key groups (port with features or as text-only):**
 - [x] P1 `main_window_title` (py:5) — title not sourced from translations.
-- [ ] P2 History clear-confirm flow missing entirely: `confirm_clear_history_title`
+- [x] P2 History clear-confirm flow missing entirely: `confirm_clear_history_title`
       py:559, `confirm_clear_history_text` py:560, `history_cleared_text` py:564 —
       HistoryPage.tsx:62 clears with no confirmation.
 - [x] P2 Arrow submenu keys (16): `arrow_sizes` py:513, `adjust` py:514,
@@ -226,7 +226,7 @@ persistence coverage (no dropped fields).
       1.109 = red circle (in user's highlight color @alpha 60!), blue circle,
       `yellow_circle`, `start_end_squares`, `control_point_squares` with
       rendered icons (`settings_dialog.py:3265-3287,5906-5927`).
-- [ ] P2 History Clear All: no confirm dialog / no "cleared" info box / not
+- [x] P2 History Clear All: no confirm dialog / no "cleared" info box / not
       disabled when empty (`settings_dialog.py:6730,6766,6890-6895`, keys
       py:559-564).
 - [ ] P2 Lock-mode icons (lock_open/lock_closed PNGs) missing from Button
