@@ -59,6 +59,13 @@ export function toRenderArray(
       shadow_only: s.shadow_only,
       // OSS 1.109 per-layer Hide Shadow: cast nothing, still receive.
       hide_shadow: s.hide_shadow,
+      // Arrow visibility + customization (1.109 §7) — all live in `extra`.
+      start_arrow_visible: ex.start_arrow_visible as boolean | undefined,
+      end_arrow_visible: ex.end_arrow_visible as boolean | undefined,
+      full_arrow_visible: ex.full_arrow_visible as boolean | undefined,
+      arrow_color: (ex.arrow_color as RenderStrand['arrow_color']) ?? null,
+      arrow_transparency: ex.arrow_transparency as number | undefined,
+      arrow_head_visible: ex.arrow_head_visible as boolean | undefined,
     };
     if (s.type === 'MaskedStrand') r.deletion_rectangles = s.deletion_rectangles ?? [];
     out.push(r);

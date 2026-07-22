@@ -3,7 +3,7 @@ import { useEditorStore } from '../store/editorStore';
 import {
   toggleHidden, setShadowOnly, setHideShadow, setColor, setWidth, setWidthGridUnits,
   resetMask, setCircleStrokeColor, toggleCircleVisible, toggleLineVisible, closeKnot,
-  toggleLock,
+  toggleLock, toggleArrowVisible,
 } from '../store/actions';
 import { maskComponents } from '../model/layerName';
 import type { RGBA } from '../model/types';
@@ -400,6 +400,35 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
       });
       items.push({ label: '', separator: true });
       items.push({ label: '', rowLabel: t('circle', lang), buttons, noPad: true });
+    }
+
+    // ---- Arrow group (1.109 §7): Start/End arrow toggles + Full Arrow ----
+    // Compound row like Line/Circle; the renderer draws all three arrow kinds
+    // (pixel-verified vs the Qt oracle). Color/transparency/texture/sizes
+    // customization submenu is the remaining §7 tail.
+    {
+      const startArrow = strand?.extra?.start_arrow_visible === true;
+      const endArrow = strand?.extra?.end_arrow_visible === true;
+      const fullArrow = strand?.extra?.full_arrow_visible === true;
+      items.push({ label: '', separator: true });
+      items.push({
+        label: '',
+        rowLabel: t('arrow', lang),
+        buttons: [
+          {
+            label: startArrow ? t('hide_start_arrow', lang) : t('show_start_arrow', lang),
+            onClick: () => commitEdit((d) => toggleArrowVisible(d, name, 'start')),
+          },
+          {
+            label: endArrow ? t('hide_end_arrow', lang) : t('show_end_arrow', lang),
+            onClick: () => commitEdit((d) => toggleArrowVisible(d, name, 'end')),
+          },
+        ],
+      });
+      items.push({
+        label: fullArrow ? t('hide_full_arrow', lang) : t('show_full_arrow', lang),
+        onClick: () => commitEdit((d) => toggleArrowVisible(d, name, 'full')),
+      });
     }
 
     // ---- Close the Knot (exactly one free end) ----

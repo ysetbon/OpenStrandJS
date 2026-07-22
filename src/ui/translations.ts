@@ -77,6 +77,13 @@ export const STRINGS: Record<string, Entry> = {
   move_group: { en: 'Move Group', fr: 'Déplacer le Groupe', de: 'Gruppe bewegen', it: 'Sposta Gruppo', es: 'Mover Grupo', pt: 'Mover Grupo', he: 'הזז קבוצה' },
   enter_group_name: { en: 'Enter group name:', fr: 'Entrez le nom du groupe:', de: 'Gruppennamen eingeben:', it: 'Inserisci nome gruppo:', es: 'Introduce nombre del grupo:', pt: 'Digite o nome do grupo:', he: 'הזן שם קבוצה:' },
   select_all: { en: 'Select All', fr: 'Tout Sélectionner', de: 'Alle Auswählen', it: 'Seleziona Tutto', es: 'Seleccionar Todo', pt: 'Selecionar Tudo', he: 'בחר הכל' },
+  // ---- Arrows (1.109 §7) ---- (`arrow` + `show_full_arrow` already exist in
+  // the button-guide section below with identical values.)
+  show_start_arrow: { en: 'Show Start Arrow', fr: 'Afficher Flèche Départ', de: 'Startpfeil einblenden', it: 'Mostra Freccia Inizio', es: 'Mostrar Flecha Inicio', pt: 'Mostrar Flecha Início', he: 'הצג חץ התחלתי' },
+  hide_start_arrow: { en: 'Hide Start Arrow', fr: 'Masquer Flèche Départ', de: 'Startpfeil ausblenden', it: 'Nascondi Freccia Inizio', es: 'Ocultar Flecha Inicio', pt: 'Ocultar Flecha Início', he: 'הסתר חץ התחלתי' },
+  show_end_arrow: { en: 'Show End Arrow', fr: 'Afficher Flèche Fin', de: 'Endpfeil einblenden', it: 'Mostra Freccia Fine', es: 'Mostrar Flecha Fin', pt: 'Mostrar Flecha Fim', he: 'הצג חץ סופי' },
+  hide_end_arrow: { en: 'Hide End Arrow', fr: 'Masquer Flèche Fin', de: 'Endpfeil ausblenden', it: 'Nascondi Freccia Fine', es: 'Ocultar Flecha Fin', pt: 'Ocultar Flecha Fim', he: 'הסתר חץ סופי' },
+  hide_full_arrow: { en: 'Hide Full Arrow', fr: 'Masquer la flèche complète', de: 'Vollständigen Pfeil ausblenden', it: 'Nascondi freccia completa', es: 'Ocultar flecha completa', pt: 'Ocultar seta completa', he: 'הסתר חץ מלא' },
   // ---- Copy/Paste Strand Data (1.109 93c4565b) ----
   copy_strand_data: { en: 'Copy Strand Data', fr: 'Copier les données du brin', de: 'Strangdaten kopieren', it: 'Copia dati del filo', es: 'Copiar datos del cordón', pt: 'Copiar dados do cordão', he: 'העתק נתוני גדיל' },
   paste_copied_data: { en: 'Paste Copied Data', fr: 'Coller les données copiées', de: 'Kopierte Daten einfügen', it: 'Incolla dati copiati', es: 'Pegar datos copiados', pt: 'Colar dados copiados', he: 'הדבק נתונים שהועתקו' },

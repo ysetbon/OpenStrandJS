@@ -238,6 +238,15 @@ export interface RenderStrand {
   // OSS 1.109 hide_shadow: the strand casts no shadow at all (regular cast AND a
   // mask's own crossing shadow) but still receives. Absent/false == casts normally.
   hide_shadow?: boolean;
+  // Arrows (1.109 §7): start/end arrows use the strand's own colors; the full
+  // arrow honors arrow_color + arrow_transparency (% replacing alpha) and
+  // arrow_head_visible. All absent-safe (oracle fixtures never set them).
+  start_arrow_visible?: boolean;
+  end_arrow_visible?: boolean;
+  full_arrow_visible?: boolean;
+  arrow_color?: RGBA | null;
+  arrow_transparency?: number;
+  arrow_head_visible?: boolean;
 }
 
 export interface RenderMeta {

@@ -176,13 +176,23 @@ renderer is inert.
 
 ## Progress
 
-**Status: §1–§6 are all DONE and verified — every behavioral/data feature of
-v1.109 is ported. Remaining: §7 (arrows — blocked on the renderer drawing
-arrows at all; a full renderer sub-project, do it fixture-first) and §8
-(settings-dialog cosmetics: segmented +/− spin boxes, auto-sized category
-panel; button-guide sections for arrows/multi-select/lock icons; the remaining
-guide-text i18n strings). Both are chrome/documentation — no data-model or
-rendering-correctness gaps remain vs OSS 1.109.**
+**Status: §1–§7 DONE and verified. Remaining: §8 cosmetics only
+(segmented +/− spin boxes, auto-sized settings category panel, button-guide
+arrow/multi-select sections' remaining guide-text i18n) plus the §7 tail
+(arrow color/transparency/texture/shaft-style/sizes submenu UI — the renderer
+already honors color/transparency/head, so only the menu chrome is missing;
+shaft patterns, head textures, and arrow_casts_shadow stay deferred).**
+
+- **§7 DONE** (this commit): arrow RENDERING is ported and pixel-verified
+  against the real Qt oracle running in-container (PyQt5 headless +
+  tools/reference_render.py with OSS_ROOT): start/end arrows
+  (gap→shaft→head along the end tangent), full arrow (whole-path shaft +
+  base-on-endpoint head, arrow_color / arrow_transparency /
+  arrow_head_visible honored). New fixtures arrow_startend / arrow_full /
+  arrow_custom diff at 24 px / **0 px** / 12 px (≤0.002%); box_stitch and
+  attached_90 regress at 0.248% / 0% (unchanged). Layer menu gains the
+  Arrow compound row (Start/End) + Show/Hide Full Arrow. Arrow-only edits
+  now create undo steps (visualEqual compares the arrow extra fields).
 
 - **§1 DONE** (commit `e6839e0`): hide_shadow modeled + rendered + menu toggle;
   computeHasCircles honors `manual_circle_visibility[0]` for AttachedStrand;

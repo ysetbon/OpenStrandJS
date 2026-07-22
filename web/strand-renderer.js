@@ -773,6 +773,99 @@ function drawHighlight(s, strands, P, enableThird, S) {
   if (items.length) new paper.Group(items);
 }
 
+// ---- Arrows (OSS 1.109 §7: strand.py start/end arrows + full strand arrow) --
+// Canvas-level arrow dimensions (Qt settings dialog; the oracle renders with
+// these defaults). The editor may override via meta.arrow_params.
+const ARROW_DEFAULTS = {
+  head_length: 20, head_width: 10, gap_length: 10,
+  line_length: 20, line_width: 10, head_stroke_width: 4,
+};
+let ARROW_PARAMS = ARROW_DEFAULTS;
+
+// Draw a strand's arrows AFTER its body (start/end arrows, then the full
+// arrow on top) — faithful to strand.py:2818-3000:
+//   * start/end arrow: gap -> shaft segment -> head, along the tangent at the
+//     end, pointing AWAY from the body. Shaft pen = stroke_color at
+//     arrow_line_width (FlatCap); head = triangle (tip extends head_length
+//     past the shaft) filled with the STRAND color, bordered with
+//     stroke_color at head_stroke_width (MiterJoin/FlatCap).
+//   * full arrow: the whole strand path stroked at arrow_line_width
+//     (FlatCap/RoundJoin) in arrow_color (fallback stroke_color), plus a head
+//     whose BASE sits ON the end point and whose tip extends outward; head
+//     fill = arrow_color (fallback strand color), border = stroke_color.
+//     arrow_transparency (0-100 %) REPLACES the alpha (Qt setAlphaF) on the
+//     full arrow's shaft + head fill only — never on borders or on start/end
+//     arrows.
+// Deferred (defaults 'solid'/'none' draw identically): shaft patterns
+// (stripes/tiles/dots), head textures, arrow_casts_shadow, and the
+// hidden-strand full arrow (the editor drops hidden strands pre-render).
+function drawArrows(s, P, enableThird, S) {
+  const hasAny = s.start_arrow_visible === true || s.end_arrow_visible === true ||
+    s.full_arrow_visible === true;
+  if (!hasAny) return;
+  const ap = ARROW_PARAMS;
+  const headL = ap.head_length * S, headW = ap.head_width * S;
+  const gapL = ap.gap_length * S, lineL = ap.line_length * S, lineW = ap.line_width * S;
+  const borderW = ap.head_stroke_width * S;
+  const cl = buildCenterline(s, P, enableThird);
+  const len = cl.length;
+  if (len <= 0) { cl.remove(); return; }
+
+  const drawHead = (base, dir, fillColor) => {
+    const perp = { x: -dir.y, y: dir.x };
+    const tip = new paper.Point(base.x + dir.x * headL, base.y + dir.y * headL);
+    const left = new paper.Point(base.x + perp.x * headW / 2, base.y + perp.y * headW / 2);
+    const right = new paper.Point(base.x - perp.x * headW / 2, base.y - perp.y * headW / 2);
+    const poly = new paper.Path([tip, left, right]);
+    poly.closed = true;
+    poly.fillColor = fillColor;
+    poly.strokeColor = null;
+    const border = poly.clone();
+    border.fillColor = null;
+    border.strokeColor = toColor(s.stroke_color);
+    border.strokeWidth = borderW;
+    border.strokeJoin = 'miter';
+    border.strokeCap = 'butt';
+  };
+
+  // tangentAngle points INTO the body at off=0 and OUT of it at off=len, so
+  // the start arrow flips the direction (OSS arrow_dir = -unit at the start).
+  const endArrow = (worldPt, angle, flip) => {
+    const dir = { x: Math.cos(angle) * flip, y: Math.sin(angle) * flip };
+    const p0 = P(worldPt);
+    const s0 = new paper.Point(p0.x + dir.x * gapL, p0.y + dir.y * gapL);
+    const s1 = new paper.Point(s0.x + dir.x * lineL, s0.y + dir.y * lineL);
+    const shaft = new paper.Path.Line(s0, s1);
+    shaft.strokeColor = toColor(s.stroke_color);
+    shaft.strokeWidth = lineW;
+    shaft.strokeCap = 'butt';
+    drawHead(s1, dir, toColor(s.color));
+  };
+
+  if (s.start_arrow_visible === true) endArrow(s.start, tangentAngle(cl, 0), -1);
+  if (s.end_arrow_visible === true) endArrow(s.end, tangentAngle(cl, len), 1);
+
+  if (s.full_arrow_visible === true) {
+    const alpha = Math.max(0, Math.min(100, s.arrow_transparency != null ? s.arrow_transparency : 100)) / 100;
+    const shaftColor = toColor(s.arrow_color ? s.arrow_color : s.stroke_color);
+    shaftColor.alpha = alpha;
+    const shaft = cl.clone();
+    shaft.fillColor = null;
+    shaft.strokeColor = shaftColor;
+    shaft.strokeWidth = lineW;
+    shaft.strokeCap = 'butt';
+    shaft.strokeJoin = 'round';
+    if (s.arrow_head_visible !== false) {
+      const a = tangentAngle(cl, len);
+      const dir = { x: Math.cos(a), y: Math.sin(a) };
+      const fill = toColor(s.arrow_color ? s.arrow_color : s.color);
+      fill.alpha = alpha;
+      drawHead(P(s.end), dir, fill);
+    }
+  }
+  cl.remove();
+}
+
 function drawStrand(s, strands, P, enableThird, S) {
   drawHighlight(s, strands, P, enableThird, S);   // under the body
   const centerline = buildCenterline(s, P, enableThird);
@@ -804,6 +897,10 @@ function drawStrand(s, strands, P, enableThird, S) {
 
   // Paint stroke layer, then fill layer, then side bars (top), in order.
   new paper.Group([strokePath, fillPath, ...sideLines]);
+
+  // Arrows go over this strand's body (start/end arrows, then the full arrow
+  // on top) but under any later strand, exactly like OSS's in-draw ordering.
+  drawArrows(s, P, enableThird, S);
 }
 
 // A deletion rectangle (over-under gap) in pixel space. Corner-based
@@ -1245,6 +1342,7 @@ window.renderFixture = function (strands, meta) {
   const shadowEnabled = !!meta.shadow_enabled;
   SHADOW_ENABLED = shadowEnabled;
   SHADOW_PAINT = toColor(SHADOW_COLOR);
+  ARROW_PARAMS = Object.assign({}, ARROW_DEFAULTS, meta.arrow_params || {});
   // Stash the per-pair override dict module-scoped so castStrandShadow can read
   // it in the Port phase without threading a new param. Inert until that phase.
   SHADOW_OVERRIDES = meta.shadow_overrides || {};

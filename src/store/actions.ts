@@ -491,6 +491,19 @@ export function setHideShadow(draft: EditorDocument, name: string, value: boolea
   if (s) s.hide_shadow = value;
 }
 
+// Arrow visibility toggles (1.109 §7). The flags live in the `extra`
+// passthrough bag (start/end/full_arrow_visible), same as OSS serialization.
+export function toggleArrowVisible(
+  draft: EditorDocument,
+  name: string,
+  which: 'start' | 'end' | 'full',
+): void {
+  const s = draft.strands[name];
+  if (!s || s.type === 'MaskedStrand') return;
+  const key = `${which}_arrow_visible`;
+  s.extra[key] = s.extra[key] !== true;
+}
+
 // OSS is_strand_deletable: deletable iff it has knot connections OR not all of
 // its endpoint circles are present. A strand with both circles and no knot
 // connections is a closed-on-both-ends interior strand and may not be deleted.

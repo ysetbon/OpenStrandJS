@@ -46,6 +46,16 @@ export function strandVisualEqual(a: StrandRecord, b: StrandRecord): boolean {
   if (a.has_circles[0] !== b.has_circles[0] || a.has_circles[1] !== b.has_circles[1]) return false;
   if (!!a.is_hidden !== !!b.is_hidden || !!a.shadow_only !== !!b.shadow_only) return false;
   if (!!a.hide_shadow !== !!b.hide_shadow) return false;
+  // Arrow flags/customization live in `extra` but are rendered (1.109 §7), so
+  // arrow-only edits must create an undo step.
+  const ea = a.extra ?? {}, eb = b.extra ?? {};
+  for (const k of ['start_arrow_visible', 'end_arrow_visible', 'full_arrow_visible'] as const) {
+    if ((ea[k] === true) !== (eb[k] === true)) return false;
+  }
+  // arrow_head_visible defaults TRUE (absent == visible).
+  if ((ea.arrow_head_visible !== false) !== (eb.arrow_head_visible !== false)) return false;
+  if (JSON.stringify(ea.arrow_color ?? null) !== JSON.stringify(eb.arrow_color ?? null)) return false;
+  if ((ea.arrow_transparency ?? 100) !== (eb.arrow_transparency ?? 100)) return false;
   if ((a.attached_to ?? null) !== (b.attached_to ?? null)) return false;
   if ((a.attachment_side ?? null) !== (b.attachment_side ?? null)) return false;
   if (rectSig(a.deletion_rectangles) !== rectSig(b.deletion_rectangles)) return false;
