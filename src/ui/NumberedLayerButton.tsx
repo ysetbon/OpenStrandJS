@@ -236,9 +236,15 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
     const ticked = useEditorStore.getState().multiSelectedLayers;
     doPaste(anchor, ticked.includes(name) ? ticked : [name]);
   };
-  const isCopySource = !!strandClipboard && strandClipboard.source_layer_name === name;
+  // OSS _strand_clipboard_state: copy/paste indicators live in MULTI-SELECT
+  // mode only, and the SOURCE layer never shows paste chips — right after a
+  // copy both anchors are exact no-ops on it, and the badge marks it instead
+  // (the right-click menu can still paste onto the source when it is ticked).
+  const isCopySource =
+    multiSelectMode && !!strandClipboard && strandClipboard.source_layer_name === name;
   const isPasteTarget =
-    !!strandClipboard && !!strand && strand.type !== 'MaskedStrand' && !locked;
+    multiSelectMode && !!strandClipboard && !isCopySource &&
+    !!strand && strand.type !== 'MaskedStrand' && !locked;
 
   // ---- circle / line gating by scanning children attached to this strand ----
   const childSides = (): { start: boolean; end: boolean } => {
