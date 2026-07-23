@@ -63,15 +63,27 @@ It's built with **TypeScript**, **React**, **[Paper.js](http://paperjs.org/)**
 **Canvas**. See [`UI_PORT_PLAN.md`](UI_PORT_PLAN.md) and the other `*_PLAN.md`
 files for the porting notes.
 
-## Deploying
+## CI / CD / code review bots
 
-This repo auto-publishes to GitHub Pages. To push the current build live:
+GitHub Actions handle checks and deployment (see [`docs/CI_CD.md`](docs/CI_CD.md)
+for the full setup, including the review bots):
 
-```bash
-npm run deploy     # builds and publishes to the gh-pages branch
-```
+- **CI** — every PR and push to `main` runs the TypeScript typecheck, the Vite
+  production build, and headless Chromium smoke tests that render real
+  fixtures and boot the built editor (`tools/ci_smoke.mjs`). Rendered PNGs are
+  attached to each run as an artifact.
+- **CD** — merging to `main` automatically builds and publishes the editor to
+  GitHub Pages. Manual deploys still work:
 
-The site then updates at https://ysetbon.github.io/OpenStrandJS/ within a minute.
+  ```bash
+  npm run deploy     # builds and publishes to the gh-pages branch
+  ```
+
+- **Reviews** — each PR gets an automatic review from the Claude Code workflow
+  (needs the `ANTHROPIC_API_KEY` repo secret), and optionally from the
+  [Baz](https://baz.co) GitHub App.
+
+The site updates at https://ysetbon.github.io/OpenStrandJS/ within a minute of a merge.
 
 ## License
 
