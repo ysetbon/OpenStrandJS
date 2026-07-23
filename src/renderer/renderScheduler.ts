@@ -7,7 +7,13 @@ import { useEditorStore } from '../store/editorStore';
 import { callRender, callRenderDragBackground, callRenderDragFrame, callEndDrag } from './rendererBridge';
 import { buildMeta, toRenderArray } from './toRenderArray';
 
-let scheduled = false;
+// Pending work for the coalescing rAF: 0 = idle, 1 = overlay-only, 2 = full
+// render (+ overlay). requestRender UPGRADES a frame already scheduled as
+// overlay-only; with a single "scheduled" boolean, a pointer-move's overlay
+// request arriving in the same frame window as pointer-up's render request
+// silently swallowed the render — a just-created strand stayed invisible until
+// the next unrelated full render.
+let pendingWork: 0 | 1 | 2 = 0;
 // True once the current drag gesture's static background has been baked.
 let dragBaked = false;
 // The moving-set signature (dragMoving.join('|')) the cached DRAG_BG was baked
@@ -53,9 +59,19 @@ function syncOverlay(): void {
 
 // Redraw just the overlay (cheap; no renderFixture). Used for hover/selection.
 export function requestOverlay(): void {
-  if (scheduled) return;
-  scheduled = true;
-  requestAnimationFrame(() => { scheduled = false; syncOverlay(); });
+  schedule(1);
+}
+
+function schedule(level: 1 | 2): void {
+  const wasIdle = pendingWork === 0;
+  if (level > pendingWork) pendingWork = level;
+  if (!wasIdle) return; // a frame is queued; it will pick up the (upgraded) level
+  requestAnimationFrame(() => {
+    const work = pendingWork;
+    pendingWork = 0; // reset BEFORE the work so re-entrant requests queue a fresh frame
+    if (work === 2) renderNow();
+    syncOverlay();
+  });
 }
 
 if (import.meta.env?.DEV) {
@@ -64,56 +80,56 @@ if (import.meta.env?.DEV) {
 }
 
 export function requestRender(): void {
-  if (scheduled) return;
-  scheduled = true;
-  requestAnimationFrame(() => {
-    scheduled = false;
-    const { doc, view, settings, dragging, dragMoving, selection } = useEditorStore.getState();
-    try {
-      // During an endpoint drag, highlight every strand that moves with the
-      // grabbed handle (weld group + attached/mask peers from movingStrandSet),
-      // so a moving junction reddens on both sides like OSS — not just the
-      // grabbed strand. At rest only the selected strand is highlighted.
-      const highlightSet = dragging && dragMoving.length ? new Set(dragMoving) : undefined;
-      const arr = toRenderArray(doc, selection.layerName, highlightSet);
-      if (dragging && dragMoving.length) {
-        // DRAG FAST-PATH (mirrors the original's draw-only-affected-strand path).
-        // Render at native resolution with shadows off: bake every STATIC strand
-        // once into a cached bitmap, then each frame draw ONLY the moving strands
-        // over that cache. Per-frame work is O(moving strands), not O(all strands),
-        // so dragging stays smooth regardless of scene size. The fidelity harness
-        // calls renderFixture directly and never sets meta.drag, so the oracle's
-        // default output is unchanged.
-        const meta = {
-          ...buildMeta(doc, view, settings),
-          supersample: 1,
-          shadow_enabled: false,
-          drag: { moving: dragMoving },
-        };
-        // Bake the static background when none is live OR when a prior gesture's
-        // stale bake is still cached for a DIFFERENT moving set (re-grab after a
-        // release). Same moving set => the static set is identical and unmoved, so
-        // the cache is safely reused.
-        const key = dragMoving.join('|');
-        if (!dragBaked || bakedKey !== key) {
-          if (dragBaked) callEndDrag(); // drop the stale bake from the prior gesture
-          callRenderDragBackground(arr, meta);
-          dragBaked = true;
-          bakedKey = key;
-        }
-        callRenderDragFrame(arr, meta);
-      } else {
-        // NOT DRAGGING (release, selection click, undo, …): one full render at the
-        // editor supersample (1×). At 1× shadows + correct z-order are restored in
-        // ~30ms instead of the ~260ms a full ss2 render costs, so pointer-up no
-        // longer hangs. Drop any drag background first so the next gesture re-bakes.
-        if (dragBaked) { callEndDrag(); dragBaked = false; bakedKey = null; }
-        callRender(arr, { ...buildMeta(doc, view, settings), supersample: EDITOR_SUPERSAMPLE });
+  schedule(2);
+}
+
+// One full document render (renderFixture / drag fast-path). Overlay sync is the
+// caller's job — schedule() always runs syncOverlay after this.
+function renderNow(): void {
+  const { doc, view, settings, dragging, dragMoving, selection } = useEditorStore.getState();
+  try {
+    // During an endpoint drag, highlight every strand that moves with the
+    // grabbed handle (weld group + attached/mask peers from movingStrandSet),
+    // so a moving junction reddens on both sides like OSS — not just the
+    // grabbed strand. At rest only the selected strand is highlighted.
+    const highlightSet = dragging && dragMoving.length ? new Set(dragMoving) : undefined;
+    const arr = toRenderArray(doc, selection.layerName, highlightSet);
+    if (dragging && dragMoving.length) {
+      // DRAG FAST-PATH (mirrors the original's draw-only-affected-strand path).
+      // Render at native resolution with shadows off: bake every STATIC strand
+      // once into a cached bitmap, then each frame draw ONLY the moving strands
+      // over that cache. Per-frame work is O(moving strands), not O(all strands),
+      // so dragging stays smooth regardless of scene size. The fidelity harness
+      // calls renderFixture directly and never sets meta.drag, so the oracle's
+      // default output is unchanged.
+      const meta = {
+        ...buildMeta(doc, view, settings),
+        supersample: 1,
+        shadow_enabled: false,
+        drag: { moving: dragMoving },
+      };
+      // Bake the static background when none is live OR when a prior gesture's
+      // stale bake is still cached for a DIFFERENT moving set (re-grab after a
+      // release). Same moving set => the static set is identical and unmoved, so
+      // the cache is safely reused.
+      const key = dragMoving.join('|');
+      if (!dragBaked || bakedKey !== key) {
+        if (dragBaked) callEndDrag(); // drop the stale bake from the prior gesture
+        callRenderDragBackground(arr, meta);
+        dragBaked = true;
+        bakedKey = key;
       }
-    } catch (err) {
-      // Surface renderer errors without killing the rAF loop.
-      console.error('[OpenStrandJS] render failed:', err);
+      callRenderDragFrame(arr, meta);
+    } else {
+      // NOT DRAGGING (release, selection click, undo, …): one full render at the
+      // editor supersample (1×). At 1× shadows + correct z-order are restored in
+      // ~30ms instead of the ~260ms a full ss2 render costs, so pointer-up no
+      // longer hangs. Drop any drag background first so the next gesture re-bakes.
+      if (dragBaked) { callEndDrag(); dragBaked = false; bakedKey = null; }
+      callRender(arr, { ...buildMeta(doc, view, settings), supersample: EDITOR_SUPERSAMPLE });
     }
-    syncOverlay();
-  });
+  } catch (err) {
+    // Surface renderer errors without killing the rAF loop.
+    console.error('[OpenStrandJS] render failed:', err);
+  }
 }
