@@ -467,39 +467,64 @@ function buildShadowCasterCore(s, P, enableThird, S) {
   return strokedBodyAtWidth(s, P, enableThird, (w + 2 * sw) * S);
 }
 
+// Cut the caster CORE at every UNFOLDED end. Faithful port of the transparent-
+// circle subtraction in draw_strand_shadow (shader_utils.py:528-556): for each end
+// idx that is has_circles[idx] AND has a transparent circle stroke (alpha 0), Qt
+// subtracts a FULL circle of radius adj_radius = (w+2sw)/1.5 centred at start
+// (idx 0) / end (idx 1) from the square-capped body core, so the unfolded end (an
+// unfolded plain strand OR an unfolded AttachedStrand start) casts a rounded, cut-
+// back footprint instead of a square end-cap halo. Returns the (possibly new,
+// possibly empty) core; the caller removes it. Radius uses the *S convention.
+function subtractTransparentEndCaps(core, s, P, S) {
+  const hc = s.has_circles || [false, false];
+  if (!hc[0] && !hc[1]) return core;
+  const w = s.width || 0, sw = s.stroke_width || 0;
+  const r = ((w + 2 * sw) / 1.5) * S;
+  const startA = circleStrokeAlpha(effStartStroke(s));
+  const endA = circleStrokeAlpha(effEndStroke(s));
+  let out = core;
+  const cut = (centre) => {
+    if (!out) return;
+    const c = new paper.Path.Circle(centre, r);
+    const d = out.subtract(c);
+    c.remove();
+    out.remove();
+    out = d;
+  };
+  if (hc[0] && startA === 0) cut(P(s.start));
+  if (hc[1] && endA === 0) cut(P(s.end));
+  return out;
+}
+
 // build_shadow_circle_geometry(strand): caster end-circles only, radius
 // ((w+2sw)/2 + 2)*S (the +2 IS scaled). The MAX_BLUR vs MAX_BLUR+2 arg distinction
-// is moot — the builder always uses (w+2sw)/2+2 for the radius. AttachedStrand
-// caps are half-circles (td = ((w+2sw)+4)*S so the half-circle radius is
-// (w+2sw)/2+2); plain Strand caps are full circles. May return null when no
-// visible circle exists.
+// is moot — the builder always uses (w+2sw)/2+2 for the radius. Qt
+// build_shadow_circle_geometry builds each visible end circle via
+// _cap_shadow_path(idx, radius, depth_margin=2) (shader_utils.py:1806); with
+// _partner_cap_dims == (None,None) — always true while elliptical_end_caps is off
+// (the whole corpus) — that returns a FULL circle (strand.py:392-397), for BOTH
+// plain and attached strands. So the caster shadow circle is a full circle, not a
+// half circle, on the attached starting side too. (The RECEIVER geometry in
+// buildShadowReceiverGeom keeps half-circles to match build_rendered_geometry —
+// that is a different path and stays as-is.) May return null when no visible
+// circle exists.
 function buildShadowCasterCircles(s, strands, P, enableThird, S) {
   const w = s.width || 0, sw = s.stroke_width || 0;
-  const td = ((w + 2 * sw) + 4) * S;    // doubled radius for the half-circle builder
   const radius = ((w + 2 * sw) / 2 + 2) * S;
   const hc = s.has_circles || [false, false];
   const startA = circleStrokeAlpha(effStartStroke(s));
   const endA = circleStrokeAlpha(effEndStroke(s));
-  const isAttached = s.type === 'AttachedStrand';
-  const cl = buildCenterline(s, P, enableThird);
-  const len = cl.length;
   let path = null;
-  const addCircle = (centre, angle, which) => {
-    let circle;
-    if (isAttached) {
-      circle = which === 0 ? capOuterStart(centre, angle, td) : capOuterEnd(centre, angle, td);
-    } else {
-      circle = new paper.Path.Circle(centre, radius);
-    }
+  const addCircle = (centre) => {
+    const circle = new paper.Path.Circle(centre, radius);
     if (!path) { path = circle; return; }
     const u = path.unite(circle);
     path.remove();
     circle.remove();
     path = u;
   };
-  if (hc[0] && startA > 0) addCircle(P(s.start), tangentAngle(cl, 0), 0);
-  if (hc[1] && endA > 0) addCircle(P(s.end), tangentAngle(cl, len), 1);
-  cl.remove();
+  if (hc[0] && startA > 0) addCircle(P(s.start));
+  if (hc[1] && endA > 0) addCircle(P(s.end));
   return path;
 }
 
@@ -602,6 +627,15 @@ function castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i) 
     if (!core) return;
   } else {
     core = buildShadowCasterCore(s, P, enableThird, S);
+    if (!core) return;
+    // Unfolded (transparent-circle) ends cast NO square end-cap halo: Qt
+    // draw_strand_shadow subtracts a full circle of radius (w+2sw)/1.5 from the
+    // caster CORE at every end that is has_circles[idx] AND transparent (circle
+    // stroke alpha 0) BEFORE the receiver intersection (shader_utils.py:528-556).
+    // Cut here — inside the render path only, NOT in buildShadowCasterCore — so
+    // the auto_shadow probe (computeShadowPairAreas) keeps OSS's un-cut raw
+    // footprint (auto_shadow.py) and the two never desync.
+    core = subtractTransparentEndCaps(core, s, P, S);
     if (!core) return;
     circles = buildShadowCasterCircles(s, strands, P, enableThird, S);
   }
