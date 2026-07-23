@@ -1,0 +1,78 @@
+# CI for every PR and every push to main.
+#
+# The full pixel-fidelity harness (npm run prove) needs the Qt reference app
+# and can't run on a hosted runner, so CI covers everything that CAN run
+# headlessly: the TypeScript typecheck, the production editor build, and the
+# Chromium smoke tests in tools/ci_smoke.mjs (fixtures render non-empty, the
+# built editor boots without page errors). Rendered PNGs are uploaded as a
+# workflow artifact so reviewers can eyeball what a PR draws.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    name: Typecheck (tsc)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+  build-and-smoke:
+    name: Build editor + headless smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Build editor (Vite)
+        run: npm run build:editor
+
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Renderer smoke — fixtures draw non-empty output
+        run: >
+          node tools/ci_smoke.mjs render
+          fixtures/single_strand.json
+          fixtures/closed_knot.json
+          fixtures/box_stitch.json
+          fixtures/three_strand_braid.json
+          fixtures/overhand_knot.json
+          fixtures/attached_90.json
+          fixtures/mask_receiver.json
+
+      - name: Editor smoke — built app boots cleanly
+        run: node tools/ci_smoke.mjs editor dist-editor
+
+      - name: Upload rendered fixtures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-smoke-renders
+          path: artifacts/ci_smoke/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload editor build
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-editor
+          path: dist-editor/
+          retention-days: 7
