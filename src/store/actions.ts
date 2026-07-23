@@ -579,9 +579,6 @@ export function toggleLineVisible(draft: EditorDocument, name: string, end: 'sta
 // manual_circle_visibility on BOTH strands, and records the knot connection on
 // both (keyed by END TYPE) with the target mirroring the initiator. Gating
 // (exactly-one-free-end) is computed by the caller (NumberedLayerButton).
-// TODO(oss-fidelity): per-end circle-stroke transparency on the target's
-// connecting edge (OSS start/end_circle_stroke_color) needs per-end stroke model
-// fields the JS renderer lacks; the target keeps an opaque-black circle stroke.
 export function closeKnot(draft: EditorDocument, name: string, freeEnd: 'start' | 'end'): void {
   const s = draft.strands[name];
   if (!s) return;
@@ -632,6 +629,18 @@ export function closeKnot(draft: EditorDocument, name: string, freeEnd: 'start' 
   const black: RGBA = { r: 0, g: 0, b: 0, a: 255 };
   if (!s.circle_stroke_color) s.circle_stroke_color = { ...black };
   if (!target.circle_stroke_color) target.circle_stroke_color = { ...black };
+
+  // The TARGET's connecting edge gets an explicit per-end stroke
+  // (numbered_layer_button.py:3450-3456): free end 'end' -> transparent
+  // end_circle_stroke_color (its closing circle keeps only the inner fill);
+  // free end 'start' -> start_circle_stroke_color pinned OPAQUE black — the
+  // OSS comment there says "Transparent" but the code sets QColor(0,0,0,255),
+  // and the explicit value overrides any legacy circle_stroke_color fallback.
+  if (best.end === 'end') {
+    target.extra.end_circle_stroke_color = { r: 0, g: 0, b: 0, a: 0 };
+  } else {
+    target.extra.start_circle_stroke_color = { ...black };
+  }
 
   // Mark closed_connections + manual_circle_visibility on BOTH strands so the
   // renderer draws full closing circles (OSS:2610-2651).
