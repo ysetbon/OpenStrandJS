@@ -432,7 +432,10 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, st: OverlayState): vo
   // drag OSS draws control-point glyphs ONLY for the affected strand
   // (draw_control_points should_skip = not is_affected), so suppress every other
   // strand's green triangle/circle/square + dashed connectors for the gesture.
-  if (doc.show_control_points) {
+  // In view mode the "In view mode, hide the control points" setting suppresses
+  // the whole layer (OSS draw_control_points early-return, canvas.py:5941-5942).
+  const hideCpInView = mode === 'view' && st.settings.view_hide_control_points;
+  if (doc.show_control_points && !hideCpInView) {
     const affected = st.dragging && mode === 'move' && selection.handle ? selection.layerName : null;
     for (const name of doc.order) {
       const s = doc.strands[name];
