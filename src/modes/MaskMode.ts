@@ -72,4 +72,17 @@ export const MaskMode: Mode = {
   onPointerUp() {
     // Mask mode has no drag gesture (no eraser). Nothing to finalize.
   },
+
+  // Deactivation (mode switch away / pointercancel): drop the armed first pick so
+  // returning to Mask mode starts a fresh two-click flow instead of silently
+  // resuming a half-finished one (OSS resets selected_strands when the mode is
+  // left/re-entered). The red picked-highlight only draws while mode==='mask', so
+  // this is state hygiene rather than a visible ghost — but without it the first
+  // click after returning would instantly create a mask against a forgotten pick.
+  onCancel(ctx: ModeContext) {
+    const st = useEditorStore.getState();
+    if (st.maskPending.length === 0) return;
+    st.setMaskPending([]);
+    ctx.requestOverlay();
+  },
 };

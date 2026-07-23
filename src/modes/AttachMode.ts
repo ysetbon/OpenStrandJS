@@ -93,9 +93,16 @@ export const AttachMode: Mode = {
     if (free) {
       drag = { kind: 'attach', start: free.pos, parent: free.layer, side: free.side };
       st.setPending({ kind: 'attach', start: free.pos, end: free.pos, parent: free.layer, side: free.side });
-    } else {
+    } else if (forceNew) {
+      // A NEW main strand may only be drawn when the "New Strand" button/'N' armed
+      // this gesture (is_drawing_new_strand). OSS attach_mode never creates a main
+      // strand from a bare empty-space press — only child attachments happen there —
+      // so without the arming flag an empty-space press starts no drag at all.
       drag = { kind: 'new', start: p.world };
       st.setPending({ kind: 'new', start: p.world, end: p.world });
+    } else {
+      // Empty space, no free endpoint, not armed: OSS does nothing here (no x_1).
+      return;
     }
     st.beginGesture();
     st.setDragging(true);
@@ -177,5 +184,24 @@ export const AttachMode: Mode = {
     st.commit();                 // one create = one undo step
     if (newName) st.setSelection({ layerName: newName, handle: null });
     ctx.requestRender();
+  },
+
+  // Abort an in-flight attach/new-strand gesture WITHOUT creating anything
+  // (pointercancel, ESC mid-drag, or a mode switch away from Attach). Drops the
+  // module-level drag AND every piece of store state the gesture armed — pending
+  // rubber-band, dragging flag, attach hover — then reverts to the gesture
+  // baseline, which restores the selection cleared on pointer-down (OSS
+  // cancel_attachment: no strand is created, no undo entry). Without this, the
+  // preview ghost persisted across mode switches (drawPending renders whenever
+  // `pending` exists) and returning to Attach resumed the dead gesture.
+  onCancel(ctx: ModeContext) {
+    const st = useEditorStore.getState();
+    if (!drag && !st.pending) return;   // nothing in flight
+    drag = null;
+    st.setPending(null);
+    st.setDragging(false);
+    st.setHover({ layerName: null, handle: null });
+    st.cancelGesture();     // restore pre-press doc + selection, push NO history
+    ctx.requestRender();    // selection highlight lives in #c -> full repaint + overlay
   },
 };
