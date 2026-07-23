@@ -193,6 +193,13 @@ function approxPt(a, b) {
 }
 // circle_stroke colors default to a visible (alpha 255) stroke when absent.
 function circleStrokeAlpha(c) { return c && c.a != null ? c.a : 255; }
+// Effective per-end stroke: OSS start/end_circle_stroke_color are properties
+// that fall back to the legacy circle_stroke_color, then opaque black
+// (strand.py:507-521 / 543-557). Saved files may carry only the legacy field
+// (e.g. an unfolded start stored as circle_stroke_color alpha 0), so every
+// alpha gate must resolve through the same fallback chain.
+function effStartStroke(s) { return s.start_circle_stroke_color != null ? s.start_circle_stroke_color : s.circle_stroke_color; }
+function effEndStroke(s) { return s.end_circle_stroke_color != null ? s.end_circle_stroke_color : s.circle_stroke_color; }
 
 // True when some OTHER AttachedStrand starts at world point `pt` (i.e. a child
 // attaches there). Mirrors Qt's `any(child.start == self.<end> for child in
@@ -302,8 +309,8 @@ function collectCaps(s, strands, centerline, P, S) {
   const td = (w + 2 * sw) * S, wpx = w * S, swpx = sw * S;
   const hc = s.has_circles || [false, false];
   const cc = s.closed_connections || [false, false];
-  const startA = circleStrokeAlpha(s.start_circle_stroke_color);
-  const endA = circleStrokeAlpha(s.end_circle_stroke_color);
+  const startA = circleStrokeAlpha(effStartStroke(s));
+  const endA = circleStrokeAlpha(effEndStroke(s));
   const len = centerline.length;
   const cStart = P(s.start), cEnd = P(s.end);
   const aStart = tangentAngle(centerline, 0);
@@ -317,7 +324,13 @@ function collectCaps(s, strands, centerline, P, S) {
       stroke.push(capOuterStart(cStart, aStart, td));
       fill.push(capInner(cStart, wpx));
       fill.push(capSideRect(cStart, aStart, swpx, wpx));
-    } else if (startA === 0 && s.is_setting_staring_circle && hc[0]) {
+    } else if (startA === 0 && s.is_setting_staring_circle !== false && hc[0]) {
+      // Unfolded start edge: transparent outline, inner fill circle kept
+      // (attached_strand.py:1291+). OSS gates this on is_setting_staring_circle,
+      // but that flag is never serialized — the start_circle_stroke_color setter
+      // derives it as (alpha == 0) on load (strand.py:534-541) — so with
+      // startA === 0 it is always true for loaded OSS files; only an explicit
+      // false (editor-supplied) suppresses it.
       fill.push(capInner(cStart, wpx));
     }
     // end — half-circle only when a child attaches there (no alpha gate, per Qt)
@@ -424,8 +437,8 @@ function buildShadowReceiverGeom(s, strands, P, enableThird, S) {
   let path = cleanOutline(strokedOutline(cl, td));
   if (!path) { cl.remove(); return null; }
   const hc = s.has_circles || [false, false];
-  const startA = circleStrokeAlpha(s.start_circle_stroke_color);
-  const endA = circleStrokeAlpha(s.end_circle_stroke_color);
+  const startA = circleStrokeAlpha(effStartStroke(s));
+  const endA = circleStrokeAlpha(effEndStroke(s));
   const len = cl.length;
   const isAttached = s.type === 'AttachedStrand';
   const addCircle = (centre, angle, which) => {
@@ -465,8 +478,8 @@ function buildShadowCasterCircles(s, strands, P, enableThird, S) {
   const td = ((w + 2 * sw) + 4) * S;    // doubled radius for the half-circle builder
   const radius = ((w + 2 * sw) / 2 + 2) * S;
   const hc = s.has_circles || [false, false];
-  const startA = circleStrokeAlpha(s.start_circle_stroke_color);
-  const endA = circleStrokeAlpha(s.end_circle_stroke_color);
+  const startA = circleStrokeAlpha(effStartStroke(s));
+  const endA = circleStrokeAlpha(effEndStroke(s));
   const isAttached = s.type === 'AttachedStrand';
   const cl = buildCenterline(s, P, enableThird);
   const len = cl.length;
@@ -710,8 +723,8 @@ function drawHighlight(s, strands, P, enableThird, S) {
   const red = toColor(hcA && hcA.a != null ? hcA : { r: 255, g: 0, b: 0, a: 255 });
   const hc = s.has_circles || [false, false];
   const cc = s.closed_connections || [false, false];
-  const startA = circleStrokeAlpha(s.start_circle_stroke_color);
-  const endA = circleStrokeAlpha(s.end_circle_stroke_color);
+  const startA = circleStrokeAlpha(effStartStroke(s));
+  const endA = circleStrokeAlpha(effEndStroke(s));
   const isAttached = s.type === 'AttachedStrand';
   const childStart = hasAttachedChildAt(s.start, strands, s);
   const childEnd = hasAttachedChildAt(s.end, strands, s);
@@ -721,8 +734,23 @@ function drawHighlight(s, strands, P, enableThird, S) {
   const items = [];
 
   // (1) body band: centerline stroked at total+10 (solid; the body covers its
-  // inner half, leaving the 5px outer halo).
-  const band = cl.clone();
+  // inner half, leaving the 5px outer halo). An unfolded (transparent-stroke)
+  // edge pulls the band in along the curve — OSS resamples 100 points between
+  // t_start/t_end (attached_strand.py:564-583: 5.5 start / 3.5 end;
+  // strand.py:2090-2095: 5.0 both) whenever either edge is unfolded and the
+  // path is longer than 10.
+  let band = cl.clone();
+  if ((startA === 0 || endA === 0) && len > 10 * S) {
+    const tS = startA === 0 ? (isAttached ? 5.5 : 5.0) * S : 0;
+    const tE = endA === 0 ? (isAttached ? 3.5 : 5.0) * S : 0;
+    const pts = [];
+    for (let i = 0; i <= 100; i++) {
+      const off = tS + (len - tE - tS) * (i / 100);
+      pts.push(cl.getPointAt(Math.max(0, Math.min(len, off))));
+    }
+    band.remove();
+    band = new paper.Path({ segments: pts });
+  }
   band.strokeColor = red;
   band.strokeWidth = td + 10 * S;
   band.strokeCap = 'butt';
@@ -932,7 +960,7 @@ function maskComponentPath(s, P, enableThird, S, widthW) {
   if (
     s.type === 'AttachedStrand' &&
     (s.has_circles || [])[0] &&
-    circleStrokeAlpha(s.start_circle_stroke_color) > 0
+    circleStrokeAlpha(effStartStroke(s)) > 0
   ) {
     const circle = new paper.Path.Circle(P(s.start), (widthW * S) / 2);
     const u = path.unite(circle);
