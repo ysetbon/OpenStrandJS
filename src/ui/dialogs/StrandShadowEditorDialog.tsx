@@ -167,6 +167,16 @@ export function StrandShadowEditorDialog(props: {
       footer={<button onClick={close}>{t('close', lang)}</button>}
     >
       <div className="gd-shadow-editor">
+        {/* OSS info line: 'Shadows cast by <b>{0}</b> onto layers below:'
+            (shadow_editor_dialog.py:654-659, key shadow_editor_info). */}
+        <div className="gd-shadow-info">
+          {t('shadow_editor_info', lang).split('{0}').map((part, i, arr) => (
+            <span key={i}>
+              {part}
+              {i < arr.length - 1 && <b>{layerName}</b>}
+            </span>
+          ))}
+        </div>
         <div className="gd-member-list gd-shadow-scroll">
           {empty && (
             <div className="gd-member-row">

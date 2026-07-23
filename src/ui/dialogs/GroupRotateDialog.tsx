@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Modal } from '../Modal';
-import { useEditorStore, cloneDoc } from '../../store/editorStore';
+import { useEditorStore } from '../../store/editorStore';
 import { snapshotGroupDrag, applyGroupRotateSnapshot } from '../../model/group';
 import { requestRender } from '../../renderer/renderScheduler';
 import { t } from '../i18n';
@@ -18,7 +18,6 @@ export function GroupRotateDialog(props: { groupName: string; onClose: () => voi
   const lang = useEditorStore((s) => s.settings.language);
 
   const init = useEditorStore.getState();
-  const baseRef = useRef(cloneDoc(init.doc));
   const snapRef = useRef(snapshotGroupDrag(init.doc, groupName));
   const [angle, setAngle] = useState(0);
 
@@ -55,18 +54,13 @@ export function GroupRotateDialog(props: { groupName: string; onClose: () => voi
     onClose();
   };
 
-  const cancel = () => {
-    endDrag();
-    useEditorStore.getState().setDoc(cloneDoc(baseRef.current));
-    useEditorStore.getState().commit(); // base == gestureBase -> clears gesture, no history
-    requestRender();
-    onClose();
-  };
-
+  // OSS has NO revert path: OK, Esc and window-close all emit rotation_finished
+  // once, which KEEPS the rotated geometry and saves the undo state
+  // (group_layers.py:6002-6032, 2222-2298). Esc must not destroy the rotation.
   return (
     <Modal
       title={`${t('rotate_group_strands', lang)} ${groupName}`}
-      onClose={cancel}
+      onClose={apply}
       lang={lang}
       onEnter={apply}
       footer={<button onClick={apply}>{t('ok', lang)}</button>}

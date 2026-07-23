@@ -51,7 +51,7 @@ extra in OSSJS 9. Same 7 languages both sides.
       `refresh_tooltip` py:338, `center_tooltip` py:339, `hide_mode_tooltip`
       py:340 (full multi-line 'Multi-Layer Select:…' text).
 - [x] P1 `tab_copy_suffix` (py:26 'copy') — duplicate-tab title suffix untranslated.
-- [ ] P1 `shadow_editor_info` (py:67 'Shadows cast by <b>{0}</b> onto layers
+- [x] P1 `shadow_editor_info` (py:67 'Shadows cast by <b>{0}</b> onto layers
       below:') — info line absent from StrandShadowEditorDialog.tsx.
 
 **English values that differ on shared keys:**
@@ -434,11 +434,11 @@ mechanics, rename flow strings.
 - [ ] P1 Group creation: missing "Group Exists — replace?" confirm between
       name and select steps (`group_layers.py:5125-5144`, key
       `group_replace_confirm`).
-- [ ] P1 GroupMove Cancel: OSS keeps moved geometry (cancel ≈ close); OSSJS
+- [x] P1 GroupMove Cancel: OSS keeps moved geometry (cancel ≈ close); OSSJS
       reverts. Snap-to-grid: OSS snaps each strand's points to grid then
       CLOSES (`group_layers.py:4256-4266`); OSSJS rounds the offset and stays
       open. Also OSS lets totals exceed ±600 after grid Apply; OSSJS clamps.
-- [ ] P1 GroupRotate Esc/close: OSS ALWAYS keeps rotation + saves undo
+- [x] P1 GroupRotate Esc/close: OSS ALWAYS keeps rotation + saves undo
       (`group_layers.py:6002-6032`); OSSJS Esc reverts — destroys work.
 - [ ] P1 Angle editor: direct angle edits must re-sync all x/180+x-checked
       rows (`update_linked_strands` `group_layers.py:7312-7338`); main-strand
@@ -451,8 +451,8 @@ mechanics, rename flow strings.
       `strand_drawing_canvas.py:2788-2817,1317`; checked style #4A6FA5/#6A9FD5
       dark, #A0C0E0/#7090C0 light; min 80×36). Also selection-driven
       `set_highlighted_shadow` on row click (`:1139-1148`).
-- [ ] P1 Per-strand shadow editor: missing info label `shadow_editor_info` and
-      the strand-level batch toggle row (color box + bold name + Visible/Full/
+- [x] P1 Per-strand shadow editor info label DONE; strand-level batch toggle
+      row still open — see remaining item: batch toggle row (color box + bold name + Visible/Full/
       Subtract/Show All, `shadow_editor_dialog.py:654-659,766-849`).
 - [x] P1 Per-strand WidthConfigDialog replaces `window.prompt`
       (`NumberedLayerButton.tsx:197-222`): title "Change Width", min 400×220,
