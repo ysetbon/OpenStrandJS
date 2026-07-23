@@ -4,7 +4,9 @@
 // reference_render.py. shadow_enabled can be forced on to exercise the
 // shadow-of-unfolded-strands path (no committed fixture combines shadow+unfold).
 //
-// Usage: node tools/make_meta.mjs <fixture.json> <artifactDir> [shadow=on|off] [step=N]
+// Usage: node tools/make_meta.mjs <fixture.json> <artifactDir> [on|off] [step]
+// The 3rd arg is a positional shadow toggle: pass the literal `on` to force
+// shadow_enabled (default off); the 4th arg is a positional history step number.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 

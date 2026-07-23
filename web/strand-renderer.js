@@ -508,7 +508,7 @@ function subtractTransparentEndCaps(core, s, P, S) {
 // buildShadowReceiverGeom keeps half-circles to match build_rendered_geometry —
 // that is a different path and stays as-is.) May return null when no visible
 // circle exists.
-function buildShadowCasterCircles(s, strands, P, enableThird, S) {
+function buildShadowCasterCircles(s, P, S) {
   const w = s.width || 0, sw = s.stroke_width || 0;
   const radius = ((w + 2 * sw) / 2 + 2) * S;
   const hc = s.has_circles || [false, false];
@@ -637,7 +637,7 @@ function castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i) 
     // footprint (auto_shadow.py) and the two never desync.
     core = subtractTransparentEndCaps(core, s, P, S);
     if (!core) return;
-    circles = buildShadowCasterCircles(s, strands, P, enableThird, S);
+    circles = buildShadowCasterCircles(s, P, S);
   }
 
   // The caster's combined casting footprint (core ∪ circles), used both for the
@@ -1762,7 +1762,11 @@ window.computeShadowPairAreas = function (strands, meta, pairs) {
 
     const core = buildShadowCasterCore(s, P, enableThird, S);
     if (!core) continue;
-    const circles = buildShadowCasterCircles(s, strands, P, enableThird, S);
+    // Probe uses the RAW (un-cut) caster footprint — no transparentEndCap cut —
+    // matching OSS auto_shadow.compute_auto_hidden_pairs (auto_shadow.py:190-197),
+    // which calls build_shadow_geometry directly (the cut lives only in
+    // draw_strand_shadow, i.e. the render path in castStrandShadow).
+    const circles = buildShadowCasterCircles(s, P, S);
     let footprint = core.clone();
     if (circles) { const u = footprint.unite(circles); footprint.remove(); footprint = u; }
 

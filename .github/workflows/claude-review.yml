@@ -15,7 +15,10 @@ name: Claude Code Review
 
 on:
   pull_request:
-    types: [labeled, synchronize, reopened]
+    # `ready_for_review` is included so a PR labeled while still a draft starts
+    # its review the moment it is marked ready (the non-draft gate below skips
+    # the `labeled` event that fired during draft).
+    types: [labeled, synchronize, reopened, ready_for_review]
 
 jobs:
   claude-review:
