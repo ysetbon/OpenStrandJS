@@ -59,7 +59,13 @@ const results = [];
 
 for (const name of fixtures) {
   const fixture = path.join('fixtures', `${name}.json`);
-  if (!existsSync(fixture)) { console.error(`skip ${name}: ${fixture} not found`); continue; }
+  if (!existsSync(fixture)) {
+    // Record as an error so a missing/misnamed corpus can never yield a green
+    // "matches the oracle" header from an empty result set.
+    console.error(`MISSING ${name}: ${fixture} not found`);
+    results.push({ fixture: name, ok: false, error: `${fixture} not found` });
+    continue;
+  }
   const dir = path.join(OUT, name);
   mkdirSync(dir, { recursive: true });
   const ref = path.join(dir, 'reference.png');

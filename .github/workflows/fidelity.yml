@@ -42,6 +42,8 @@ jobs:
       pull-requests: write   # upsert the sticky comment
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false   # this job builds its own authed remote for the push
 
       - uses: actions/setup-node@v4
         with:
@@ -117,25 +119,37 @@ jobs:
           git init -q
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git ls-remote --exit-code --heads "$REMOTE" "$BR" >/dev/null 2>&1; then
-            git fetch -q --depth 1 "$REMOTE" "$BR"
-            git checkout -q -b "$BR" FETCH_HEAD
-          else
-            git checkout -q --orphan "$BR"
-          fi
-          mkdir -p "pr-${PR}"
-          rm -f "pr-${PR}"/*.png 2>/dev/null || true
-          for m in "$GITHUB_WORKSPACE"/artifacts/fidelity/*/montage.png; do
-            [ -f "$m" ] || continue
-            cp "$m" "pr-${PR}/$(basename "$(dirname "$m")").png"
-          done
-          git add -A
-          if git diff --cached --quiet; then
-            echo "no montage changes to publish"
-          else
+          # This branch is shared across PRs (each writes only its own pr-<N>/ dir).
+          # To avoid clobbering a concurrent PR's commit, always start from the
+          # latest remote tip, apply ONLY this PR's montages on top, and use a
+          # plain fast-forward push; on a non-fast-forward rejection (another PR
+          # pushed in between) refresh and retry. No force push.
+          pushed=0
+          for attempt in 1 2 3 4 5; do
+            if git ls-remote --exit-code --heads "$REMOTE" "$BR" >/dev/null 2>&1; then
+              git fetch -q --depth 1 "$REMOTE" "$BR"
+              git checkout -q -B "$BR" FETCH_HEAD
+            else
+              git checkout -q --orphan "$BR"
+              git reset -q --hard 2>/dev/null || true
+            fi
+            rm -rf "pr-${PR}"; mkdir -p "pr-${PR}"
+            for m in "$GITHUB_WORKSPACE"/artifacts/fidelity/*/montage.png; do
+              [ -f "$m" ] || continue
+              cp "$m" "pr-${PR}/$(basename "$(dirname "$m")").png"
+            done
+            git add -A
+            if git diff --cached --quiet; then
+              echo "no montage changes to publish"; pushed=1; break
+            fi
             git commit -q -m "fidelity montages: PR #${PR} @ ${SHA}"
-            git push -q -f "$REMOTE" "HEAD:${BR}"
-          fi
+            if git push -q "$REMOTE" "HEAD:${BR}"; then
+              pushed=1; break
+            fi
+            echo "push rejected (attempt ${attempt}): ${BR} advanced, refreshing and retrying"
+            sleep $((attempt * 2))
+          done
+          [ "$pushed" = "1" ] || echo "::warning::could not publish montages after retries (inline images may be stale; table + artifact are unaffected)"
           echo "url_base=https://raw.githubusercontent.com/${{ github.repository }}/${BR}/pr-${PR}" >> "$GITHUB_OUTPUT"
 
       - name: Build PR comment (with inline montages)
@@ -147,6 +161,7 @@ jobs:
 
       - name: Upsert sticky fidelity comment
         if: always() && github.event_name == 'pull_request'
+        continue-on-error: true   # read-only GITHUB_TOKEN on fork PRs must not fail a successful render
         uses: actions/github-script@v7
         with:
           script: |
@@ -164,8 +179,10 @@ jobs:
 
       - name: Gate (render errors block; regressions are advisory)
         if: always()
+        env:
+          HARNESS_CODE: ${{ steps.run.outputs.code }}   # via env, not inline expansion (template-injection safe)
         run: |
-          if [ "${{ steps.run.outputs.code }}" != "0" ]; then
+          if [ "$HARNESS_CODE" != "0" ]; then
             echo "::error::Fidelity harness reported render errors."
             exit 1
           fi
@@ -187,6 +204,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Fetch fidelity report artifact
         uses: actions/download-artifact@v4
         with:
