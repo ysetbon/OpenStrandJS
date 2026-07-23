@@ -93,9 +93,16 @@ export const AttachMode: Mode = {
     if (free) {
       drag = { kind: 'attach', start: free.pos, parent: free.layer, side: free.side };
       st.setPending({ kind: 'attach', start: free.pos, end: free.pos, parent: free.layer, side: free.side });
-    } else {
+    } else if (forceNew) {
+      // A NEW main strand may only be drawn when the "New Strand" button/'N' armed
+      // this gesture (is_drawing_new_strand). OSS attach_mode never creates a main
+      // strand from a bare empty-space press — only child attachments happen there —
+      // so without the arming flag an empty-space press starts no drag at all.
       drag = { kind: 'new', start: p.world };
       st.setPending({ kind: 'new', start: p.world, end: p.world });
+    } else {
+      // Empty space, no free endpoint, not armed: OSS does nothing here (no x_1).
+      return;
     }
     st.beginGesture();
     st.setDragging(true);
