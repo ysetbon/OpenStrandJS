@@ -25,6 +25,7 @@ export class InteractionHost {
   // Active per-mask "Edit Mask" eraser drag (OSS mask_edit_mode erase_start_pos /
   // current_erase_rect). Set on pointer-down while store.maskEditTarget is active.
   private maskErase: { start: Point } | null = null;
+  private unsubscribeMode: () => void;
 
   constructor(private el: HTMLCanvasElement) {
     el.addEventListener('pointerdown', this.onPointerDown);
@@ -35,9 +36,27 @@ export class InteractionHost {
     el.addEventListener('contextmenu', this.onContextMenu);
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
+    // Mode-switch deactivation (OSS main_window.update_mode deactivates the old
+    // mode object before activating the new one). setMode() only swaps the name —
+    // the OUTGOING mode's in-flight gesture state (AttachMode's module `drag` +
+    // store pending/dragging/gestureBase, MoveMode's drag, MaskMode's armed pick)
+    // survived, so Attach -> View/Select left a ghost attach preview and returning
+    // to Attach resumed the dead gesture. Abort it via the outgoing mode's
+    // onCancel, then drop stale hover so the new mode starts clean.
+    this.unsubscribeMode = useEditorStore.subscribe((state, prev) => {
+      if (state.mode === prev.mode) return;
+      modes[prev.mode]?.onCancel?.(this.ctx());
+      const st = useEditorStore.getState();
+      if (st.hover.layerName !== null || st.hover.handle !== null) {
+        st.setHover({ layerName: null, handle: null });
+      }
+      this.el.style.cursor = this.editTarget() ? 'crosshair' : this.mode().cursor;
+      requestOverlay();
+    });
   }
 
   detach(): void {
+    this.unsubscribeMode();
     const el = this.el;
     el.removeEventListener('pointerdown', this.onPointerDown);
     el.removeEventListener('pointermove', this.onPointerMove);
