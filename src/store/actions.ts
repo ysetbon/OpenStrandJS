@@ -300,12 +300,18 @@ export function addNewStrand(
 
 // Attach a child strand to a free parent endpoint. Marks the parent endpoint
 // occupied (has_circles[side]=true). Returns the new layer_name.
+// `transparentStart` threads the "Unfolded start edge by default" setting: OSS
+// AttachedStrand.__init__ (attached_strand.py:143-146) makes the new child's
+// START outline transparent when canvas.default_transparent_start_circle is on
+// — exactly as if "Unfold Start Edge" had been chosen from the layer menu — so
+// the same per-end fields are written here (end stays at the default stroke).
 export function attachChild(
   draft: EditorDocument,
   parentName: string,
   side: 0 | 1,
   start: Point,
   end: Point,
+  transparentStart = false,
 ): string | null {
   const parent = draft.strands[parentName];
   if (!parent) return null;
@@ -317,6 +323,12 @@ export function attachChild(
     color: clone(parent.color), width: parent.width, stroke_width: parent.stroke_width,
     attached_to: parentName, attachment_side: side,
   });
+  if (transparentStart) {
+    child.extra.end_circle_stroke_color = child.circle_stroke_color
+      ? clone(child.circle_stroke_color) : { r: 0, g: 0, b: 0, a: 255 };
+    child.extra.start_circle_stroke_color = { r: 0, g: 0, b: 0, a: 0 };
+    child.circle_stroke_color = { r: 0, g: 0, b: 0, a: 0 };
+  }
   parent.has_circles[side] = true;
   draft.strands[layer_name] = child;
   draft.order.push(layer_name);
@@ -512,11 +524,27 @@ export function isStrandDeletable(s: StrandRecord): boolean {
   return !(s.has_circles[0] && s.has_circles[1]);
 }
 
-// OSS Transparent / Restore-Default Stroke item: sets circle_stroke_color (the
-// stroke around the endpoint circle). Passing null clears it.
+// OSS Unfold / Fold-Over Start Edge item: set_start_circle_stroke_color
+// (numbered_layer_button.py:2081+) writes the START edge only — the end edge
+// keeps its color. The legacy circle_stroke_color property mirrors the start
+// value (strand.py:495-505 getter), which is what save_load_manager serializes,
+// so we mirror it here too for byte-identical saves. The effective end color is
+// pinned into extra.end_circle_stroke_color first so it survives the mirror
+// (OSS end_circle_stroke_color falls back to _circle_stroke_color the same way
+// the renderer falls back to circle_stroke_color). null resets to opaque black,
+// like the OSS setter's None branch. is_setting_staring_circle is NOT stored:
+// OSS derives it from the start alpha and never serializes it (toRenderArray
+// derives it the same way).
 export function setCircleStrokeColor(draft: EditorDocument, name: string, color: RGBA | null): void {
   const s = draft.strands[name];
-  if (s) s.circle_stroke_color = color ? { ...color } : null;
+  if (!s) return;
+  const c: RGBA = color ? { ...color } : { r: 0, g: 0, b: 0, a: 255 };
+  if (s.extra.end_circle_stroke_color == null) {
+    s.extra.end_circle_stroke_color = s.circle_stroke_color
+      ? { ...s.circle_stroke_color } : { r: 0, g: 0, b: 0, a: 255 };
+  }
+  s.extra.start_circle_stroke_color = { ...c };
+  s.circle_stroke_color = { ...c };
 }
 
 // OSS toggle_strand_circle_visibility: flips has_circles[index] and records the

@@ -344,11 +344,16 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
       { label: '', separator: true },
     );
 
-    // Circle stroke fold/unfold: one item toggling on circle_stroke_color.alpha.
-    // OSS gates this on hasattr(strand,'circle_stroke_color'), which is true only
-    // for AttachedStrand — so a plain Strand never shows it.
-    if (isAttached) {
-      const strokeAlpha = strand?.circle_stroke_color?.a ?? 255;
+    // Start-edge fold/unfold: one item keyed on the START stroke alpha. OSS gates
+    // on hasattr(strand,'circle_stroke_color') — a base-class @property
+    // (strand.py:495), so EVERY regular layer (plain Strand included) shows it
+    // (numbered_layer_button.py:891-916). The label keys on
+    // strand.circle_stroke_color.alpha(), whose getter returns the effective
+    // START color (falls back to the legacy field, then opaque black).
+    {
+      const startStroke = (strand?.extra?.start_circle_stroke_color as { a?: number } | undefined)
+        ?? strand?.circle_stroke_color;
+      const strokeAlpha = startStroke?.a ?? 255;
       if (strokeAlpha === 0) {
         items.push({
           label: t('restore_default_stroke', lang),

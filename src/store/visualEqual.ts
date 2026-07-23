@@ -43,6 +43,12 @@ export function strandVisualEqual(a: StrandRecord, b: StrandRecord): boolean {
   if (!approx(a.width, b.width) || !approx(a.stroke_width, b.stroke_width)) return false;
   if (!rgbaEq(a.color, b.color) || !rgbaEq(a.stroke_color, b.stroke_color)) return false;
   if (!rgbaNullEq(a.circle_stroke_color, b.circle_stroke_color)) return false;
+  // Per-end circle strokes (fold/unfold start edge) live in `extra` but are
+  // rendered, so a fold/unfold-only edit must create an undo step.
+  const exa = a.extra ?? {}, exb = b.extra ?? {};
+  for (const k of ['start_circle_stroke_color', 'end_circle_stroke_color'] as const) {
+    if (JSON.stringify(exa[k] ?? null) !== JSON.stringify(exb[k] ?? null)) return false;
+  }
   if (a.has_circles[0] !== b.has_circles[0] || a.has_circles[1] !== b.has_circles[1]) return false;
   if (!!a.is_hidden !== !!b.is_hidden || !!a.shadow_only !== !!b.shadow_only) return false;
   if (!!a.hide_shadow !== !!b.hide_shadow) return false;

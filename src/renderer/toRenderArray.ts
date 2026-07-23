@@ -29,6 +29,7 @@ export function toRenderArray(
     // them here. Without this the renderer never draws flat-end side lines and
     // can't honor closed/unfolded cap state in the editor.
     const ex = (s.extra ?? {}) as Record<string, unknown>;
+    const startStroke = (ex.start_circle_stroke_color as RenderStrand['start_circle_stroke_color']) ?? s.circle_stroke_color;
     const r: RenderStrand = {
       type: s.type,
       layer_name: s.layer_name,
@@ -47,9 +48,13 @@ export function toRenderArray(
       closed_connections: ex.closed_connections as [boolean, boolean] | undefined,
       manual_circle_visibility: ex.manual_circle_visibility as [boolean | null, boolean | null] | undefined,
       circle_stroke_color: s.circle_stroke_color,
-      start_circle_stroke_color: (ex.start_circle_stroke_color as RenderStrand['start_circle_stroke_color']) ?? s.circle_stroke_color,
+      start_circle_stroke_color: startStroke,
       end_circle_stroke_color: (ex.end_circle_stroke_color as RenderStrand['end_circle_stroke_color']) ?? s.circle_stroke_color,
-      is_setting_staring_circle: ex.is_setting_staring_circle as boolean | undefined,
+      // OSS never serializes is_setting_staring_circle — the
+      // start_circle_stroke_color setter derives it as (alpha == 0) on every
+      // assignment, including load (strand.py:534-541). Derive identically here
+      // so an unfolded start keeps its inner fill circle.
+      is_setting_staring_circle: startStroke != null && (startStroke.a ?? 255) === 0,
       // Selected strand draws its unified highlight in the renderer (under the
       // body), exactly like OSS — so the black stroke stays on top. Welded peers
       // moving with a dragged endpoint are highlighted too (highlightSet).
