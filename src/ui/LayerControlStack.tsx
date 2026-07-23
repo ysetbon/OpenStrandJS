@@ -128,6 +128,7 @@ export function LayerControlStack() {
       {confirmAll && (
         <Modal
           title={t('delete_all', lang)}
+          lang={lang}
           onClose={() => setConfirmAll(false)}
           footer={
             <>

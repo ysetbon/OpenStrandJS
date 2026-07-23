@@ -26,13 +26,23 @@ function toColor(c) {
 function computeGridLines(meta, scale, ox, oy, targetW, targetH) {
   const g = meta.grid_size;
   if (!meta.show_grid || !g || g <= 0) return null;
-  if (g * (meta.zoom || 1) < 4) return null; // skip when too dense (matches the old overlay gate)
+  // OSS never auto-hides the grid; below zoom 0.5 it thickens the lines instead
+  // (strand_drawing_canvas.py:3256-3276) — see gridStyle.
   const xs = [], ys = [];
   const worldLeft = (0 - ox) / scale, worldRight = (targetW - ox) / scale;
   const worldTop = (0 - oy) / scale, worldBottom = (targetH - oy) / scale;
   for (let x = Math.floor(worldLeft / g) * g; x <= worldRight; x += g) xs.push(x * scale + ox);
   for (let y = Math.floor(worldTop / g) * g; y <= worldBottom; y += g) ys.push(y * scale + oy);
   return { xs, ys };
+}
+
+// OSS grid pen (strand_drawing_canvas.py:3256-3276): opaque rgb(200,200,200)
+// width 1; when zoom < 0.5 the lines thicken to 1.5 and darken to rgb(180,180,180).
+function gridStyle(meta) {
+  const thick = (meta.zoom || 1) < 0.5;
+  return thick
+    ? { css: 'rgb(180,180,180)', color: { r: 180, g: 180, b: 180, a: 255 }, width: 1.5 }
+    : { css: 'rgb(200,200,200)', color: { r: 200, g: 200, b: 200, a: 255 }, width: 1 };
 }
 
 // Curve-shape parameters. These are canvas-level settings (NOT stored per
@@ -1288,7 +1298,7 @@ window.renderFixture = function (strands, meta) {
   paper.setup(hi);
 
   const bg = new paper.Path.Rectangle(new paper.Point(0, 0), new paper.Size(W * ss, H * ss));
-  bg.fillColor = 'white';
+  bg.fillColor = meta.canvas_bg || 'white'; // theme bg live; oracle/export never set it
 
   const ox = meta.x_offset, oy = meta.y_offset;
   // world -> backing: position scaled by S (= ss*zoom), offset by ss. At zoom 1
@@ -1305,14 +1315,15 @@ window.renderFixture = function (strands, meta) {
   {
     const grid = computeGridLines(meta, S, ox * ss, oy * ss, W * ss, H * ss);
     if (grid) {
-      const gridColor = toColor({ r: 0, g: 0, b: 0, a: 20 }); // ~0.08 alpha
+      const gs = gridStyle(meta);
+      const gridColor = toColor(gs.color);
       for (const x of grid.xs) {
         const ln = new paper.Path.Line(new paper.Point(x, 0), new paper.Point(x, H * ss));
-        ln.strokeColor = gridColor; ln.strokeWidth = ss;
+        ln.strokeColor = gridColor; ln.strokeWidth = gs.width * ss;
       }
       for (const y of grid.ys) {
         const ln = new paper.Path.Line(new paper.Point(0, y), new paper.Point(W * ss, y));
-        ln.strokeColor = gridColor; ln.strokeWidth = ss;
+        ln.strokeColor = gridColor; ln.strokeWidth = gs.width * ss;
       }
     }
   }
@@ -1520,7 +1531,7 @@ function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg, topo) {
   paper.setup(targetCanvas);
   if (whiteBg) {
     const bg = new paper.Path.Rectangle(new paper.Point(0, 0), new paper.Size(W, H));
-    bg.fillColor = 'white';
+    bg.fillColor = meta.canvas_bg || 'white';
   }
   const ox = meta.x_offset, oy = meta.y_offset;
   // Matches renderFixture's P at ss=1: P(pt) = pt*S + offset.
@@ -1618,7 +1629,7 @@ window.renderDragFrame = function (strands, meta) {
   vis.style.height = H + 'px';
   const ctx = vis.getContext('2d');
   ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = 'white';
+  ctx.fillStyle = meta.canvas_bg || 'white';
   ctx.fillRect(0, 0, W, H); // backdrop (baked into no band; see renderDragBackground)
   // Grid: same as the full render path, painted on the visible canvas after the
   // white backdrop and BEFORE the transparent static bands, so it sits under every
@@ -1627,9 +1638,10 @@ window.renderDragFrame = function (strands, meta) {
   {
     const grid = computeGridLines(meta, meta.zoom || 1, meta.x_offset, meta.y_offset, W, H);
     if (grid) {
+      const gs = gridStyle(meta);
       ctx.save();
-      ctx.strokeStyle = 'rgba(0,0,0,0.08)';
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = gs.css;
+      ctx.lineWidth = gs.width;
       for (const x of grid.xs) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
       for (const y of grid.ys) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
       ctx.restore();

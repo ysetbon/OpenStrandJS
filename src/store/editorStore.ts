@@ -22,6 +22,7 @@ import {
   DEFAULT_STRAND_WIDTH, DEFAULT_STROKE_WIDTH,
 } from '../model/factory';
 import { areVisuallyEqual } from './visualEqual';
+import { t as tr } from '../ui/translations';
 
 export function emptyDocument(): EditorDocument {
   return {
@@ -31,7 +32,7 @@ export function emptyDocument(): EditorDocument {
     selected_strand_name: null,
     locked_layers: [],
     lock_mode: false,
-    shadow_enabled: true,
+    shadow_enabled: false,   // OSS launch default: shadows OFF (strand_drawing_canvas.py:1320, main_window.py:336)
     show_control_points: true,
     shadow_overrides: {},
   };
@@ -42,7 +43,7 @@ export function emptyDocument(): EditorDocument {
 const DEFAULT_SETTINGS: Settings = {
   curve_params: { base_fraction: 1.0, dist_multiplier: 2.0, exponent: 2.0 },
   grid_size: 28,
-  show_grid: false,
+  show_grid: true,   // OSS launch default: grid ON (strand_drawing_canvas.py:184)
   snap_to_grid_enabled: true,   // OSS default; new strands draw free-angle, endpoints quantized to grid_size
   default_strand_color: DEFAULT_STRAND_COLOR,   // 200,170,230,255
   default_stroke_color: DEFAULT_STROKE_COLOR,   // 0,0,0,255
@@ -203,6 +204,10 @@ export interface EditorState {
   setSelection: (sel: Selection) => void;
   setDragging: (b: boolean) => void;
   setDragMoving: (moving: string[]) => void;
+  // Live angle-adjust session (OSS AngleAdjustMode): the overlay draws the red
+  // angle arc + green start→end line for this strand while the dialog is open.
+  angleAdjust: { name: string; deltaDeg: number } | null;
+  setAngleAdjust: (a: { name: string; deltaDeg: number } | null) => void;
   setHover: (hover: { layerName: string | null; handle: HandleKind | null }) => void;
   setPending: (pending: PendingStrand | null) => void;
   setMaskPending: (maskPending: string[]) => void;
@@ -338,7 +343,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     };
   }),
 
-  // Clone the active doc into a brand-new tab named "<name> copy". The new tab
+  // Clone the active doc into a brand-new tab named "<name> copy" (localized
+  // suffix, OSS tab_copy_suffix). The new tab
   // becomes active and starts clean (no dirty flag, fresh history).
   duplicateTab: (id) => set((s) => {
     // Persist the active doc/view into its tab first so the source is current.
@@ -348,7 +354,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const srcDoc = src.doc ?? (id === s.activeTabId ? s.doc : emptyDocument());
     const nid = s.nextTabId;
     const copyDoc = cloneDoc(srcDoc);
-    const tabs = [...persisted, { id: nid, name: `${src.name} copy`, doc: copyDoc, view: src.view }];
+    const tabs = [...persisted, { id: nid, name: `${src.name} ${tr('tab_copy_suffix', s.settings.language)}`, doc: copyDoc, view: src.view }];
     return {
       tabs, activeTabId: nid, nextTabId: nid + 1,
       doc: copyDoc, view: src.view ? { ...src.view } : { ...DEFAULT_VIEW, width: s.view.width, height: s.view.height },
@@ -477,7 +483,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   // Any explicit mode switch disarms a pending new-strand draw (matching OSS, where
   // choosing another tool exits new-strand mode). armNewStrand() sets the flag
   // separately so it survives the attach-mode switch it performs.
-  setMode: (mode) => set({ mode, newStrandArmed: false }),
+  // OSS set_mode runs the outgoing mode's deactivate() (strand_drawing_canvas.py
+  // :4973,5015-5018), which resets per-mode hover/pick state — a pending mask
+  // pick must not survive a mode round-trip.
+  setMode: (mode) => set({ mode, newStrandArmed: false, maskPending: [], hover: { layerName: null, handle: null } }),
   // Selection is ONE thing in OSS (canvas.selected_strand): the canvas highlight
   // and the layer-panel button must agree. We mirror that by keeping
   // doc.selected_strand_name in lockstep with the live selection here — the canvas
@@ -495,6 +504,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   )),
   setDragging: (dragging) => set({ dragging }),
   setDragMoving: (dragMoving) => set({ dragMoving }),
+  angleAdjust: null,
+  setAngleAdjust: (angleAdjust) => set({ angleAdjust }),
   setHover: (hover) => set({ hover }),
   setPending: (pending) => set({ pending }),
   setMaskPending: (maskPending) => set({ maskPending }),

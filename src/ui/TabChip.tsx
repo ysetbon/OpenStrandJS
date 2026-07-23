@@ -61,8 +61,8 @@ export function TabChip(props: {
         <button
           type="button"
           className="tab-icon-btn tab-chip-dup"
-          title="Duplicate"
-          aria-label="Duplicate tab"
+          title={t('duplicate_tab', lang)}
+          aria-label={t('duplicate_tab', lang)}
           onClick={onDuplicate}
         >
           <DuplicateGlyph />
@@ -70,8 +70,8 @@ export function TabChip(props: {
         <button
           type="button"
           className="tab-icon-btn tab-chip-close"
-          title={t('close', lang)}
-          aria-label={t('close', lang)}
+          title={t('close_tab', lang)}
+          aria-label={t('close_tab', lang)}
           onClick={onCloseClick}
         >
           <CloseGlyph />
@@ -81,6 +81,7 @@ export function TabChip(props: {
       {confirmOpen ? (
         <Modal
           title={t('unsaved_tab_title', lang)}
+          lang={lang}
           onClose={doCancel}
           footer={
             <>

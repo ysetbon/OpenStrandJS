@@ -89,5 +89,8 @@ export function buildMeta(doc: EditorDocument, view: ViewState, settings: Settin
     // never sets these, so fixtures stay byte-identical.
     show_grid: settings.show_grid,
     grid_size: settings.grid_size,
+    // OSS canvas bg = the app-wide QWidget background per theme
+    // (main_window.py:712 dark #2C2C2C / :871 light #FFFFFF / :1034 default #ECECEC).
+    canvas_bg: settings.theme === 'dark' ? '#2C2C2C' : settings.theme === 'light' ? '#FFFFFF' : '#ECECEC',
   };
 }

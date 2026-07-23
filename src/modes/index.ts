@@ -4,6 +4,7 @@ import { SelectMode } from './SelectMode';
 import { MoveMode } from './MoveMode';
 import { AttachMode } from './AttachMode';
 import { MaskMode } from './MaskMode';
+import { RotateMode } from './RotateMode';
 import { passiveMode } from './PassiveMode';
 
 export const modes: Record<ModeName, Mode> = {
@@ -11,7 +12,9 @@ export const modes: Record<ModeName, Mode> = {
   move: MoveMode,
   attach: AttachMode,
   mask: MaskMode,
-  view: passiveMode('view'),       // read-only inspect
-  rotate: passiveMode('rotate'),   // stub (OSS rotate gesture not yet ported)
-  angle: passiveMode('angle'),     // stub (OSS angle-adjust not yet ported)
+  view: passiveMode('view', 'grab'), // read-only inspect; OSS view_mode.activate -> OpenHand (view_mode.py:22)
+  rotate: RotateMode,
+  // Angle-adjust: interaction lives entirely in AngleAdjustDialog (opened by the
+  // toolbar button); the mode itself only sets the OSS SizeAll cursor (:4995-4998).
+  angle: passiveMode('angle', 'move'),
 };

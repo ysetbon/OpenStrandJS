@@ -281,4 +281,8 @@ export interface RenderMeta {
   // top. Absent/false => no grid, so the fidelity oracle stays byte-identical.
   show_grid?: boolean;
   grid_size?: number;
+  // LIVE EDITOR ONLY. Theme canvas background (OSS: the app-wide QWidget bg —
+  // default #ECECEC / light #FFFFFF / dark #2C2C2C). Absent => white, so the
+  // fidelity oracle and PNG export stay byte-identical.
+  canvas_bg?: string;
 }

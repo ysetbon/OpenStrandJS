@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import {
-  toggleHidden, setShadowOnly, setHideShadow, setColor, setWidth, setWidthGridUnits,
+  toggleHidden, setShadowOnly, setHideShadow, setColor,
   resetMask, setCircleStrokeColor, toggleCircleVisible, toggleLineVisible, closeKnot,
   toggleLock, toggleArrowVisible,
 } from '../store/actions';
@@ -9,11 +9,11 @@ import { maskComponents } from '../model/layerName';
 import type { RGBA } from '../model/types';
 import { ContextMenu, type MenuItem, type MenuRowButton } from './ContextMenu';
 import { StrandShadowEditorDialog } from './dialogs/StrandShadowEditorDialog';
+import { WidthConfigDialog } from './dialogs/WidthConfigDialog';
 import {
   COPY_PROPERTIES, clipboardPropertyCount, pasteStrandData, snapshotStrandData,
   type CopyProperty,
 } from '../store/strandClipboard';
-import { Modal } from './Modal';
 import { ossIcon } from './icons';
 import { t } from './i18n';
 import './layerButton.css';
@@ -97,9 +97,6 @@ function qtDarker(c: RGBA | undefined | null, factor = 200): string {
   return `rgba(${r}, ${g}, ${b}, ${a})`;
 }
 
-// WidthConfigDialog constants (numbered_layer_button.py:3098-3102).
-const GRID_UNIT = 27;
-
 export interface NumberedLayerButtonProps {
   name: string;
   orderIdx: number;
@@ -148,11 +145,25 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
 
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [shadowEditor, setShadowEditor] = useState(false);
-  const [copyPanel, setCopyPanel] = useState(false);
+  // Inline expandable panels inside the multi-select menu (OSS QWidgetAction
+  // dropdowns — both collapsed each time the menu opens).
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [copyOpen, setCopyOpen] = useState(false);
   const [badgeMenu, setBadgeMenu] = useState<{ x: number; y: number } | null>(null);
+  // OSS right-click-on-indicator explanation tooltip (QToolTip.showText —
+  // hover tooltips were deliberately removed as "too chatty").
+  const [indicatorTip, setIndicatorTip] = useState<{ x: number; y: number; text: string } | null>(null);
+  const tipTimer = useRef<number | null>(null);
+  const showIndicatorTip = (x: number, y: number, text: string) => {
+    if (tipTimer.current != null) window.clearTimeout(tipTimer.current);
+    setIndicatorTip({ x, y, text });
+    tipTimer.current = window.setTimeout(() => setIndicatorTip(null), 2500);
+  };
+  const toggleMultiSelectLayer = useEditorStore((s) => s.toggleMultiSelectLayer);
   const strandClipboard = useEditorStore((s) => s.strandClipboard);
   const setStrandClipboard = useEditorStore((s) => s.setStrandClipboard);
   const [colorPick, setColorPick] = useState<'fill' | 'stroke' | null>(null);
+  const [widthDialog, setWidthDialog] = useState<{ wholeSet: boolean } | null>(null);
   const colorInputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -194,31 +205,12 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
     commitEdit((d) => setColor(d, name, kind, rgba, kind === 'fill'));
   };
 
-  // OSS WidthConfigDialog: total thickness conserved; the slider redistributes
-  // color vs stroke. total = squares*27, stroke clamped to [1, total/2], color =
-  // total - 2*stroke. wholeSet -> Change Width (whole set); else Change Width
-  // (This Layer Only). (numbered_layer_button.py:2698-2799, 3098-3396)
-  // TODO(oss-fidelity): WidthConfigDialog slider redistribution — using prompt
-  // for the grid-square count.
+  // OSS WidthConfigDialog (numbered_layer_button.py:3750-4244): the real dialog
+  // with the total-thickness spinbox + color-vs-stroke slider redistribution.
+  // wholeSet -> Change Width; else Change Width (This Layer Only).
   const doChangeWidth = (wholeSet: boolean) => {
     if (!strand) return;
-    const curUnits = typeof strand.extra.width_in_grid_units === 'number'
-      ? (strand.extra.width_in_grid_units as number)
-      : Math.max(0.5, Math.round(((strand.width + 2 * strand.stroke_width) / GRID_UNIT) * 10) / 10);
-    const raw = window.prompt(t('change_width', lang), String(curUnits));
-    if (raw == null) return;
-    let squares = Number(raw);
-    if (!Number.isFinite(squares)) return;
-    if (squares < 0.5) squares = 0.5;
-    const total = squares * GRID_UNIT;
-    const maxStroke = Math.max(1, Math.floor(total / 2));
-    const stroke = Math.max(1, Math.min(maxStroke, Math.round(strand.stroke_width)));
-    const colorWidth = Math.max(0, total - 2 * stroke);
-    commitEdit((d) => {
-      setWidth(d, name, 'width', colorWidth, wholeSet);
-      setWidth(d, name, 'stroke_width', stroke, wholeSet);
-      setWidthGridUnits(d, name, squares, wholeSet);
-    });
+    setWidthDialog({ wholeSet });
   };
 
   // ---- Copy/Paste Strand Data (1.109 strand_data_menu.py) ----
@@ -246,6 +238,56 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
     multiSelectMode && !!strandClipboard && !isCopySource &&
     !!strand && strand.type !== 'MaskedStrand' && !locked;
 
+  // OSS _build_strand_copy_panel (strand_data_menu.py:174-287): an UNTITLED
+  // inline checklist inside the same menu — tristate Select All, one checkbox
+  // per property, and a single flat "Copy (N)" button (live ticked count,
+  // disabled at 0) that snapshots and closes the menu. Choices are remembered
+  // for the session (strand_data_copy_options, default all ticked).
+  const copyOptions = useEditorStore((s) => s.strandDataCopyOptions);
+  const setCopyOption = useEditorStore((s) => s.setStrandDataCopyOption);
+  const copyInlinePanel = (): React.ReactNode => {
+    const labelOf: Record<CopyProperty, string> = {
+      start_point: t('strand_data_start_point', lang),
+      end_point: t('strand_data_end_point', lang),
+      control_points: t('strand_data_control_points', lang),
+      width: t('strand_data_width', lang),
+      strand_color: t('strand_data_strand_color', lang),
+      stroke_color: t('strand_data_stroke_color', lang),
+    };
+    const isOn = (k: CopyProperty) => copyOptions[k] !== false; // default true
+    const allOn = COPY_PROPERTIES.every(isOn);
+    const someOn = COPY_PROPERTIES.some(isOn);
+    const selected = COPY_PROPERTIES.filter(isOn);
+    const doCopy = () => {
+      if (!strand) return;
+      const snap = snapshotStrandData(strand, selected);
+      if (snap) setStrandClipboard(snap);
+      setMenu(null); // a successful Copy closes the menu (strand_data_menu.py:278-284)
+    };
+    return (
+      <div className="ctx-inline-panel">
+        <label className="ctx-check">
+          <input
+            type="checkbox"
+            checked={allOn}
+            ref={(el) => { if (el) el.indeterminate = someOn && !allOn; }}
+            onChange={(e) => COPY_PROPERTIES.forEach((k) => setCopyOption(k, e.target.checked))}
+          />
+          <span>{t('select_all', lang)}</span>
+        </label>
+        {COPY_PROPERTIES.map((k) => (
+          <label key={k} className="ctx-check">
+            <input type="checkbox" checked={isOn(k)} onChange={(e) => setCopyOption(k, e.target.checked)} />
+            <span>{labelOf[k]}</span>
+          </label>
+        ))}
+        <button type="button" className="ctx-copy-btn" disabled={selected.length === 0} onClick={doCopy}>
+          {`${t('copy', lang)} (${selected.length})`}
+        </button>
+      </div>
+    );
+  };
+
   // ---- circle / line gating by scanning children attached to this strand ----
   const childSides = (): { start: boolean; end: boolean } => {
     let start = false, end = false;
@@ -264,9 +306,9 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
     // ---- multi-select menu: batch items over the selected set + the 1.109
     //      Copy/Paste Strand Data entries (strand_data_menu.py) ----
     if (multiSelectMode) {
-      const S = multiSelectedLayers.includes(name)
-        ? multiSelectedLayers
-        : [name, ...multiSelectedLayers];
+      // The right-clicked layer was added to the ticked set on contextmenu
+      // (OSS layer_panel.py:1935-1938), so the set alone is the target list.
+      const S = multiSelectedLayers;
       const anyHidden = S.some((n) => strands[n]?.is_hidden);
       const anyShadow = S.some((n) => strands[n]?.shadow_only);
       items.push(
@@ -287,29 +329,46 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
         },
         { label: '', separator: true },
       );
-      // Paste sits above Copy (OSS add_strand_data_menu_actions). Menu paste
-      // targets the ticked layers only (paste_copied_strand_data with no
-      // explicit targets), anchored from the start or the end point.
+      // Paste sits above Copy (OSS strand_data_menu.py:93-133 — "so expanding
+      // Copy never pushes Paste around"). Both are collapsed "label  ▾" rows
+      // that expand INLINE in the menu; the ▾ flips to ▴ when expanded.
+      const arrow = (open: boolean) => (open ? '  ▴' : '  ▾');
       if (strandClipboard) {
         items.push({
-          label: '',
-          rowLabel: t('paste_copied_data', lang),
-          buttons: [
-            { label: t('angle_from_start_point', lang), onClick: () => doPaste('start', null) },
-            { label: t('angle_from_end_point', lang), onClick: () => doPaste('end', null) },
-          ],
+          label: t('paste_copied_data', lang) + arrow(pasteOpen),
+          keepOpen: true,
+          onClick: () => setPasteOpen((v) => !v),
         });
+        if (pasteOpen) {
+          // First row of the expanded panel: the gray clipboard summary hint
+          // "{count} properties from {source}" (strand_data_menu.py:321-329).
+          items.push({
+            label: t('strand_data_clipboard_hint', lang)
+              .replace('{count}', String(clipboardPropertyCount(strandClipboard)))
+              .replace('{source}', strandClipboard.source_layer_name),
+            disabled: true,
+          });
+          items.push(
+            { label: t('angle_from_start_point', lang), indent: true, onClick: () => doPaste('start', null) },
+            { label: t('angle_from_end_point', lang), indent: true, onClick: () => doPaste('end', null) },
+          );
+        }
       } else {
-        items.push({ label: t('paste_copied_data', lang), disabled: true });
+        // Disabled label keeps its ▾ in OSS.
+        items.push({ label: t('paste_copied_data', lang) + arrow(false), disabled: true });
       }
       items.push({ label: '', separator: true });
       // Copy from the right-clicked layer; masked strands cannot be copied.
       const copyAllowed = !!strand && strand.type !== 'MaskedStrand';
       items.push({
-        label: t('copy_strand_data', lang),
+        label: t('copy_strand_data', lang) + arrow(copyOpen),
         disabled: !copyAllowed,
-        onClick: copyAllowed ? () => setCopyPanel(true) : undefined,
+        keepOpen: true,
+        onClick: copyAllowed ? () => setCopyOpen((v) => !v) : undefined,
       });
+      if (copyOpen && copyAllowed) {
+        items.push({ label: '', custom: copyInlinePanel() });
+      }
       return items;
     }
 
@@ -510,7 +569,14 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
           // (OSS setContextMenuPolicy(Qt.NoContextMenu)); exit with ESC.
           if (editActive) return;
           // OSS suppresses the normal per-button menu in multi-select mode and
-          // shows the 2-item multi menu instead (built in menuItems()).
+          // shows the batch menu instead; right-clicking a non-ticked layer
+          // first ADDS it to the selection (gold border + paste target,
+          // layer_panel.py:1935-1938).
+          if (multiSelectMode && !multiSelectedLayers.includes(name)) {
+            toggleMultiSelectLayer(name);
+          }
+          setPasteOpen(false);
+          setCopyOpen(false);
           setMenu({ x: e.clientX, y: e.clientY });
         }}
         onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; onDragStart?.(orderIdx, e); }}
@@ -560,8 +626,19 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
           <button
             type="button"
             className="nlb-copybadge"
-            aria-label="strand data clipboard"
+            aria-label={t('copy_strand_data', lang)}
             onClick={(e) => { e.stopPropagation(); setBadgeMenu({ x: e.clientX, y: e.clientY }); }}
+            onContextMenu={(e) => {
+              // OSS: right-click on the badge shows the clipboard hint as a
+              // tooltip INSTEAD of the batch menu (numbered_layer_button.py:1772-1789;
+              // hover tooltips were deliberately removed).
+              e.preventDefault();
+              e.stopPropagation();
+              if (!strandClipboard) return;
+              showIndicatorTip(e.clientX, e.clientY, t('strand_data_clipboard_hint', lang)
+                .replace('{count}', String(clipboardPropertyCount(strandClipboard)))
+                .replace('{source}', strandClipboard.source_layer_name));
+            }}
           >
             <img src={ossIcon('copy_badge')} alt="" draggable={false} />
           </button>
@@ -570,18 +647,33 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
           <span className="nlb-chips">
             <button
               type="button"
-              title={t('angle_from_start_point', lang)}
               onClick={(e) => { e.stopPropagation(); doChipPaste('start'); }}
+              onContextMenu={(e) => {
+                e.preventDefault(); e.stopPropagation();
+                showIndicatorTip(e.clientX, e.clientY, t('angle_from_start_point', lang));
+              }}
             >
               <img src={ossIcon('chip_start')} alt="" draggable={false} />
             </button>
             <button
               type="button"
-              title={t('angle_from_end_point', lang)}
               onClick={(e) => { e.stopPropagation(); doChipPaste('end'); }}
+              onContextMenu={(e) => {
+                e.preventDefault(); e.stopPropagation();
+                showIndicatorTip(e.clientX, e.clientY, t('angle_from_end_point', lang));
+              }}
             >
               <img src={ossIcon('chip_end')} alt="" draggable={false} />
             </button>
+          </span>
+        )}
+        {indicatorTip && (
+          <span
+            className="nlb-indicator-tip"
+            style={{ left: indicatorTip.x + 8, top: indicatorTip.y + 12 }}
+            aria-hidden
+          >
+            {indicatorTip.text}
           </span>
         )}
       </div>
@@ -601,12 +693,20 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
           items={menuItems()}
           x={menu.x}
           y={menu.y}
-          onClose={() => setMenu(null)}
+          onClose={() => { setMenu(null); setPasteOpen(false); setCopyOpen(false); }}
         />
       )}
 
       {shadowEditor && (
         <StrandShadowEditorDialog layerName={name} onClose={() => setShadowEditor(false)} />
+      )}
+
+      {widthDialog && (
+        <WidthConfigDialog
+          layerName={name}
+          wholeSet={widthDialog.wholeSet}
+          onClose={() => setWidthDialog(null)}
+        />
       )}
 
       {/* Copy-badge popup: clipboard hint + Clear (show_strand_data_badge_popup). */}
@@ -628,75 +728,6 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
         />
       )}
 
-      {copyPanel && strand && (
-        <CopyStrandDataPanel layerName={name} onClose={() => setCopyPanel(false)} />
-      )}
     </>
-  );
-}
-
-// Copy panel (OSS _build_strand_copy_panel, rendered as a small dialog): one
-// checkbox per copyable property + Select All, and a Copy button that snapshots
-// the ticked properties into the clipboard. Checkbox choices are remembered for
-// the session (OSS strand_data_copy_options, default all ticked).
-function CopyStrandDataPanel(props: { layerName: string; onClose: () => void }): JSX.Element {
-  const { layerName, onClose } = props;
-  const lang = useEditorStore((s) => s.settings.language);
-  const strand = useEditorStore((s) => s.doc.strands[layerName]);
-  const options = useEditorStore((s) => s.strandDataCopyOptions);
-  const setOption = useEditorStore((s) => s.setStrandDataCopyOption);
-  const setStrandClipboard = useEditorStore((s) => s.setStrandClipboard);
-
-  const labelOf: Record<CopyProperty, string> = {
-    start_point: t('strand_data_start_point', lang),
-    end_point: t('strand_data_end_point', lang),
-    control_points: t('strand_data_control_points', lang),
-    width: t('strand_data_width', lang),
-    strand_color: t('strand_data_strand_color', lang),
-    stroke_color: t('strand_data_stroke_color', lang),
-  };
-  const isOn = (k: CopyProperty) => options[k] !== false; // default true
-  const allOn = COPY_PROPERTIES.every(isOn);
-  const selected = COPY_PROPERTIES.filter(isOn);
-
-  const doCopy = () => {
-    if (!strand) return;
-    const snap = snapshotStrandData(strand, selected);
-    if (snap) setStrandClipboard(snap);
-    onClose();
-  };
-
-  return (
-    <Modal
-      title={`${t('copy_strand_data', lang)} - ${layerName}`}
-      onClose={onClose}
-      lang={lang}
-      onEnter={doCopy}
-      footer={
-        <>
-          <button onClick={onClose}>{t('close', lang)}</button>
-          <button autoFocus disabled={selected.length === 0} onClick={doCopy}>
-            {t('copy', lang)}
-          </button>
-        </>
-      }
-    >
-      <div className="nlb-copy-panel">
-        <label className="gd-check">
-          <input
-            type="checkbox"
-            checked={allOn}
-            onChange={(e) => COPY_PROPERTIES.forEach((k) => setOption(k, e.target.checked))}
-          />
-          <span>{t('select_all', lang)}</span>
-        </label>
-        {COPY_PROPERTIES.map((k) => (
-          <label key={k} className="gd-check">
-            <input type="checkbox" checked={isOn(k)} onChange={(e) => setOption(k, e.target.checked)} />
-            <span>{labelOf[k]}</span>
-          </label>
-        ))}
-      </div>
-    </Modal>
   );
 }

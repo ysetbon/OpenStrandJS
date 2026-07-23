@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useEditorStore } from '../../store/editorStore';
 import { t, tt } from '../i18n';
 import { Button } from './controls';
+import { Modal } from '../Modal';
 import { listSessions, getSessionLatestDoc, clearOtherSessions, type SessionInfo } from './history';
 import type { PageProps } from './types';
 
@@ -19,6 +20,8 @@ export function HistoryPage({ lang, onClose }: PageProps) {
   const [sessions, setSessions] = useState<SessionInfo[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [cleared, setCleared] = useState(false);
 
   const refresh = () => { setSelected(null); listSessions().then(setSessions); };
   useEffect(() => { listSessions().then(setSessions); }, []);
@@ -59,10 +62,39 @@ export function HistoryPage({ lang, onClose }: PageProps) {
         <Button onClick={loadSelected} disabled={!selected}>
           {t('load_selected_history', lang)}
         </Button>
-        <Button onClick={async () => { await clearOtherSessions(); refresh(); }}>
+        {/* OSS: Clear is disabled when there is no history and always confirms
+            first (settings_dialog.py:6730,6766,6890-6895). */}
+        <Button onClick={() => setConfirmClear(true)} disabled={!sessions || sessions.length === 0}>
           {t('clear_all_history', lang)}
         </Button>
       </div>
+
+      {cleared && <div>{t('history_cleared_text', lang)}</div>}
+
+      {confirmClear && (
+        <Modal
+          title={t('confirm_clear_history_title', lang)}
+          lang={lang}
+          onClose={() => setConfirmClear(false)}
+          footer={
+            <>
+              <button autoFocus onClick={() => setConfirmClear(false)}>{t('no', lang)}</button>
+              <button
+                onClick={async () => {
+                  await clearOtherSessions();
+                  setConfirmClear(false);
+                  setCleared(true);
+                  refresh();
+                }}
+              >
+                {t('yes', lang)}
+              </button>
+            </>
+          }
+        >
+          <div style={{ maxWidth: 360 }}>{t('confirm_clear_history_text', lang)}</div>
+        </Modal>
+      )}
     </div>
   );
 }

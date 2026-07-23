@@ -54,17 +54,74 @@
   flex: 1 1 auto;
 }
 
+/* OSS disables items with color #909090 in BOTH themes (strand_data_menu.py:84-90). */
 .ctx-disabled,
 .ctx-disabled:hover {
-  color: #888;
+  color: #909090;
   background: transparent;
   cursor: default;
 }
 
 .ctx-theme-dark .ctx-disabled,
 .ctx-theme-dark .ctx-disabled:hover {
-  color: #777;
+  color: #909090;
   background: transparent;
+}
+
+/* OSS paste anchor rows: setIndent(20) inside the expanded panel. */
+.ctx-indent {
+  padding-inline-start: 25px;
+}
+
+/* Inline expandable panels (OSS QWidgetAction: Copy checklist / Paste dropdown). */
+.ctx-inline-panel {
+  padding: 2px 5px 4px;
+}
+
+.ctx-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  padding: 2px 0;
+  cursor: pointer;
+}
+
+.ctx-check input {
+  margin: 0;
+}
+
+/* OSS copy confirm: a flat transparent "Copy (N)" button (strand_data_menu.py:218-233). */
+.ctx-copy-btn {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 4px;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+[dir='rtl'] .ctx-copy-btn {
+  text-align: right;
+}
+
+.ctx-copy-btn:hover:not(:disabled) {
+  background: #333333;
+  color: #fff;
+}
+
+.ctx-theme-dark .ctx-copy-btn:hover:not(:disabled) {
+  background: #F0F0F0;
+  color: #000;
+}
+
+.ctx-copy-btn:disabled {
+  color: #909090;
+  cursor: default;
 }
 
 .ctx-sep {

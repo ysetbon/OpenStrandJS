@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Modal } from '../Modal';
-import { useEditorStore, cloneDoc } from '../../store/editorStore';
+import { useEditorStore } from '../../store/editorStore';
 import { snapshotGroupDrag, applyGroupMoveSnapshot } from '../../model/group';
 import { requestRender } from '../../renderer/renderScheduler';
 import { t } from '../i18n';
@@ -20,7 +20,6 @@ export function GroupMoveDialog(props: { groupName: string; onClose: () => void 
   const grid = useEditorStore((s) => s.settings.grid_size) || 28;
 
   const init = useEditorStore.getState();
-  const baseRef = useRef(cloneDoc(init.doc));
   const snapRef = useRef(snapshotGroupDrag(init.doc, groupName));
   const [dx, setDx] = useState(0);
   const [dy, setDy] = useState(0);
@@ -43,14 +42,18 @@ export function GroupMoveDialog(props: { groupName: string; onClose: () => void 
   const clampPx = (v: number) => Math.max(-600, Math.min(600, v));
   const clampStep = (v: number) => Math.max(-50, Math.min(50, Math.round(v)));
 
-  const preview = (nx: number, ny: number) => {
-    const tx = clampPx(nx), ty = clampPx(ny);
+  // Slider/input drive a ±600-clamped total; the grid-step Apply may push the
+  // TRUE total past ±600 (OSS keeps the real total_dx, the slider merely
+  // saturates — group_layers.py:4102-4104), so raw previews skip the clamp.
+  const preview = (nx: number, ny: number, clamp = true) => {
+    const tx = clamp ? clampPx(nx) : nx;
+    const ty = clamp ? clampPx(ny) : ny;
     useEditorStore.getState().mutateDoc((d) => applyGroupMoveSnapshot(d, snapRef.current, tx, ty));
     setDx(tx); setDy(ty);
   };
 
-  const applyXGrid = () => { if (xStep) { preview(dx + xStep * grid, dy); setXStep(0); } };
-  const applyYGrid = () => { if (yStep) { preview(dx, dy + yStep * grid); setYStep(0); } };
+  const applyXGrid = () => { if (xStep) { preview(dx + xStep * grid, dy, false); setXStep(0); } };
+  const applyYGrid = () => { if (yStep) { preview(dx, dy + yStep * grid, false); setYStep(0); } };
 
   const endDrag = () => {
     const s = useEditorStore.getState();
@@ -65,16 +68,35 @@ export function GroupMoveDialog(props: { groupName: string; onClose: () => void 
     onClose();
   };
 
-  const cancel = () => {
-    endDrag();
-    useEditorStore.getState().setDoc(cloneDoc(baseRef.current));
-    useEditorStore.getState().commit();
-    requestRender();
-    onClose();
-  };
+  // OSS Cancel/close KEEPS the moved geometry — reject never restores the
+  // originals (group_layers.py: cancel just closes; the last preview delta
+  // stays). Committing here preserves that observable behavior while keeping
+  // the whole session a single undo step.
+  const cancel = apply;
 
-  // Snap the current offset to the nearest whole grid step on each axis.
-  const snap = () => preview(Math.round(dx / grid) * grid, Math.round(dy / grid) * grid);
+  // OSS Snap to Grid: snap EVERY member point to the grid (canvas.
+  // snap_group_to_grid — per-point, not offset rounding) then accept and
+  // CLOSE the dialog (group_layers.py:4256-4266).
+  const snap = () => {
+    const q = (v: number) => Math.round(v / grid) * grid;
+    const members = [...snapRef.current.members.regular, ...snapRef.current.members.masks];
+    useEditorStore.getState().mutateDoc((d) => {
+      for (const n of members) {
+        const s = d.strands[n];
+        if (!s) continue;
+        s.start = { x: q(s.start.x), y: q(s.start.y) };
+        s.end = { x: q(s.end.x), y: q(s.end.y) };
+        s.control_points = [
+          { x: q(s.control_points[0].x), y: q(s.control_points[0].y) },
+          { x: q(s.control_points[1].x), y: q(s.control_points[1].y) },
+        ];
+        if (s.control_point_center) {
+          s.control_point_center = { x: q(s.control_point_center.x), y: q(s.control_point_center.y) };
+        }
+      }
+    });
+    apply();
+  };
 
   return (
     <Modal

@@ -24,6 +24,13 @@ export interface MenuItem {
   buttons?: MenuRowButton[];
   /** Circle row label carries no padding in OSS. */
   noPad?: boolean;
+  /** Clicking the item does NOT close the menu (OSS expandable QWidgetAction
+   *  rows — Paste/Copy Strand Data toggle their inline panels in place). */
+  keepOpen?: boolean;
+  /** Indented sub-row (OSS setIndent(20) on the paste anchor rows). */
+  indent?: boolean;
+  /** Raw content rendered inside the menu (OSS inline QWidgetAction panels). */
+  custom?: React.ReactNode;
 }
 
 /* ---- Dynamic menu width (OSS calculate_menu_width: 8pt, min 150, +20, cap 350) ---- */
@@ -113,7 +120,7 @@ export function ContextMenu(props: {
   const clickItem = (item: MenuItem) => {
     if (item.disabled || item.separator) return;
     item.onClick?.();
-    onClose();
+    if (!item.keepOpen) onClose();
   };
 
   return (
@@ -127,6 +134,7 @@ export function ContextMenu(props: {
     >
       {items.map((item, i) => {
         if (item.separator) return <div key={i} className="ctx-sep" role="separator" />;
+        if (item.custom) return <div key={i} className="ctx-custom">{item.custom}</div>;
         if (item.buttons) {
           return (
             <div
@@ -151,7 +159,7 @@ export function ContextMenu(props: {
             </div>
           );
         }
-        const cls = 'ctx-item' + (item.disabled ? ' ctx-disabled' : '');
+        const cls = 'ctx-item' + (item.disabled ? ' ctx-disabled' : '') + (item.indent ? ' ctx-indent' : '');
         return (
           <div
             key={i}
