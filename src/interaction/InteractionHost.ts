@@ -51,7 +51,11 @@ export class InteractionHost {
         st.setHover({ layerName: null, handle: null });
       }
       this.el.style.cursor = this.editTarget() ? 'crosshair' : this.mode().cursor;
-      requestOverlay();
+      // Entering/leaving view mode can change the RENDERER-drawn selection
+      // highlight (view_hide_highlight lives in #c, not the overlay), so those
+      // transitions need a full render; every other switch is overlay-only.
+      if (state.mode === 'view' || prev.mode === 'view') requestRender();
+      else requestOverlay();
     });
   }
 

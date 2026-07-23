@@ -86,14 +86,18 @@ export function requestRender(): void {
 // One full document render (renderFixture / drag fast-path). Overlay sync is the
 // caller's job — schedule() always runs syncOverlay after this.
 function renderNow(): void {
-  const { doc, view, settings, dragging, dragMoving, selection } = useEditorStore.getState();
+  const { doc, view, settings, dragging, dragMoving, selection, mode } = useEditorStore.getState();
   try {
     // During an endpoint drag, highlight every strand that moves with the
     // grabbed handle (weld group + attached/mask peers from movingStrandSet),
     // so a moving junction reddens on both sides like OSS — not just the
     // grabbed strand. At rest only the selected strand is highlighted.
     const highlightSet = dragging && dragMoving.length ? new Set(dragMoving) : undefined;
-    const arr = toRenderArray(doc, selection.layerName, highlightSet);
+    // OSS _suppress_highlight_in_view (strand.py:1970-1980): in view mode the
+    // "hide the selection highlight" setting skips PAINTING the highlight
+    // without clearing the selection, so it reappears on leaving view mode.
+    const highlightLayer = mode === 'view' && settings.view_hide_highlight ? null : selection.layerName;
+    const arr = toRenderArray(doc, highlightLayer, highlightSet);
     if (dragging && dragMoving.length) {
       // DRAG FAST-PATH (mirrors the original's draw-only-affected-strand path).
       // Render at native resolution with shadows off: bake every STATIC strand
