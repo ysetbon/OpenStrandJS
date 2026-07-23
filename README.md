@@ -79,9 +79,9 @@ for the full setup, including the review bots):
   npm run deploy     # builds and publishes to the gh-pages branch
   ```
 
-- **Reviews** — each PR gets an automatic review from the Claude Code workflow
-  (needs the `ANTHROPIC_API_KEY` repo secret), and optionally from the
-  [Baz](https://baz.co) GitHub App.
+- **Reviews** — each PR gets an automatic review from
+  [CodeRabbit](https://coderabbit.ai) (free for this public repo) and from the
+  Claude Code workflow (needs the `ANTHROPIC_API_KEY` repo secret).
 
 The site updates at https://ysetbon.github.io/OpenStrandJS/ within a minute of a merge.
 

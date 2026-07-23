@@ -73,18 +73,35 @@ Notes:
   see the [claude-code-action docs](https://github.com/anthropics/claude-code-action)
   if you want that in addition to automatic reviews.
 
-## Baz review bot (GitHub App — no workflow file)
+## CodeRabbit review bot (GitHub App — no workflow file)
 
-[Baz](https://baz.co) is an AI code reviewer that runs as a GitHub App, so it
-is installed on the repository rather than added to `.github/workflows/`:
+[CodeRabbit](https://coderabbit.ai) is an AI code reviewer that runs as a
+GitHub App, so it is installed on the repository rather than added to
+`.github/workflows/`. **It is free for public/open-source repos** (the full Pro
+feature set, same AI models as the paid plan), which is why it's a good fit for
+this project.
 
-1. Install **Baz AI Code Review** from the GitHub Marketplace
-   (<https://github.com/marketplace/baz-review>, app:
-   <https://github.com/apps/baz-reviewer>).
-2. During installation, grant it access to the `OpenStrandJS` repository
-   (choose "Only select repositories").
-3. Finish account setup on baz.co when prompted. From then on it reviews each
-   PR automatically — it groups big diffs into topics, flags risky changes,
-   and learns from your past review comments.
+**Setup (already done for OpenStrandJS):**
 
-Baz and the Claude workflow are independent; you can enable either or both.
+1. Install **CodeRabbit** from the GitHub Marketplace
+   (<https://github.com/marketplace/coderabbitai>) on the **Open Source (free)**
+   plan.
+2. Grant it access to the `OpenStrandJS` repository.
+3. Finish onboarding in the CodeRabbit wizard (<https://app.coderabbit.ai>).
+
+From then on it reviews each PR automatically: inline comments, a PR summary,
+and 40+ built-in linters. It works out of the box with no config, but you can
+tune it by committing a `.coderabbit.yaml` at the repo root — see
+<https://docs.coderabbit.ai/getting-started/configure-coderabbit>.
+
+CodeRabbit and the Claude workflow are independent and complementary — run
+either or both. (Baz, the reviewer we first looked at, is org/team-oriented and
+paid, so it isn't used here.)
+
+### Other free options for individuals / public repos
+
+- **Sourcery** — free for public repos and individual use; strong on JS/TS
+  refactoring and code smells. <https://sourcery.ai>
+- **GitHub Copilot code review** — if you have any Copilot plan (Free tier
+  includes 50 review requests/month), add **Copilot** as a reviewer on a PR
+  natively; nothing to install.
