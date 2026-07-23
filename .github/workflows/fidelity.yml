@@ -1,0 +1,211 @@
+# OSS-vs-JS visual fidelity bot.
+#
+# On every PR it renders each corpus fixture with BOTH the real OpenStrandStudio
+# Qt canvas (the pixel oracle) and the JS/Paper.js renderer, pixel-diffs them,
+# and posts a sticky PR comment with a match% table plus an inline
+# OSS | JS | diff montage per fixture. The montages are also uploaded as a
+# downloadable workflow artifact (`fidelity-montages`).
+#
+# Phase 3 (opt-in): if the PR carries the `claude-review` label, a second job
+# asks Claude to inspect the worst-matching fixtures and post inline code
+# suggestions. Token cost only when that label is present (needs ANTHROPIC_API_KEY).
+#
+# The match% gate is ADVISORY for now (render errors hard-fail; regressions only
+# warn in the comment) until the committed baselines are recalibrated in this CI
+# environment. Flip `--errors-only` off in the "Run fidelity harness" step to make
+# regressions blocking.
+name: Fidelity (OSS vs JS)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+concurrency:
+  group: fidelity-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  OSS_REPO: ysetbon/OpenStrandStudio
+  # Pinned oracle commit — the fidelity spec. Bump deliberately (and refresh
+  # fidelity-baselines.json) when you want to track a newer OpenStrandStudio.
+  OSS_SHA: 0d751d90f79c97c7ea9994fd02234fe066935a47
+  PYQT_VERSION: "5.15.11"
+  ARTIFACTS_BRANCH: ci-fidelity
+
+jobs:
+  fidelity:
+    if: github.event.pull_request.draft == false || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # push montages to the ci-fidelity branch
+      pull-requests: write   # upsert the sticky comment
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: System libs for headless Qt (QtMultimedia -> libpulse)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpulse-mainloop-glib0 libgl1 libegl1 libxkbcommon0 \
+            libdbus-1-3 libglib2.0-0 libfontconfig1 libfreetype6
+
+      - name: Python deps (Qt oracle)
+        run: pip install "PyQt5==${{ env.PYQT_VERSION }}" pillow
+
+      - name: Clone OpenStrandStudio oracle (pinned SHA, shallow)
+        run: |
+          set -e
+          OSS_DIR="${{ runner.temp }}/OpenStrandStudio"
+          mkdir -p "$OSS_DIR" && cd "$OSS_DIR"
+          git init -q
+          git remote add origin "https://github.com/${{ env.OSS_REPO }}"
+          git fetch -q --depth 1 origin "${{ env.OSS_SHA }}"
+          git checkout -q FETCH_HEAD
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run fidelity harness (Qt oracle vs JS)
+        id: run
+        env:
+          OSS_ROOT: ${{ runner.temp }}/OpenStrandStudio
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set +e
+          node tools/fidelity_run.mjs --errors-only --tolerance 1.0
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+          set -e
+
+      - name: Upload montages artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fidelity-montages
+          path: |
+            artifacts/fidelity/**/montage.png
+            artifacts/fidelity/**/reference.png
+            artifacts/fidelity/**/js.png
+            artifacts/fidelity/**/diff.png
+            artifacts/fidelity/report.json
+          if-no-files-found: warn
+
+      - name: Publish montages to ci-fidelity branch (for inline images)
+        id: publish
+        continue-on-error: true   # fork PRs lack write token -> fall back to a table-only comment
+        if: always() && github.event_name == 'pull_request'
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          BR="${{ env.ARTIFACTS_BRANCH }}"
+          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          WT="${{ runner.temp }}/fidelity-artifacts"
+          rm -rf "$WT"; mkdir -p "$WT"; cd "$WT"
+          git init -q
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads "$REMOTE" "$BR" >/dev/null 2>&1; then
+            git fetch -q --depth 1 "$REMOTE" "$BR"
+            git checkout -q -b "$BR" FETCH_HEAD
+          else
+            git checkout -q --orphan "$BR"
+          fi
+          mkdir -p "pr-${PR}"
+          rm -f "pr-${PR}"/*.png 2>/dev/null || true
+          for m in "$GITHUB_WORKSPACE"/artifacts/fidelity/*/montage.png; do
+            [ -f "$m" ] || continue
+            cp "$m" "pr-${PR}/$(basename "$(dirname "$m")").png"
+          done
+          git add -A
+          if git diff --cached --quiet; then
+            echo "no montage changes to publish"
+          else
+            git commit -q -m "fidelity montages: PR #${PR} @ ${SHA}"
+            git push -q -f "$REMOTE" "HEAD:${BR}"
+          fi
+          echo "url_base=https://raw.githubusercontent.com/${{ github.repository }}/${BR}/pr-${PR}" >> "$GITHUB_OUTPUT"
+
+      - name: Build PR comment (with inline montages)
+        if: always() && github.event_name == 'pull_request'
+        env:
+          MONTAGE_URL_BASE: ${{ steps.publish.outputs.url_base }}
+          CACHE_BUST: ${{ github.event.pull_request.head.sha }}
+        run: node tools/fidelity_comment.mjs
+
+      - name: Upsert sticky fidelity comment
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let body;
+            try { body = fs.readFileSync('artifacts/fidelity/comment.md', 'utf8'); }
+            catch { core.warning('no comment.md; skipping'); return; }
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const marker = '<!-- fidelity-bot -->';
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            else await github.rest.issues.createComment({ owner, repo, issue_number, body });
+
+      - name: Gate (render errors block; regressions are advisory)
+        if: always()
+        run: |
+          if [ "${{ steps.run.outputs.code }}" != "0" ]; then
+            echo "::error::Fidelity harness reported render errors."
+            exit 1
+          fi
+          echo "Fidelity OK (render errors: none)."
+
+  fidelity-claude:
+    needs: fidelity
+    if: >-
+      always() &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.draft == false &&
+      contains(github.event.pull_request.labels.*.name, 'claude-review')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch fidelity report artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: fidelity-montages
+          path: artifacts/fidelity
+      - name: Claude fidelity code suggestions
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            A fidelity harness compared the JS renderer (web/strand-renderer.js) against the
+            REAL OpenStrandStudio Qt oracle. Read artifacts/fidelity/report.json (produced by
+            tools/fidelity_run.mjs). For any fixture whose match_pct is below 99.5% OR marked
+            "regressed": true, inspect the corresponding diff and the code changed in this PR,
+            hypothesize which renderer code causes the pixel mismatch versus OpenStrandStudio,
+            and post concise, specific inline code suggestions on web/strand-renderer.js (or
+            src/) to close the gap. Skip fixtures at 100%. Cite the OSS drawing behavior where
+            relevant. If nothing is actionable, post a single one-line summary comment saying so.
+          claude_args: '--allowed-tools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(cat artifacts/fidelity/report.json)"'
