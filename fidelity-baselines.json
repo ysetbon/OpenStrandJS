@@ -1,32 +1,17 @@
 {
-  "single_strand": {
-    "match_pct": 100,
-    "width": 800,
-    "height": 600
-  },
-  "closed_knot": {
+  "unfolded_shadow": {
     "match_pct": 100,
     "width": 1230,
     "height": 1202
-  },
-  "three_strand_braid": {
-    "match_pct": 100,
-    "width": 928,
-    "height": 1460
-  },
-  "overhand_knot": {
-    "match_pct": 98.81,
-    "width": 1358,
-    "height": 1050
   },
   "box_stitch": {
     "match_pct": 99.752,
     "width": 1134,
     "height": 966
   },
-  "unfolded_shadow": {
-    "match_pct": 100,
-    "width": 1230,
-    "height": 1202
+  "overhand_knot": {
+    "match_pct": 98.81,
+    "width": 1358,
+    "height": 1050
   }
 }

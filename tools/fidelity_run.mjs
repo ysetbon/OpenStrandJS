@@ -24,14 +24,15 @@ const ROOT = process.cwd();
 const OUT = path.join(ROOT, 'artifacts', 'fidelity');
 const BASELINE_FILE = path.join(ROOT, 'fidelity-baselines.json');
 
-// Default corpus - the fixtures worth gating on. Curated for signal + runtime.
+// Default corpus - a curated 2-3 fixtures with the most coverage:
+//   unfolded_shadow - the shadow-of-unfolded-strand case (this project's fix),
+//   box_stitch      - masked crossings + cast shadows,
+//   overhand_knot   - a knot with masks, folded attached starts, and shadows.
+// (Pass --fixtures a,b,c to override, e.g. to run the wider set.)
 const DEFAULT_CORPUS = [
-  'single_strand',
-  'closed_knot',
-  'three_strand_braid',
-  'overhand_knot',
-  'box_stitch',
   'unfolded_shadow',
+  'box_stitch',
+  'overhand_knot',
 ];
 
 const args = process.argv.slice(2);

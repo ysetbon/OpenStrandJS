@@ -9,7 +9,24 @@ import path from 'node:path';
 
 const OSS_SHA = (process.argv[2] || '0d751d90f79c97c7ea9994fd02234fe066935a47').slice(0, 10);
 const OUT = path.join(process.cwd(), 'artifacts', 'fidelity');
-const baselines = JSON.parse(readFileSync(path.join(process.cwd(), 'fidelity-baselines.json'), 'utf8'));
+
+// Prefer THIS run's actual results (report.json) so the page shows live numbers;
+// fall back to the committed baselines when built without a fresh run.
+function loadData() {
+  const rp = path.join(OUT, 'report.json');
+  if (existsSync(rp)) {
+    try {
+      const rep = JSON.parse(readFileSync(rp, 'utf8'));
+      const map = {};
+      for (const r of rep.results || []) {
+        if (r && r.ok && r.match_pct != null) map[r.fixture] = { match_pct: r.match_pct, width: r.width, height: r.height };
+      }
+      if (Object.keys(map).length) return map;
+    } catch { /* fall through to baselines */ }
+  }
+  return JSON.parse(readFileSync(path.join(process.cwd(), 'fidelity-baselines.json'), 'utf8'));
+}
+const data = loadData();
 
 // Real content: what each fixture actually exercises.
 const NOTES = {
@@ -20,23 +37,29 @@ const NOTES = {
   box_stitch: 'The densest case — masked crossings plus cast shadows.',
   unfolded_shadow: 'The closed knot with shadows ON — the exact case this change fixes (shadow of unfolded strands).',
 };
-const ORDER = ['unfolded_shadow', 'single_strand', 'closed_knot', 'three_strand_braid', 'box_stitch', 'overhand_knot'];
+// Preferred display order; any fixtures not listed follow alphabetically.
+const PREF = ['unfolded_shadow', 'box_stitch', 'overhand_knot', 'single_strand', 'closed_knot', 'three_strand_braid'];
 
 const dataUri = (p) => 'data:image/png;base64,' + readFileSync(p).toString('base64');
 
-const rows = ORDER.filter((f) => baselines[f]).map((f) => {
-  const b = baselines[f];
-  const mp = path.join(OUT, f, 'montage.png');
-  return {
-    fixture: f,
-    match: b.match_pct,
-    w: b.width,
-    h: b.height,
-    note: NOTES[f] || '',
-    img: existsSync(mp) ? dataUri(mp) : null,
-    isTarget: f === 'unfolded_shadow',
-  };
-});
+const rows = Object.keys(data)
+  .sort((a, b) => {
+    const ia = PREF.indexOf(a), ib = PREF.indexOf(b);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b);
+  })
+  .map((f) => {
+    const b = data[f];
+    const mp = path.join(OUT, f, 'montage.png');
+    return {
+      fixture: f,
+      match: b.match_pct,
+      w: b.width,
+      h: b.height,
+      note: NOTES[f] || '',
+      img: existsSync(mp) ? dataUri(mp) : null,
+      isTarget: f === 'unfolded_shadow',
+    };
+  });
 
 const perfect = rows.filter((r) => r.match === 100).length;
 const lowest = Math.min(...rows.map((r) => r.match));

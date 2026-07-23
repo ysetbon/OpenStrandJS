@@ -89,12 +89,17 @@ jobs:
           echo "code=$?" >> "$GITHUB_OUTPUT"
           set -e
 
-      - name: Upload montages artifact
+      - name: Build standalone fidelity.html (self-contained, viewable)
+        if: always()
+        run: node tools/fidelity_artifact.mjs "${{ env.OSS_SHA }}" || echo "::warning::fidelity.html build failed"
+
+      - name: Upload fidelity artifact (montages + viewable HTML)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: fidelity-montages
           path: |
+            artifacts/fidelity/artifact.html
             artifacts/fidelity/**/montage.png
             artifacts/fidelity/**/reference.png
             artifacts/fidelity/**/js.png
