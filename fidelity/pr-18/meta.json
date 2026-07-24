@@ -4,8 +4,8 @@
   "pr": 18,
   "branch": "claude/ultracode-effort-jy4apa",
   "title": "Add dark-mode window gallery with automated screenshot testing",
-  "sha": "849394cdc2",
-  "updated": "2026-07-24T08:21:57.818Z",
+  "sha": "f842dd7b4a",
+  "updated": "2026-07-24T08:34:23.010Z",
   "summary": {
     "fixtures": 3,
     "perfect": 3,
