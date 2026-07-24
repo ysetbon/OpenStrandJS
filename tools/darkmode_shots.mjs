@@ -126,7 +126,13 @@ async function main() {
             for (let i = 0; i < navCount; i++) {
               const label = await page.$$eval('.set-nav-item', (els, idx) => els[idx]?.textContent?.trim() || `page${idx}`, i);
               await page.$$eval('.set-nav-item', (els, idx) => els[idx]?.click(), i);
-              await page.waitForTimeout(150);
+              // Wait for the click to commit (the clicked nav item gains .active in the
+              // same React render that swaps the page content) rather than a blind sleep,
+              // so a slow CI runner can't screenshot a stale/half-rendered page.
+              await page.waitForFunction(
+                (idx) => document.querySelectorAll('.set-nav-item')[idx]?.classList.contains('active'),
+                i,
+              );
               const id = `${entry.id}-${String(i + 1).padStart(2, '0')}-${slug(label)}`;
               const file = path.join(themeDir, `${id}.png`);
               await shoot(page, '.modal', file);

@@ -22,7 +22,7 @@ if (!existsSync(manifestPath)) {
 }
 
 const { themes, shots } = JSON.parse(readFileSync(manifestPath, 'utf8'));
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 function dataUri(rel) {
   const file = path.join(dir, rel);

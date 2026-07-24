@@ -27,8 +27,12 @@ jobs:
   gallery:
     name: Screenshot every window (default · light · dark)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read   # only reads the repo; the artifact upload uses the Actions runtime token
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false   # no git writes after checkout; don't leave the token in .git/config
       - uses: actions/setup-node@v4
         with:
           node-version: 22
