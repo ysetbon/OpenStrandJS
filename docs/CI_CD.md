@@ -71,10 +71,32 @@ without downloading the artifact zip:
   at the top of that PR's sticky fidelity comment.
 
 Each run writes only its own `<sub>/` entry (`index.html` + `meta.json` +
-`thumb.png`, via `tools/fidelity_entry.mjs`), then rebuilds the landing page from
-the union of every entry's `meta.json` (`tools/fidelity_index.mjs`). Publishing is
-non-destructive (fast-forward push with retry), so concurrent PRs and the editor
-deploy coexist.
+`thumb.png` + a `snaps/<fixture>.png` per example, via `tools/fidelity_entry.mjs`),
+then rebuilds the landing page from the union of every entry's `meta.json`
+(`tools/fidelity_index.mjs`). Publishing is non-destructive (fast-forward push
+with retry), so concurrent PRs and the editor deploy coexist.
+
+### Choosing a card's representative example (admin-only)
+
+Every gallery card has a client-side **toggle** (hover for arrows, or click the
+dots) that flips its snapshot through each example the run exercised — a preview
+only, available to anyone viewing the page. **Persisting** which example a card
+shows is admin-only:
+
+- The card shows the exact inputs (`sub=…`, `fixture=…`) and a **"Set as card
+  thumbnail (admin)"** button that deep-links to the `fidelity-thumb.yml`
+  workflow's *Run workflow* page.
+- `.github/workflows/fidelity-thumb.yml` is a `workflow_dispatch` — GitHub only
+  shows *Run workflow* to users with write access, and the workflow's first step
+  additionally **fails unless the triggering user has `admin` permission** on the
+  repo. So only an admin of `ysetbon/OpenStrandJS` can change a card's snapshot.
+- It re-points `<sub>/thumb.png` at the chosen `snaps/<fixture>.png`, records
+  `meta.selected`, and rebuilds the gallery (non-destructive push). The choice is
+  remembered by `fidelity_entry.mjs` across later fidelity re-runs.
+
+GitHub can't pre-fill `workflow_dispatch` inputs from a URL, so the admin enters
+the `sub` and `fixture` values shown on the card (the `fixture` field is a
+dropdown of the known examples).
 
 ## Claude review bot — `.github/workflows/claude-review.yml`
 

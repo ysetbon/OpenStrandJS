@@ -1,12 +1,17 @@
 // Publish ONE fidelity dashboard "entry" into a gh-pages /fidelity gallery:
 //
-//   <fidelityDir>/<sub>/index.html   the self-contained dashboard (artifact.html)
-//   <fidelityDir>/<sub>/meta.json    card metadata for the landing gallery
-//   <fidelityDir>/<sub>/thumb.png    a small snapshot (one example, downscaled)
+//   <fidelityDir>/<sub>/index.html          the self-contained dashboard (artifact.html)
+//   <fidelityDir>/<sub>/meta.json           card metadata for the landing gallery
+//   <fidelityDir>/<sub>/thumb.png           the CURRENT card snapshot (one example)
+//   <fidelityDir>/<sub>/snaps/<fixture>.png a snapshot per example (for the toggle)
 //
 // <sub> is "main" for the canonical (merged) dashboard, or "pr-<N>" for a PR
 // preview. tools/fidelity_index.mjs then scans every <sub>/meta.json and
-// regenerates <fidelityDir>/index.html — the gallery/landing page.
+// regenerates <fidelityDir>/index.html — the gallery/landing page. The gallery
+// card lets you toggle which example is the snapshot; an admin persists the
+// choice through tools/fidelity_set_thumb.mjs (via the fidelity-thumb workflow),
+// which rewrites thumb.png + meta.selected. This tool HONORS an existing
+// meta.selected so an admin's pick survives later fidelity re-runs.
 //
 // Usage: node tools/fidelity_entry.mjs <fidelityDir> <sub>
 // Env (all optional; sensible fallbacks):
@@ -27,7 +32,17 @@ if (!fidelityDir || !sub) {
 
 const OUT = path.join(process.cwd(), 'artifacts', 'fidelity');
 const dest = path.join(fidelityDir, sub);
+
+// Preserve an admin's previously-persisted thumbnail choice (meta.selected)
+// across re-runs, if that fixture is still present in this run's results.
+let priorSelected = null;
+try {
+  const prior = JSON.parse(readFileSync(path.join(dest, 'meta.json'), 'utf8'));
+  if (prior && typeof prior.selected === 'string') priorSelected = prior.selected;
+} catch { /* no prior entry */ }
+
 mkdirSync(dest, { recursive: true });
+mkdirSync(path.join(dest, 'snaps'), { recursive: true });
 
 // 1) The dashboard itself.
 const artifact = path.join(OUT, 'artifact.html');
@@ -37,7 +52,7 @@ if (!existsSync(artifact)) {
 }
 copyFileSync(artifact, path.join(dest, 'index.html'));
 
-// 2) Live results from this run (for the card's match summary + thumb pick).
+// 2) Live results from this run (for the card's match summary + thumb choices).
 let results = [];
 const rp = path.join(OUT, 'report.json');
 if (existsSync(rp)) {
@@ -51,24 +66,6 @@ if (existsSync(rp)) {
 const matches = results.map((r) => r.match_pct);
 const perfect = matches.filter((m) => m === 100).length;
 const lowest = matches.length ? Math.min(...matches) : null;
-
-// 3) Thumbnail: a single clean snapshot (the JS render of a preferred fixture),
-//    box-averaged down to a small card icon. Falls back through js/reference/montage.
-const PREF = ['fid_shadow_unfolded_attach', 'fid_unfold_angled', 'fid_unfold_chain', 'fid_shadow_folded_attach', 'fid_shadow_cross'];
-const orderedFixtures = [
-  ...PREF.filter((f) => results.some((r) => r.fixture === f)),
-  ...results.map((r) => r.fixture).filter((f) => !PREF.includes(f)),
-];
-
-function findSnapshot() {
-  for (const f of orderedFixtures) {
-    for (const name of ['js.png', 'reference.png', 'montage.png']) {
-      const p = path.join(OUT, f, name);
-      if (existsSync(p)) return p;
-    }
-  }
-  return null;
-}
 
 // Box-average downscale a PNG to fit within maxW x maxH, preserving aspect.
 function downscale(srcPath, maxW, maxH) {
@@ -103,19 +100,52 @@ function downscale(srcPath, maxW, maxH) {
   return { png: out, w: dw, h: dh };
 }
 
-let thumb = null;
-const snap = findSnapshot();
-if (snap) {
+// A clean single-panel snapshot source for a fixture: prefer the JS render,
+// fall back to the OSS reference, then the (wide) montage.
+function snapshotSource(fixture) {
+  for (const name of ['js.png', 'reference.png', 'montage.png']) {
+    const p = path.join(OUT, fixture, name);
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
+// 3) One downscaled snapshot per example (the toggle cycles these). Preferred
+//    order first so the default picks a meaningful example.
+const PREF = ['fid_shadow_unfolded_attach', 'fid_unfold_angled', 'fid_unfold_chain', 'fid_shadow_folded_attach', 'fid_shadow_cross'];
+const orderedFixtures = [
+  ...PREF.filter((f) => results.some((r) => r.fixture === f)),
+  ...results.map((r) => r.fixture).filter((f) => !PREF.includes(f)),
+];
+
+const thumbs = [];
+for (const fixture of orderedFixtures) {
+  const src = snapshotSource(fixture);
+  if (!src) continue;
   try {
-    const { png, w, h } = downscale(snap, 480, 360);
-    writeFileSync(path.join(dest, 'thumb.png'), PNG.sync.write(png));
-    thumb = { file: 'thumb.png', w, h, from: path.basename(path.dirname(snap)) };
+    const { png, w, h } = downscale(src, 480, 360);
+    const rel = path.join('snaps', `${fixture}.png`);
+    writeFileSync(path.join(dest, rel), PNG.sync.write(png));
+    thumbs.push({ fixture, file: rel.split(path.sep).join('/'), w, h });
   } catch (e) {
-    console.error(`thumb generation failed: ${e && e.message}`);
+    console.error(`snapshot for ${fixture} failed: ${e && e.message}`);
   }
 }
 
-// 4) Card metadata for the gallery.
+// 4) Pick the default/selected snapshot: an admin's prior pick wins if still
+//    available; otherwise the first (preferred) fixture.
+let selected = null;
+if (priorSelected && thumbs.some((t) => t.fixture === priorSelected)) selected = priorSelected;
+else if (thumbs.length) selected = thumbs[0].fixture;
+
+let thumb = null;
+if (selected) {
+  const t = thumbs.find((x) => x.fixture === selected);
+  copyFileSync(path.join(dest, t.file), path.join(dest, 'thumb.png'));
+  thumb = { file: 'thumb.png', from: t.fixture, w: t.w, h: t.h };
+}
+
+// 5) Card metadata for the gallery.
 const kind = process.env.FID_KIND || (sub === 'main' ? 'main' : 'pr');
 const pr = process.env.FID_PR ? Number(process.env.FID_PR) : null;
 const meta = {
@@ -128,8 +158,10 @@ const meta = {
   updated: new Date().toISOString(),
   summary: { fixtures: matches.length, perfect, lowest },
   results,
-  thumb,
+  selected,        // the fixture currently shown as the card thumbnail
+  thumb,           // { file, from, w, h }
+  thumbs,          // all selectable snapshots: [{ fixture, file, w, h }]
 };
 writeFileSync(path.join(dest, 'meta.json'), JSON.stringify(meta, null, 2));
 
-console.log(`entry -> ${dest} (${kind}${meta.pr ? ` #${meta.pr}` : ''}, ${matches.length} fixtures, thumb: ${thumb ? thumb.file : 'none'})`);
+console.log(`entry -> ${dest} (${kind}${meta.pr ? ` #${meta.pr}` : ''}, ${matches.length} fixtures, ${thumbs.length} snapshots, selected: ${selected || 'none'}${priorSelected ? ` (prior admin pick: ${priorSelected})` : ''})`);
