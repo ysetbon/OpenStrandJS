@@ -1350,7 +1350,7 @@ window.renderFixture = function (strands, meta) {
   paper.setup(hi);
 
   const bg = new paper.Path.Rectangle(new paper.Point(0, 0), new paper.Size(W * ss, H * ss));
-  bg.fillColor = 'white';
+  bg.fillColor = meta.canvas_bg || 'white'; // themed live editor (OSS dark #2C2C2C); oracle leaves it white
 
   const ox = meta.x_offset, oy = meta.y_offset;
   // world -> backing: position scaled by S (= ss*zoom), offset by ss. At zoom 1
@@ -1367,7 +1367,7 @@ window.renderFixture = function (strands, meta) {
   {
     const grid = computeGridLines(meta, S, ox * ss, oy * ss, W * ss, H * ss);
     if (grid) {
-      const gridColor = toColor({ r: 0, g: 0, b: 0, a: 20 }); // ~0.08 alpha
+      const gridColor = meta.grid_color || toColor({ r: 0, g: 0, b: 0, a: 20 }); // OSS #C8C8C8/#B4B4B4; legacy faint fallback
       for (const x of grid.xs) {
         const ln = new paper.Path.Line(new paper.Point(x, 0), new paper.Point(x, H * ss));
         ln.strokeColor = gridColor; ln.strokeWidth = ss;
@@ -1582,7 +1582,7 @@ function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg, topo) {
   paper.setup(targetCanvas);
   if (whiteBg) {
     const bg = new paper.Path.Rectangle(new paper.Point(0, 0), new paper.Size(W, H));
-    bg.fillColor = 'white';
+    bg.fillColor = meta.canvas_bg || 'white'; // themed backdrop under drag bands (live editor); oracle unused
   }
   const ox = meta.x_offset, oy = meta.y_offset;
   // Matches renderFixture's P at ss=1: P(pt) = pt*S + offset.
@@ -1680,7 +1680,7 @@ window.renderDragFrame = function (strands, meta) {
   vis.style.height = H + 'px';
   const ctx = vis.getContext('2d');
   ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = 'white';
+  ctx.fillStyle = meta.canvas_bg || 'white'; // themed backdrop during drags (live editor); oracle leaves it white
   ctx.fillRect(0, 0, W, H); // backdrop (baked into no band; see renderDragBackground)
   // Grid: same as the full render path, painted on the visible canvas after the
   // white backdrop and BEFORE the transparent static bands, so it sits under every
@@ -1690,7 +1690,7 @@ window.renderDragFrame = function (strands, meta) {
     const grid = computeGridLines(meta, meta.zoom || 1, meta.x_offset, meta.y_offset, W, H);
     if (grid) {
       ctx.save();
-      ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+      ctx.strokeStyle = meta.grid_color || 'rgba(0,0,0,0.08)'; // OSS grid color (live editor); legacy faint fallback
       ctx.lineWidth = 1;
       for (const x of grid.xs) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
       for (const y of grid.ys) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
