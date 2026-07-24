@@ -36,6 +36,25 @@ jobs:
       - name: Build editor (Vite)
         run: npm run build:editor
 
+      # The fidelity workflow hosts dashboards on the same gh-pages site under
+      # /fidelity/. This deploy force-pushes gh-pages, so carry that directory
+      # forward from the current branch first, or the dashboards would be wiped.
+      - name: Carry forward /fidelity dashboards
+        run: |
+          set -e
+          REMOTE="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git ls-remote --exit-code --heads "$REMOTE" gh-pages >/dev/null 2>&1; then
+            tmp="$(mktemp -d)"
+            if git clone -q --depth 1 --branch gh-pages "$REMOTE" "$tmp" && [ -d "$tmp/fidelity" ]; then
+              mkdir -p dist-editor/fidelity
+              cp -r "$tmp/fidelity/." dist-editor/fidelity/
+              echo "carried forward $(find dist-editor/fidelity -name index.html | wc -l) fidelity page(s)"
+            fi
+            rm -rf "$tmp"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Publish dist-editor/ to gh-pages
         run: |
           # .nojekyll stops GitHub Pages from running Jekyll over the Vite output.
