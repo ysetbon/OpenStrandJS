@@ -40,17 +40,20 @@ doesn't match the pinned Playwright version — same escape hatch as
 ## CD — `.github/workflows/deploy.yml`
 
 Deploys automatically after every merge to `main` (any push to `main`), and on
-demand from the Actions tab. It is the automated twin of `npm run deploy`:
-build with Vite, then force-push only `dist-editor/` (plus `.nojekyll`) to the
-`gh-pages` branch using the workflow's built-in `GITHUB_TOKEN`.
+demand from the Actions tab. It builds the editor with Vite, then publishes it to
+the `gh-pages` branch using the workflow's built-in `GITHUB_TOKEN`.
 
 - No secrets to configure — `GITHUB_TOKEN` is provided by GitHub.
 - Works with the existing Pages setup (source: `gh-pages` branch). Live site:
   <https://ysetbon.github.io/OpenStrandJS/>.
-- `npm run deploy` still works for manual/local deploys; the workflow just
-  makes it happen on every merge.
-- The deploy carries forward the `/fidelity/` directory on `gh-pages` before its
-  force-push, so the hosted fidelity dashboards (below) survive editor deploys.
+- The publish is **non-destructive**: it clones `gh-pages`, replaces only the
+  editor's root files (leaving `/fidelity/` untouched), and fast-forward-pushes
+  with retry. So the hosted fidelity dashboards (below) survive editor deploys,
+  and the editor deploy and a concurrent fidelity publish can't clobber each
+  other on a merge to `main`.
+- `npm run deploy` still runs the local twin (`tools/deploy-pages.mjs`), which
+  force-pushes only `dist-editor/`; prefer the workflow, or fetch `/fidelity/`
+  first if you deploy manually.
 
 ## Hosted fidelity dashboards (GitHub Pages)
 
