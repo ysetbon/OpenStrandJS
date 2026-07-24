@@ -1,4 +1,12 @@
-# Automatic Claude code review on every pull request.
+# Opt-in Claude code review. It does NOT run automatically on every PR — that
+# spent real ANTHROPIC_API_KEY tokens on each push. Instead it runs only when a
+# PR carries the `claude-review` label: add the label to request a review (and
+# it re-reviews that PR on later pushes while the label stays on); remove the
+# label to stop. CodeRabbit still reviews every PR automatically, so routine
+# PRs keep review coverage at no Anthropic-API cost.
+#
+# First use: create the label once (repo -> Issues -> Labels -> New label,
+# name it exactly `claude-review`), then add it to a PR.
 #
 # Requires one repository secret: ANTHROPIC_API_KEY
 # (Settings -> Secrets and variables -> Actions -> New repository secret).
@@ -7,12 +15,23 @@ name: Claude Code Review
 
 on:
   pull_request:
-    types: [opened, synchronize, ready_for_review]
+    # `ready_for_review` is included so a PR labeled while still a draft starts
+    # its review the moment it is marked ready (the non-draft gate below skips
+    # the `labeled` event that fired during draft).
+    types: [labeled, synchronize, reopened, ready_for_review]
 
 jobs:
   claude-review:
-    # Skip drafts; review runs when the PR is marked ready.
-    if: github.event.pull_request.draft == false
+    # Opt-in gate: non-draft PRs that carry the `claude-review` label. On a
+    # `labeled` event only run when the label just added IS `claude-review` (so
+    # adding unrelated labels never spends tokens); on synchronize/reopen run
+    # while the label is present.
+    if: >-
+      github.event.pull_request.draft == false &&
+      (
+        (github.event.action == 'labeled' && github.event.label.name == 'claude-review') ||
+        (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'claude-review'))
+      )
     runs-on: ubuntu-latest
     permissions:
       contents: read

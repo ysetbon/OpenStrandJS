@@ -52,10 +52,20 @@ build with Vite, then force-push only `dist-editor/` (plus `.nojekyll`) to the
 
 ## Claude review bot — `.github/workflows/claude-review.yml`
 
-Every non-draft PR (on open, new pushes, and ready-for-review) gets an
-automatic review from [Claude Code](https://github.com/anthropics/claude-code-action):
-inline comments on specific lines plus a summary comment, with a prompt tuned
-to this repo (renderer fidelity, oracle drift, store/undo state, hot paths).
+**Opt-in, not automatic.** A review from [Claude Code](https://github.com/anthropics/claude-code-action)
+runs only when a PR carries the **`claude-review`** label — inline comments on
+specific lines plus a summary comment, with a prompt tuned to this repo
+(renderer fidelity, oracle drift, store/undo state, hot paths). It was switched
+from run-on-every-PR to opt-in because each automatic run spends real
+`ANTHROPIC_API_KEY` tokens; CodeRabbit already reviews every PR, so routine PRs
+keep coverage at no Anthropic-API cost.
+
+**How to request a Claude review:**
+
+1. One-time: create the label — repo → Issues → Labels → New label, name it
+   exactly `claude-review`.
+2. Add the `claude-review` label to the PR. The review runs, and re-runs on
+   later pushes while the label stays on. Remove the label to stop.
 
 **One-time setup (required before it can run):**
 
@@ -65,13 +75,13 @@ to this repo (renderer fidelity, oracle drift, store/undo state, hot paths).
 
 Notes:
 
-- Without the secret the workflow will fail — it does not block merging
+- Without the secret a labeled run will fail — it does not block merging
   (reviews are advisory, not required checks).
-- To pin a specific model, add `--model <model-id>` to `claude_args` in the
-  workflow; by default the action uses its current recommended model.
+- To pin a cheaper/specific model, add `--model <model-id>` to `claude_args` in
+  the workflow; by default the action uses its current recommended model.
 - You can also get on-demand help by adding an `@claude` mention workflow —
   see the [claude-code-action docs](https://github.com/anthropics/claude-code-action)
-  if you want that in addition to automatic reviews.
+  if you want that in addition to label-triggered reviews.
 
 ## Baz review bot (GitHub App — no workflow file)
 

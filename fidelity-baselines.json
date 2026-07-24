@@ -1,0 +1,17 @@
+{
+  "fid_shadow_unfolded_attach": {
+    "match_pct": 100,
+    "width": 1176,
+    "height": 1162
+  },
+  "fid_unfold_angled": {
+    "match_pct": 100,
+    "width": 1176,
+    "height": 1142
+  },
+  "fid_unfold_chain": {
+    "match_pct": 100,
+    "width": 1176,
+    "height": 1362
+  }
+}
