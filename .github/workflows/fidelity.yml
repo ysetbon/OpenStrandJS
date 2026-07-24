@@ -134,11 +134,15 @@ jobs:
             if git -C "$WT" push -q "$REMOTE" "HEAD:gh-pages"; then pushed=1; break; fi
             echo "gh-pages advanced (attempt ${attempt}); retrying"; sleep $((attempt * 2))
           done
-          [ "$pushed" = "1" ] || echo "::warning::could not publish dashboard to gh-pages after retries"
-          if [ "$IS_PR" = "true" ]; then
+          # Only expose the Pages URL when the push actually landed, so a failed
+          # publish (e.g. a fork PR's read-only token) leaves the URL unset and the
+          # comment falls back to the artifact/inline images instead of linking a 404.
+          if [ "$pushed" = "1" ] && [ "$IS_PR" = "true" ]; then
             echo "url=https://ysetbon.github.io/OpenStrandJS/fidelity/pr-${PR}/" >> "$GITHUB_OUTPUT"
-          else
+          elif [ "$pushed" = "1" ]; then
             echo "url=https://ysetbon.github.io/OpenStrandJS/fidelity/" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::could not publish dashboard to gh-pages after retries"
           fi
 
       - name: Upload fidelity artifact (montages + viewable HTML)

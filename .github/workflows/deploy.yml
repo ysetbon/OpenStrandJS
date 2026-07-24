@@ -36,35 +36,39 @@ jobs:
       - name: Build editor (Vite)
         run: npm run build:editor
 
-      # The fidelity workflow hosts dashboards on the same gh-pages site under
-      # /fidelity/. This deploy force-pushes gh-pages, so carry that directory
-      # forward from the current branch first, or the dashboards would be wiped.
-      - name: Carry forward /fidelity dashboards
+      # Publish the editor NON-DESTRUCTIVELY so it shares gh-pages with the
+      # fidelity dashboards under /fidelity/ (owned by the fidelity workflow).
+      # Clone gh-pages, replace ONLY the editor's root files (leaving /fidelity
+      # untouched), and fast-forward push with retry. No force push: if a fidelity
+      # run publishes between our clone and push, our push is rejected and we
+      # re-clone the newer tip and re-apply — so neither writer can clobber the
+      # other (fixes the deploy-vs-fidelity race on merges to main).
+      - name: Publish editor to gh-pages (non-destructive; preserves /fidelity)
         run: |
           set -e
-          REMOTE="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          if git ls-remote --exit-code --heads "$REMOTE" gh-pages >/dev/null 2>&1; then
-            tmp="$(mktemp -d)"
-            if git clone -q --depth 1 --branch gh-pages "$REMOTE" "$tmp" && [ -d "$tmp/fidelity" ]; then
-              mkdir -p dist-editor/fidelity
-              cp -r "$tmp/fidelity/." dist-editor/fidelity/
-              echo "carried forward $(find dist-editor/fidelity -name index.html | wc -l) fidelity page(s)"
-            fi
-            rm -rf "$tmp"
-          fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Publish dist-editor/ to gh-pages
-        run: |
-          # .nojekyll stops GitHub Pages from running Jekyll over the Vite output.
           touch dist-editor/.nojekyll
-          cd dist-editor
-          git init -q -b gh-pages
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -q -m "Deploy editor build from ${GITHUB_SHA:0:7}"
-          git push -f -q "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
+          REMOTE="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          WT="${RUNNER_TEMP}/gh-pages-editor"
+          pushed=0
+          for attempt in 1 2 3 4 5; do
+            rm -rf "$WT"
+            if git ls-remote --exit-code --heads "$REMOTE" gh-pages >/dev/null 2>&1; then
+              git clone -q --depth 1 --branch gh-pages "$REMOTE" "$WT"
+            else
+              mkdir -p "$WT"; git -C "$WT" init -q; git -C "$WT" checkout -q --orphan gh-pages
+            fi
+            git -C "$WT" config user.name "github-actions[bot]"
+            git -C "$WT" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            # Replace the editor's root files; keep /fidelity and .git.
+            find "$WT" -mindepth 1 -maxdepth 1 ! -name .git ! -name fidelity -exec rm -rf {} +
+            cp -r dist-editor/. "$WT"/
+            git -C "$WT" add -A
+            if git -C "$WT" diff --cached --quiet; then echo "no editor change to publish"; pushed=1; break; fi
+            git -C "$WT" commit -q -m "Deploy editor build from ${GITHUB_SHA:0:7}"
+            if git -C "$WT" push -q "$REMOTE" "HEAD:gh-pages"; then pushed=1; break; fi
+            echo "gh-pages advanced (attempt ${attempt}); refreshing and retrying"
+            sleep $((attempt * 2))
+          done
+          [ "$pushed" = "1" ] || { echo "::error::editor deploy could not fast-forward push to gh-pages"; exit 1; }
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
