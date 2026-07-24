@@ -1,17 +1,17 @@
 {
-  "unfolded_shadow": {
+  "fid_shadow_unfolded_attach": {
     "match_pct": 100,
-    "width": 1230,
-    "height": 1202
+    "width": 1176,
+    "height": 1162
   },
-  "box_stitch": {
-    "match_pct": 99.752,
-    "width": 1134,
-    "height": 966
+  "fid_shadow_folded_attach": {
+    "match_pct": 100,
+    "width": 1176,
+    "height": 1162
   },
-  "overhand_knot": {
-    "match_pct": 98.81,
-    "width": 1358,
-    "height": 1050
+  "fid_shadow_cross": {
+    "match_pct": 100,
+    "width": 1152,
+    "height": 1144
   }
 }

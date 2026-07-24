@@ -30,6 +30,9 @@ const data = loadData();
 
 // Real content: what each fixture actually exercises.
 const NOTES = {
+  fid_shadow_unfolded_attach: 'An attached strand with an UNFOLDED start (transparent circle) crossing a lower strand: its cast shadow is cut back, not a square end-cap halo (the case this project fixes).',
+  fid_shadow_folded_attach: 'Same geometry with a FOLDED (opaque) start: it casts the full rounded end-circle shadow, proving the cut applies ONLY when the start is transparent.',
+  fid_shadow_cross: 'Control: one plain strand crossing over another with shadows on. Normal drop-shadow behavior must stay matched.',
   single_strand: 'One plain strand — baseline body geometry, stroke width, and end caps.',
   closed_knot: 'Four attached strands forming a closed loop; every attachment start is unfolded (transparent).',
   three_strand_braid: 'A 21-strand over/under braid with 15 unfolded attachment starts.',
@@ -38,7 +41,7 @@ const NOTES = {
   unfolded_shadow: 'The closed knot with shadows ON — the exact case this change fixes (shadow of unfolded strands).',
 };
 // Preferred display order; any fixtures not listed follow alphabetically.
-const PREF = ['unfolded_shadow', 'box_stitch', 'overhand_knot', 'single_strand', 'closed_knot', 'three_strand_braid'];
+const PREF = ['fid_shadow_unfolded_attach', 'fid_shadow_folded_attach', 'fid_shadow_cross', 'unfolded_shadow', 'box_stitch', 'overhand_knot', 'single_strand', 'closed_knot', 'three_strand_braid'];
 
 const dataUri = (p) => 'data:image/png;base64,' + readFileSync(p).toString('base64');
 
@@ -57,7 +60,7 @@ const rows = Object.keys(data)
       h: b.height,
       note: NOTES[f] || '',
       img: existsSync(mp) ? dataUri(mp) : null,
-      isTarget: f === 'unfolded_shadow',
+      isTarget: f === 'fid_shadow_unfolded_attach',
     };
   });
 
