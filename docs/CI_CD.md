@@ -58,17 +58,23 @@ the `gh-pages` branch using the workflow's built-in `GITHUB_TOKEN`.
 ## Hosted fidelity dashboards (GitHub Pages)
 
 The fidelity workflow publishes the self-contained OSS-vs-JS dashboard to the same
-`gh-pages` site, so you can view the comparison in a browser without downloading
-the artifact zip:
+`gh-pages` site as a **gallery**, so you can browse every comparison in a browser
+without downloading the artifact zip:
 
-- **Canonical (main):** <https://ysetbon.github.io/OpenStrandJS/fidelity/> —
-  refreshed on every merge to `main` (the fidelity workflow now also runs on
-  `push: main`).
+- **Gallery / landing page:** <https://ysetbon.github.io/OpenStrandJS/fidelity/> —
+  one card per dashboard (a snapshot thumbnail of one example, the PR number, the
+  head branch / worktree name, and the match summary), sorted with `main` first
+  then PRs by number descending. Each card links to its full dashboard.
+- **Canonical (main):** `…/fidelity/main/` — refreshed on every merge to `main`
+  (the fidelity workflow also runs on `push: main`).
 - **Per-PR preview:** `…/fidelity/pr-<N>/` — published on each PR run and linked
   at the top of that PR's sticky fidelity comment.
 
-Publishing is non-destructive (each run writes only its own path and
-fast-forward-pushes with retry), so concurrent PRs and the editor deploy coexist.
+Each run writes only its own `<sub>/` entry (`index.html` + `meta.json` +
+`thumb.png`, via `tools/fidelity_entry.mjs`), then rebuilds the landing page from
+the union of every entry's `meta.json` (`tools/fidelity_index.mjs`). Publishing is
+non-destructive (fast-forward push with retry), so concurrent PRs and the editor
+deploy coexist.
 
 ## Claude review bot — `.github/workflows/claude-review.yml`
 

@@ -95,13 +95,19 @@ jobs:
         if: always()
         run: node tools/fidelity_artifact.mjs "${{ env.OSS_SHA }}" || echo "::warning::fidelity.html build failed"
 
-      # Host the dashboard on GitHub Pages (the same gh-pages site as the editor):
-      #   main  -> /fidelity/index.html            (canonical, latest merged state)
-      #   a PR  -> /fidelity/pr-<N>/index.html      (per-PR preview)
-      # Non-destructive: clone gh-pages, write ONLY this run's path, fast-forward
-      # push with retry. The editor deploy carries /fidelity/ forward across its
-      # own force-push (see deploy.yml), so the two coexist.
-      - name: Publish dashboard to GitHub Pages (/fidelity)
+      # Host the dashboards on GitHub Pages (the same gh-pages site as the editor)
+      # as a GALLERY:
+      #   /fidelity/index.html         the landing page — one card per dashboard
+      #                                (snapshot thumbnail + PR # + head branch + summary)
+      #   /fidelity/main/index.html    canonical dashboard (latest merged state)
+      #   /fidelity/pr-<N>/index.html  per-PR preview
+      # Each run writes ONLY its own <sub>/ entry (index.html + meta.json + thumb.png)
+      # via tools/fidelity_entry.mjs, then rebuilds the landing index from the union
+      # of every <sub>/meta.json via tools/fidelity_index.mjs — so a PR run refreshes
+      # the gallery without touching another PR's entry. Non-destructive: clone
+      # gh-pages, apply, fast-forward push with retry. The editor deploy carries
+      # /fidelity/ forward across its own force-push (see deploy.yml), so both coexist.
+      - name: Publish dashboard to GitHub Pages (/fidelity gallery)
         id: pages
         if: always() && github.repository == 'ysetbon/OpenStrandJS'
         continue-on-error: true   # fork PRs (read-only token) fall back to the artifact/comment
@@ -109,10 +115,16 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
           IS_PR: ${{ github.event_name == 'pull_request' }}
+          # Card metadata — passed via env (never inline-expanded) so a PR title or
+          # branch name can't inject into the shell.
+          FID_BRANCH: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || 'main' }}
+          FID_TITLE: ${{ github.event_name == 'pull_request' && github.event.pull_request.title || 'Canonical dashboard (latest main)' }}
+          FID_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
           set -e
           [ -f artifacts/fidelity/artifact.html ] || { echo "no artifact.html; skipping"; exit 0; }
-          if [ "$IS_PR" = "true" ]; then SUB="pr-${PR}"; else SUB="."; fi
+          if [ "$IS_PR" = "true" ]; then SUB="pr-${PR}"; FID_KIND="pr"; else SUB="main"; FID_KIND="main"; fi
+          export FID_KIND FID_PR="$PR"
           REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
           WT="${{ runner.temp }}/gh-pages-fidelity"
           pushed=0
@@ -125,8 +137,11 @@ jobs:
             fi
             git -C "$WT" config user.name "github-actions[bot]"
             git -C "$WT" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            mkdir -p "$WT/fidelity/${SUB}"
-            cp artifacts/fidelity/artifact.html "$WT/fidelity/${SUB}/index.html"
+            mkdir -p "$WT/fidelity"
+            # Write THIS run's entry (index.html + meta.json + thumb.png), then
+            # rebuild the landing gallery from every entry present in the clone.
+            node tools/fidelity_entry.mjs "$WT/fidelity" "$SUB"
+            node tools/fidelity_index.mjs "$WT/fidelity"
             touch "$WT/.nojekyll"
             git -C "$WT" add -A
             if git -C "$WT" diff --cached --quiet; then echo "no dashboard change"; pushed=1; break; fi
@@ -140,7 +155,7 @@ jobs:
           if [ "$pushed" = "1" ] && [ "$IS_PR" = "true" ]; then
             echo "url=https://ysetbon.github.io/OpenStrandJS/fidelity/pr-${PR}/" >> "$GITHUB_OUTPUT"
           elif [ "$pushed" = "1" ]; then
-            echo "url=https://ysetbon.github.io/OpenStrandJS/fidelity/" >> "$GITHUB_OUTPUT"
+            echo "url=https://ysetbon.github.io/OpenStrandJS/fidelity/main/" >> "$GITHUB_OUTPUT"
           else
             echo "::warning::could not publish dashboard to gh-pages after retries"
           fi
