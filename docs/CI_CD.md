@@ -76,10 +76,10 @@ then rebuilds the landing page from the union of every entry's `meta.json`
 (`tools/fidelity_index.mjs`). Publishing is non-destructive (fast-forward push
 with retry), so concurrent PRs and the editor deploy coexist.
 
-Every gallery card has a plain **prev/next toggle** (the `‹`/`›` arrows, plus
-dots) that flips its snapshot through each example the run exercised — a
-client-side preview so you can see each example in the thumbnail widget. The
-default snapshot is the first (preferred) example.
+Gallery cards with more than one example have a plain **prev/next toggle** (the
+`‹`/`›` arrows, plus dots) that flips its snapshot through each example the run
+exercised — a client-side preview so you can see each example in the thumbnail
+widget. The default snapshot is the first (preferred) example.
 
 When a PR is closed or merged, `.github/workflows/fidelity-cleanup.yml` removes
 its `pr-<N>/` entry and rebuilds the gallery, so merged/closed PR cards don't
