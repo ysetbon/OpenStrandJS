@@ -30,8 +30,10 @@ const data = loadData();
 
 // Real content: what each fixture actually exercises.
 const NOTES = {
-  fid_shadow_unfolded_attach: 'An attached strand with an UNFOLDED start (transparent circle) crossing a lower strand: its cast shadow is cut back, not a square end-cap halo (the case this project fixes).',
-  fid_shadow_folded_attach: 'Same geometry with a FOLDED (opaque) start: it casts the full rounded end-circle shadow, proving the cut applies ONLY when the start is transparent.',
+  fid_shadow_unfolded_attach: 'An attached strand with an UNFOLDED start (transparent circle) continuing straight through a lower strand: its start blends into the parent and its cast shadow is cut back, not a square end-cap halo (the case this project fixes).',
+  fid_unfold_angled: 'An UNFOLDED attached strand bending 45° at the junction on the receiver: the blended start edge and the cut-back shadow must follow the child’s tangent, not just the axis-aligned case.',
+  fid_unfold_chain: 'A chain of UNFOLDED attachments (parent → child → grandchild) crossing two receivers: reads as one continuous strand; the middle strand carries an unfolded start AND an attachment circle at its end.',
+  fid_shadow_folded_attach: 'Contrast: the same geometry with a FOLDED (opaque) start casts the full rounded end-circle shadow, proving the cut applies ONLY when the start is transparent.',
   fid_shadow_cross: 'Control: one plain strand crossing over another with shadows on. Normal drop-shadow behavior must stay matched.',
   single_strand: 'One plain strand — baseline body geometry, stroke width, and end caps.',
   closed_knot: 'Four attached strands forming a closed loop; every attachment start is unfolded (transparent).',
@@ -41,7 +43,7 @@ const NOTES = {
   unfolded_shadow: 'The closed knot with shadows ON — the exact case this change fixes (shadow of unfolded strands).',
 };
 // Preferred display order; any fixtures not listed follow alphabetically.
-const PREF = ['fid_shadow_unfolded_attach', 'fid_shadow_folded_attach', 'fid_shadow_cross', 'unfolded_shadow', 'box_stitch', 'overhand_knot', 'single_strand', 'closed_knot', 'three_strand_braid'];
+const PREF = ['fid_shadow_unfolded_attach', 'fid_unfold_angled', 'fid_unfold_chain', 'fid_shadow_folded_attach', 'fid_shadow_cross', 'unfolded_shadow', 'box_stitch', 'overhand_knot', 'single_strand', 'closed_knot', 'three_strand_braid'];
 
 const dataUri = (p) => 'data:image/png;base64,' + readFileSync(p).toString('base64');
 

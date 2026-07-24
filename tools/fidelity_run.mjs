@@ -32,9 +32,14 @@ const BASELINE_FILE = path.join(ROOT, 'fidelity-baselines.json');
 // unfolded_shadow, box_stitch, overhand_knot, ... - are still runnable via
 // --fixtures for broader regression coverage.)
 const DEFAULT_CORPUS = [
-  'fid_shadow_unfolded_attach', // the fix: unfolded attached start -> cut-back shadow
-  'fid_shadow_folded_attach',   // contrast: folded attached start -> full end-circle shadow
-  'fid_shadow_cross',           // control: normal strand-over-strand drop shadow
+  // Three UNFOLDED attached-strand scenes (fold/unfold = the "Unfold Start Edge"
+  // layer-menu action: transparent start circle, so the child's beginning blends
+  // into its parent). Each varies the configuration:
+  'fid_shadow_unfolded_attach', // straight unfolded child through a receiver (cut-back shadow)
+  'fid_unfold_angled',          // unfolded child bending 45deg at the junction
+  'fid_unfold_chain',           // parent -> unfolded child -> unfolded grandchild over two receivers
+  // (fid_shadow_folded_attach and fid_shadow_cross remain as contrast/control
+  // cases runnable via --fixtures.)
 ];
 
 const args = process.argv.slice(2);

@@ -99,6 +99,43 @@ write('fid_shadow_unfolded_attach', scene([
   }),
 ]));
 
+// ---- Case 2b: UNFOLDED attached start at an ANGLE ---------------------------
+// Same receiver + parent, but the unfolded child leaves the junction at 45deg.
+// The unfolded start's cut-back shadow and blended (outline-less) start edge
+// must follow the child's tangent, not just the axis-aligned case.
+write('fid_unfold_angled', scene([
+  strand({ layer_name: '1_1', set_number: 1, start: { x: 150, y: 520 }, end: { x: 850, y: 520 }, width: 60, color: PINK }),
+  strand({ layer_name: '2_1', set_number: 2, start: { x: 420, y: 180 }, end: { x: 420, y: 520 }, width: 46, color: GREEN, has_circles: [false, true] }),
+  attached({
+    layer_name: '2_2', set_number: 2, start: { x: 420, y: 520 }, end: { x: 760, y: 860 },
+    width: 46, color: GREEN, attached_to: '2_1', attachment_side: 1,
+    has_circles: [true, false],
+    start_circle_stroke_color: CLEAR, circle_stroke_color: CLEAR, end_circle_stroke_color: OPAQUE,
+  }),
+]));
+
+// ---- Case 2c: CHAIN of UNFOLDED attached strands ----------------------------
+// parent -> unfolded child -> unfolded grandchild, crossing TWO receivers. The
+// middle strand has an unfolded start AND an attachment circle at its end (the
+// grandchild's anchor), so one strand exercises both edge treatments at once.
+write('fid_unfold_chain', scene([
+  strand({ layer_name: '1_1', set_number: 1, start: { x: 150, y: 520 }, end: { x: 850, y: 520 }, width: 60, color: PINK }),
+  strand({ layer_name: '2_1', set_number: 2, start: { x: 150, y: 800 }, end: { x: 850, y: 800 }, width: 60, color: BLUE }),
+  strand({ layer_name: '3_1', set_number: 3, start: { x: 500, y: 180 }, end: { x: 500, y: 520 }, width: 46, color: GREEN, has_circles: [false, true] }),
+  attached({
+    layer_name: '3_2', set_number: 3, start: { x: 500, y: 520 }, end: { x: 500, y: 800 },
+    width: 46, color: GREEN, attached_to: '3_1', attachment_side: 1,
+    has_circles: [true, true],
+    start_circle_stroke_color: CLEAR, circle_stroke_color: CLEAR, end_circle_stroke_color: OPAQUE,
+  }),
+  attached({
+    layer_name: '3_3', set_number: 3, start: { x: 500, y: 800 }, end: { x: 500, y: 1080 },
+    width: 46, color: GREEN, attached_to: '3_2', attachment_side: 1,
+    has_circles: [true, false],
+    start_circle_stroke_color: CLEAR, circle_stroke_color: CLEAR, end_circle_stroke_color: OPAQUE,
+  }),
+]));
+
 // ---- Case 3: FOLDED attached start over a strand (contrast) ----------------
 // Identical geometry to case 2 but the attached start is FOLDED (opaque circle),
 // so it casts the full rounded end-circle shadow. Pairs with case 2 to prove the

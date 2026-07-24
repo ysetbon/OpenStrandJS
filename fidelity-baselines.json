@@ -4,14 +4,14 @@
     "width": 1176,
     "height": 1162
   },
-  "fid_shadow_folded_attach": {
+  "fid_unfold_angled": {
     "match_pct": 100,
     "width": 1176,
-    "height": 1162
+    "height": 1142
   },
-  "fid_shadow_cross": {
+  "fid_unfold_chain": {
     "match_pct": 100,
-    "width": 1152,
-    "height": 1144
+    "width": 1176,
+    "height": 1362
   }
 }
