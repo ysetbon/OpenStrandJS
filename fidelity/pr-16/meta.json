@@ -1,0 +1,34 @@
+{
+  "sub": "pr-16",
+  "kind": "pr",
+  "pr": 16,
+  "branch": "claude/effort-estimation-cepto6",
+  "title": "Turn /fidelity/ into a dashboard gallery/landing page",
+  "sha": "bcc56899a2",
+  "updated": "2026-07-24T06:43:45.666Z",
+  "summary": {
+    "fixtures": 3,
+    "perfect": 3,
+    "lowest": 100
+  },
+  "results": [
+    {
+      "fixture": "fid_shadow_unfolded_attach",
+      "match_pct": 100
+    },
+    {
+      "fixture": "fid_unfold_angled",
+      "match_pct": 100
+    },
+    {
+      "fixture": "fid_unfold_chain",
+      "match_pct": 100
+    }
+  ],
+  "thumb": {
+    "file": "thumb.png",
+    "w": 364,
+    "h": 360,
+    "from": "fid_shadow_unfolded_attach"
+  }
+}
