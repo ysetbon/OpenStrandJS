@@ -281,4 +281,11 @@ export interface RenderMeta {
   // top. Absent/false => no grid, so the fidelity oracle stays byte-identical.
   show_grid?: boolean;
   grid_size?: number;
+  // LIVE EDITOR ONLY (the offline oracle never sets these). Theme-aware canvas
+  // painting: canvas_bg is the backdrop CSS color the renderer clears to (OSS dark
+  // theme = #2C2C2C); ABSENT => 'white', so the fidelity oracle stays byte-identical.
+  // grid_color is the CSS color for grid lines (OSS theme-independent #C8C8C8 /
+  // #B4B4B4); ABSENT => the legacy faint black. Both only apply on the live editor.
+  canvas_bg?: string;
+  grid_color?: string;
 }

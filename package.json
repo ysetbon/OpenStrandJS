@@ -7,6 +7,10 @@
   "scripts": {
     "dev": "vite",
     "build:editor": "vite build",
+    "build:gallery": "vite build --config vite.gallery.config.ts",
+    "darkmode:shots": "node tools/darkmode_shots.mjs dist-gallery",
+    "darkmode:artifact": "node tools/darkmode_artifact.mjs",
+    "darkmode": "npm run build:gallery && npm run darkmode:shots && npm run darkmode:artifact",
     "preview": "vite preview",
     "deploy": "node tools/deploy-pages.mjs",
     "reference": "../OpenStrandStudio/src/build_env/Scripts/python.exe tools/reference_render.py",

@@ -10,10 +10,43 @@
   min-height: 0;
 }
 
-/* Themed checkboxes across group dialogs (OSS uses 20px blue indicators). */
+/* Themed checkboxes across group dialogs (OSS uses 20px blue indicators). The
+ * accent tints the checkmark; color-scheme (theme.css) paints the box itself dark
+ * on .theme-dark so unchecked boxes are no longer white squares on the dark modal. */
 .modal input[type='checkbox'] {
   accent-color: var(--accent, #2d6cdf);
 }
+
+/* Bare native <button>s in the group/strand dialogs (OK/Cancel/Apply/Snap/Close,
+ * the ± steppers, the angle-table adjust buttons) carry no class, so without this
+ * they fell back to the browser's default LIGHT button chrome on the dark modal.
+ * Give them the OSS dialog-button palette (settings buttons keep their own .set-*
+ * classes; .set-btn footers are explicitly excluded). Scoped to the containers
+ * that actually hold bare buttons so the settings segmented stepper is untouched. */
+.modal-footer > button:not(.set-btn),
+.gd-row > button,
+.gd-angle-table button,
+.gd-angle-xrow > button {
+  background: var(--dialog-btn-bg, #e8e8e8);
+  color: var(--text);
+  border: 1px solid var(--dialog-btn-border, #b0b0b0);
+  border-radius: 4px;
+  padding: 4px 12px;
+  min-height: 28px;
+  cursor: pointer;
+}
+.modal-footer > button:not(.set-btn):hover,
+.gd-row > button:hover,
+.gd-angle-table button:hover,
+.gd-angle-xrow > button:hover { background: var(--button-hover, #dadada); }
+.modal-footer > button:not(.set-btn):active,
+.gd-row > button:active,
+.gd-angle-table button:active,
+.gd-angle-xrow > button:active { background: var(--button-pressed, #c8c8c8); }
+.modal-footer > button:not(.set-btn):disabled,
+.gd-row > button:disabled,
+.gd-angle-table button:disabled,
+.gd-angle-xrow > button:disabled { opacity: 0.5; cursor: default; }
 
 .modal-footer {
   display: flex;

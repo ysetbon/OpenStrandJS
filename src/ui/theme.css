@@ -8,6 +8,11 @@
  * stylesheets). See UI_PORT_PLAN.md §2.6 / §2.7. */
 
 .theme-default {
+  /* Native form controls (checkbox, number/text inputs, <select>, range sliders,
+   * scrollbars) follow the OS color-scheme. Pinning it per theme makes the browser
+   * paint the bare controls in the group/strand dialogs with LIGHT chrome here and
+   * DARK chrome under .theme-dark, instead of always defaulting to light. */
+  color-scheme: light;
   --window-bg: #ECECEC;
   --text: #000000;
   --canvas-bg: #FFFFFF;
@@ -65,6 +70,7 @@
 }
 
 .theme-light {
+  color-scheme: light;
   --window-bg: #FFFFFF;
   --text: #000000;
   --canvas-bg: #FFFFFF;
@@ -121,6 +127,7 @@
 }
 
 .theme-dark {
+  color-scheme: dark;
   --window-bg: #2C2C2C;
   --text: #FFFFFF;
   --canvas-bg: #2C2C2C;

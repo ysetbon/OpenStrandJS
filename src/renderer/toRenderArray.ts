@@ -94,5 +94,15 @@ export function buildMeta(doc: EditorDocument, view: ViewState, settings: Settin
     // never sets these, so fixtures stay byte-identical.
     show_grid: settings.show_grid,
     grid_size: settings.grid_size,
+    // Theme-aware canvas painting (live editor only). OSS paints the canvas
+    // interior #2C2C2C in the dark theme (UI_PORT_PLAN.md §2.6, canvas_bg dark);
+    // light/default stay white. Left undefined off-dark so the renderer's default
+    // 'white' path — shared with the fidelity oracle — is byte-for-byte unchanged.
+    canvas_bg: settings.theme === 'dark' ? '#2C2C2C' : undefined,
+    // OSS grid is theme-INDEPENDENT #C8C8C8 (zoom >= 0.5) / #B4B4B4 (< 0.5)
+    // (UI_PORT_PLAN.md:196). The legacy faint rgba(0,0,0,0.08) vanished on the dark
+    // canvas; this value reads correctly on every theme. Grid is live-editor-only
+    // (the oracle never sets show_grid), so the fidelity harness is unaffected.
+    grid_color: (view.zoom ?? 1) >= 0.5 ? '#C8C8C8' : '#B4B4B4',
   };
 }

@@ -110,7 +110,7 @@ body {
 .props { border-top: 1px solid var(--hairline); padding: 8px 10px; font-size: 12px; display: flex; flex-direction: column; gap: 6px; }
 .props.empty { color: #999; }
 .props-title { font-weight: 600; }
-.props-hint { color: #888; }
+.props-hint { color: var(--text); opacity: .7; }
 .cf { display: flex; align-items: center; gap: 6px; }
 .cf-label { width: 42px; color: var(--text); opacity: .75; }
 .cf input[type=color] { width: 30px; height: 22px; padding: 0; border: 1px solid var(--panel-border); border-radius: 4px; background: none; }
@@ -138,8 +138,8 @@ body {
 .layer-state-row .ls-type { opacity: .7; }
 .layer-state-row .ls-set { opacity: .7; }
 .layer-state-row .ls-color { margin-inline-start: auto; font-family: monospace; opacity: .8; }
-.layer-state-row .ls-flags { color: #c0392b; }
-.layer-state-row .ls-missing { color: #c0392b; font-style: italic; }
+.layer-state-row .ls-flags { color: var(--danger); }
+.layer-state-row .ls-missing { color: var(--danger); font-style: italic; }
 
 /* ---- settings modal ---- */
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, .4); display: flex; align-items: center; justify-content: center; z-index: 100; }

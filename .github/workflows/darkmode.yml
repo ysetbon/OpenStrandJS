@@ -1,0 +1,64 @@
+# Dark-mode "printscreen fidelity" run.
+#
+# Builds the standalone window gallery (gallery.html + src/gallery/*), then drives
+# Chromium over every window the app can show — the main window, the canvas, both
+# side panels, all Settings pages, every group/strand dialog, and the context menus
+# — screenshotting each in the default, light AND dark themes. A self-contained
+# artifacts/darkmode/index.html (every PNG embedded as base64) is uploaded so a
+# reviewer can open ONE file and confirm the dark theme matches OpenStrand Studio
+# window-by-window, with the light/default shots alongside as reference.
+#
+# This is a UI screenshot pass, NOT the pixel-fidelity oracle (that is fidelity.yml,
+# which diffs the JS renderer against the real Qt app). It needs no Qt, so it runs
+# on any hosted runner.
+name: Dark Mode Gallery
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: darkmode-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gallery:
+    name: Screenshot every window (default · light · dark)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Typecheck (tsc)
+        run: npm run build
+
+      - name: Build window gallery (Vite)
+        run: npm run build:gallery
+
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Screenshot every window in all three themes
+        run: node tools/darkmode_shots.mjs dist-gallery default,light,dark
+
+      - name: Build self-contained gallery.html
+        if: always()
+        run: node tools/darkmode_artifact.mjs
+
+      - name: Upload dark-mode gallery artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: darkmode-gallery
+          path: |
+            artifacts/darkmode/index.html
+            artifacts/darkmode/**/*.png
+            artifacts/darkmode/manifest.json
+          if-no-files-found: warn
+          retention-days: 14
