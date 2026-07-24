@@ -19,6 +19,8 @@ name: Fidelity (OSS vs JS)
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]   # publish the canonical dashboard to Pages on each merge
   workflow_dispatch:
 
 concurrency:
@@ -35,10 +37,10 @@ env:
 
 jobs:
   fidelity:
-    if: github.event.pull_request.draft == false || github.event_name == 'workflow_dispatch'
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     permissions:
-      contents: write        # push montages to the ci-fidelity branch
+      contents: write        # push montages to ci-fidelity + the dashboard to gh-pages
       pull-requests: write   # upsert the sticky comment
     steps:
       - uses: actions/checkout@v4
@@ -92,6 +94,52 @@ jobs:
       - name: Build standalone fidelity.html (self-contained, viewable)
         if: always()
         run: node tools/fidelity_artifact.mjs "${{ env.OSS_SHA }}" || echo "::warning::fidelity.html build failed"
+
+      # Host the dashboard on GitHub Pages (the same gh-pages site as the editor):
+      #   main  -> /fidelity/index.html            (canonical, latest merged state)
+      #   a PR  -> /fidelity/pr-<N>/index.html      (per-PR preview)
+      # Non-destructive: clone gh-pages, write ONLY this run's path, fast-forward
+      # push with retry. The editor deploy carries /fidelity/ forward across its
+      # own force-push (see deploy.yml), so the two coexist.
+      - name: Publish dashboard to GitHub Pages (/fidelity)
+        id: pages
+        if: always() && github.repository == 'ysetbon/OpenStrandJS'
+        continue-on-error: true   # fork PRs (read-only token) fall back to the artifact/comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          IS_PR: ${{ github.event_name == 'pull_request' }}
+        run: |
+          set -e
+          [ -f artifacts/fidelity/artifact.html ] || { echo "no artifact.html; skipping"; exit 0; }
+          if [ "$IS_PR" = "true" ]; then SUB="pr-${PR}"; else SUB="."; fi
+          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          WT="${{ runner.temp }}/gh-pages-fidelity"
+          pushed=0
+          for attempt in 1 2 3 4 5; do
+            rm -rf "$WT"
+            if git ls-remote --exit-code --heads "$REMOTE" gh-pages >/dev/null 2>&1; then
+              git clone -q --depth 1 --branch gh-pages "$REMOTE" "$WT"
+            else
+              mkdir -p "$WT"; git -C "$WT" init -q; git -C "$WT" checkout -q --orphan gh-pages
+            fi
+            git -C "$WT" config user.name "github-actions[bot]"
+            git -C "$WT" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            mkdir -p "$WT/fidelity/${SUB}"
+            cp artifacts/fidelity/artifact.html "$WT/fidelity/${SUB}/index.html"
+            touch "$WT/.nojekyll"
+            git -C "$WT" add -A
+            if git -C "$WT" diff --cached --quiet; then echo "no dashboard change"; pushed=1; break; fi
+            git -C "$WT" commit -q -m "fidelity dashboard: ${SUB} @ ${GITHUB_SHA:0:7}"
+            if git -C "$WT" push -q "$REMOTE" "HEAD:gh-pages"; then pushed=1; break; fi
+            echo "gh-pages advanced (attempt ${attempt}); retrying"; sleep $((attempt * 2))
+          done
+          [ "$pushed" = "1" ] || echo "::warning::could not publish dashboard to gh-pages after retries"
+          if [ "$IS_PR" = "true" ]; then
+            echo "url=https://ysetbon.github.io/OpenStrandJS/fidelity/pr-${PR}/" >> "$GITHUB_OUTPUT"
+          else
+            echo "url=https://ysetbon.github.io/OpenStrandJS/fidelity/" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Upload fidelity artifact (montages + viewable HTML)
         if: always()
@@ -162,6 +210,7 @@ jobs:
         env:
           MONTAGE_URL_BASE: ${{ steps.publish.outputs.url_base }}
           CACHE_BUST: ${{ github.event.pull_request.head.sha }}
+          PAGES_URL: ${{ steps.pages.outputs.url }}
         run: node tools/fidelity_comment.mjs
 
       - name: Upsert sticky fidelity comment

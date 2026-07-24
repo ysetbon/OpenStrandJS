@@ -49,6 +49,23 @@ build with Vite, then force-push only `dist-editor/` (plus `.nojekyll`) to the
   <https://ysetbon.github.io/OpenStrandJS/>.
 - `npm run deploy` still works for manual/local deploys; the workflow just
   makes it happen on every merge.
+- The deploy carries forward the `/fidelity/` directory on `gh-pages` before its
+  force-push, so the hosted fidelity dashboards (below) survive editor deploys.
+
+## Hosted fidelity dashboards (GitHub Pages)
+
+The fidelity workflow publishes the self-contained OSS-vs-JS dashboard to the same
+`gh-pages` site, so you can view the comparison in a browser without downloading
+the artifact zip:
+
+- **Canonical (main):** <https://ysetbon.github.io/OpenStrandJS/fidelity/> —
+  refreshed on every merge to `main` (the fidelity workflow now also runs on
+  `push: main`).
+- **Per-PR preview:** `…/fidelity/pr-<N>/` — published on each PR run and linked
+  at the top of that PR's sticky fidelity comment.
+
+Publishing is non-destructive (each run writes only its own path and
+fast-forward-pushes with retry), so concurrent PRs and the editor deploy coexist.
 
 ## Claude review bot — `.github/workflows/claude-review.yml`
 
