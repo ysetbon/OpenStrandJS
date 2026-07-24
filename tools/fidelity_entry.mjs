@@ -7,11 +7,9 @@
 //
 // <sub> is "main" for the canonical (merged) dashboard, or "pr-<N>" for a PR
 // preview. tools/fidelity_index.mjs then scans every <sub>/meta.json and
-// regenerates <fidelityDir>/index.html — the gallery/landing page. The gallery
-// card lets you toggle which example is the snapshot; an admin persists the
-// choice through tools/fidelity_set_thumb.mjs (via the fidelity-thumb workflow),
-// which rewrites thumb.png + meta.selected. This tool HONORS an existing
-// meta.selected so an admin's pick survives later fidelity re-runs.
+// regenerates <fidelityDir>/index.html — the gallery/landing page, whose cards
+// have a prev/next toggle to preview each example in the thumbnail widget
+// (client-side only).
 //
 // Usage: node tools/fidelity_entry.mjs <fidelityDir> <sub>
 // Env (all optional; sensible fallbacks):
@@ -32,14 +30,6 @@ if (!fidelityDir || !sub) {
 
 const OUT = path.join(process.cwd(), 'artifacts', 'fidelity');
 const dest = path.join(fidelityDir, sub);
-
-// Preserve an admin's previously-persisted thumbnail choice (meta.selected)
-// across re-runs, if that fixture is still present in this run's results.
-let priorSelected = null;
-try {
-  const prior = JSON.parse(readFileSync(path.join(dest, 'meta.json'), 'utf8'));
-  if (prior && typeof prior.selected === 'string') priorSelected = prior.selected;
-} catch { /* no prior entry */ }
 
 mkdirSync(dest, { recursive: true });
 mkdirSync(path.join(dest, 'snaps'), { recursive: true });
@@ -132,11 +122,9 @@ for (const fixture of orderedFixtures) {
   }
 }
 
-// 4) Pick the default/selected snapshot: an admin's prior pick wins if still
-//    available; otherwise the first (preferred) fixture.
-let selected = null;
-if (priorSelected && thumbs.some((t) => t.fixture === priorSelected)) selected = priorSelected;
-else if (thumbs.length) selected = thumbs[0].fixture;
+// 4) Default snapshot: the first (preferred) example. The gallery toggle lets
+//    a viewer flip through the rest client-side.
+let selected = thumbs.length ? thumbs[0].fixture : null;
 
 let thumb = null;
 if (selected) {
@@ -158,17 +146,10 @@ const meta = {
   updated: new Date().toISOString(),
   summary: { fixtures: matches.length, perfect, lowest },
   results,
-  selected,        // the fixture currently shown as the card thumbnail
+  selected,        // the example shown by default (toggle start position)
   thumb,           // { file, from, w, h }
-  thumbs,          // all selectable snapshots: [{ fixture, file, w, h }]
+  thumbs,          // all preview snapshots: [{ fixture, file, w, h }]
 };
 writeFileSync(path.join(dest, 'meta.json'), JSON.stringify(meta, null, 2));
 
-// Only claim the prior admin pick is "in effect" when it was actually honored;
-// if that fixture wasn't available this run we fell back, and the log says so.
-const priorNote = priorSelected
-  ? (selected === priorSelected
-      ? ` (prior admin pick: ${priorSelected})`
-      : ` (prior admin pick "${priorSelected}" unavailable this run; fell back)`)
-  : '';
-console.log(`entry -> ${dest} (${kind}${meta.pr ? ` #${meta.pr}` : ''}, ${matches.length} fixtures, ${thumbs.length} snapshots, selected: ${selected || 'none'}${priorNote})`);
+console.log(`entry -> ${dest} (${kind}${meta.pr ? ` #${meta.pr}` : ''}, ${matches.length} fixtures, ${thumbs.length} snapshots, default: ${selected || 'none'})`);
