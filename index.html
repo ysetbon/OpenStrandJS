@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <script>
+    // Phone fit: the editor is a desktop-class two-pane layout whose natural
+    // minimum width is ~APP_MIN CSS px. On narrower screens, letting flex
+    // squeeze it crushes the toolbar into slivers and crops the layer panel.
+    // Instead, pin the LAYOUT viewport to APP_MIN so the browser renders the
+    // whole UI scaled-to-fit (crisp at device resolution, pinch-zoom still
+    // works) — the classic deliberate-desktop-layout treatment. Tablets and
+    // desktops (>= APP_MIN wide) keep width=device-width 1:1. Runs before the
+    // app loads so there is no reflow flash.
+    (function () {
+      var APP_MIN = 800;
+      var dev = screen.width;
+      if (dev && dev < APP_MIN) {
+        document.querySelector('meta[name="viewport"]').setAttribute(
+          'content', 'width=' + APP_MIN + ', viewport-fit=cover');
+      }
+    })();
+  </script>
+  <meta name="theme-color" content="#ECECEC" />
+  <!-- Launch from the home screen to run standalone — no browser banner. -->
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="OpenStrand" />
+  <link rel="manifest" href="/OpenStrandJS/manifest.webmanifest" />
+  <!-- The real OpenStrand Studio app icon (box_stitch / MyIcon.iconset). -->
+  <link rel="apple-touch-icon" href="/OpenStrandJS/icons/icon-192.png" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/OpenStrandJS/icons/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/OpenStrandJS/icons/icon-192.png" />
+  <title>OpenStrandJS — editor</title>
+  <script type="module" crossorigin src="/OpenStrandJS/assets/index-DvntJCgD.js"></script>
+  <link rel="stylesheet" crossorigin href="/OpenStrandJS/assets/index-C0Z_QSZX.css">
+</head>
+<body>
+  <div id="root"></div>
+</body>
+</html>
