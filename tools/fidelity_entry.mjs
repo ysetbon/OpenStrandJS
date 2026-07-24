@@ -164,4 +164,11 @@ const meta = {
 };
 writeFileSync(path.join(dest, 'meta.json'), JSON.stringify(meta, null, 2));
 
-console.log(`entry -> ${dest} (${kind}${meta.pr ? ` #${meta.pr}` : ''}, ${matches.length} fixtures, ${thumbs.length} snapshots, selected: ${selected || 'none'}${priorSelected ? ` (prior admin pick: ${priorSelected})` : ''})`);
+// Only claim the prior admin pick is "in effect" when it was actually honored;
+// if that fixture wasn't available this run we fell back, and the log says so.
+const priorNote = priorSelected
+  ? (selected === priorSelected
+      ? ` (prior admin pick: ${priorSelected})`
+      : ` (prior admin pick "${priorSelected}" unavailable this run; fell back)`)
+  : '';
+console.log(`entry -> ${dest} (${kind}${meta.pr ? ` #${meta.pr}` : ''}, ${matches.length} fixtures, ${thumbs.length} snapshots, selected: ${selected || 'none'}${priorNote})`);

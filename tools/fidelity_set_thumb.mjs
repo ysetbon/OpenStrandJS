@@ -16,8 +16,10 @@ if (!fidelityDir || !sub || !fixture) {
   process.exit(2);
 }
 
-// Guard against path traversal from the (admin-supplied but still-validated) inputs.
-const safe = (s) => /^[A-Za-z0-9._-]+$/.test(s);
+// Guard against path traversal from the (admin-supplied but still-validated)
+// inputs. The allowlist alone would accept "." / ".." (both match [._-]+), so
+// reject those explicitly — sub/fixture must name an actual child entry.
+const safe = (s) => /^[A-Za-z0-9._-]+$/.test(s) && s !== '.' && s !== '..';
 if (!safe(sub) || !safe(fixture)) {
   console.error(`invalid sub/fixture (allowed: letters, digits, dot, dash, underscore)`);
   process.exit(2);
