@@ -42,7 +42,7 @@ const lines = [
   '',
   `Each fixture is rendered by the **real OpenStrandStudio Qt canvas** (the pixel oracle) and by the **JS/Paper.js renderer**, then pixel-diffed (AA-tolerant). A fixture fails the gate if its match% drops more than **${tolerance}** points below baseline, or fails to render.`,
   '',
-  ...(pagesUrl ? [`📊 **[View the full dashboard for this PR →](${pagesUrl})**  ·  canonical (main): <https://ysetbon.github.io/OpenStrandJS/fidelity/>`, ''] : []),
+  ...(pagesUrl ? [`📊 **[View the full dashboard for this PR →](${pagesUrl})**  ·  all dashboards: <https://ysetbon.github.io/OpenStrandJS/fidelity/>  ·  canonical (main): <https://ysetbon.github.io/OpenStrandJS/fidelity/main/>`, ''] : []),
   '| Fixture | Status | Match | Baseline | Δ |',
   '| --- | --- | --- | --- | --- |',
   ...rows,

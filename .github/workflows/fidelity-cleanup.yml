@@ -1,0 +1,64 @@
+# Remove a PR's fidelity dashboard from the gh-pages gallery once the PR is
+# closed (merged or not). The main fidelity workflow only ever writes the
+# current PR's pr-<N>/ entry, so without this, merged/closed PR cards would
+# linger on /fidelity/ forever. This is cheap — no Qt oracle, no render — it just
+# deletes fidelity/pr-<N>/ and rebuilds the landing gallery from what remains.
+name: Fidelity cleanup (remove closed PR dashboard)
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gh-pages-fidelity   # serialize with the fidelity publish + thumb writers
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: github.repository == 'ysetbon/OpenStrandJS'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false   # this job builds its own authed remote for the push
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci   # pngjs for tools/fidelity_index.mjs
+
+      - name: Remove pr-<N> dashboard from gh-pages and rebuild the gallery
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -e
+          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          WT="${{ runner.temp }}/gh-pages-cleanup"
+          pushed=0
+          for attempt in 1 2 3 4 5; do
+            rm -rf "$WT"
+            if git ls-remote --exit-code --heads "$REMOTE" gh-pages >/dev/null 2>&1; then
+              git clone -q --depth 1 --branch gh-pages "$REMOTE" "$WT"
+            else
+              echo "no gh-pages branch; nothing to clean up"; pushed=1; break
+            fi
+            git -C "$WT" config user.name "github-actions[bot]"
+            git -C "$WT" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            if [ ! -d "$WT/fidelity/pr-${PR}" ]; then
+              echo "no fidelity/pr-${PR} entry to remove"; pushed=1; break
+            fi
+            rm -rf "$WT/fidelity/pr-${PR}"
+            # Rebuild the landing gallery from the entries that remain.
+            node tools/fidelity_index.mjs "$WT/fidelity"
+            git -C "$WT" add -A
+            if git -C "$WT" diff --cached --quiet; then echo "nothing to commit"; pushed=1; break; fi
+            git -C "$WT" commit -q -m "fidelity: remove closed PR #${PR} dashboard from gallery"
+            if git -C "$WT" push -q "$REMOTE" "HEAD:gh-pages"; then pushed=1; break; fi
+            echo "gh-pages advanced (attempt ${attempt}); retrying"; sleep $((attempt * 2))
+          done
+          [ "$pushed" = "1" ] || { echo "::error::could not push cleanup to gh-pages after retries"; exit 1; }
