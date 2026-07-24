@@ -1,0 +1,55 @@
+{
+  "sub": "pr-17",
+  "kind": "pr",
+  "pr": 17,
+  "branch": "claude/effort-estimation-cepto6",
+  "title": "Simplify fidelity gallery toggle: static prev/next, drop admin picker",
+  "sha": "d538abd073",
+  "updated": "2026-07-24T08:01:33.922Z",
+  "summary": {
+    "fixtures": 3,
+    "perfect": 3,
+    "lowest": 100
+  },
+  "results": [
+    {
+      "fixture": "fid_shadow_unfolded_attach",
+      "match_pct": 100
+    },
+    {
+      "fixture": "fid_unfold_angled",
+      "match_pct": 100
+    },
+    {
+      "fixture": "fid_unfold_chain",
+      "match_pct": 100
+    }
+  ],
+  "selected": "fid_shadow_unfolded_attach",
+  "thumb": {
+    "file": "thumb.png",
+    "from": "fid_shadow_unfolded_attach",
+    "w": 364,
+    "h": 360
+  },
+  "thumbs": [
+    {
+      "fixture": "fid_shadow_unfolded_attach",
+      "file": "snaps/fid_shadow_unfolded_attach.png",
+      "w": 364,
+      "h": 360
+    },
+    {
+      "fixture": "fid_unfold_angled",
+      "file": "snaps/fid_unfold_angled.png",
+      "w": 371,
+      "h": 360
+    },
+    {
+      "fixture": "fid_unfold_chain",
+      "file": "snaps/fid_unfold_chain.png",
+      "w": 311,
+      "h": 360
+    }
+  ]
+}
