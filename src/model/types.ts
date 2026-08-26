@@ -99,6 +99,11 @@ export interface EditorDocument {
   shadow_enabled: boolean;
   show_control_points: boolean;
   shadow_overrides: ShadowOverrides;
+  // Every PROJECT-level key the desktop writes that we don't model explicitly
+  // (strand_colors, and anything a future OSS release adds). Same passthrough
+  // contract as StrandRecord.extra: preserved verbatim so a load -> save
+  // round-trip re-opens identically in `python main.py`.
+  extra: Record<string, unknown>;
 }
 
 // Per-pair shadow tuning, OSS-faithful (layer_state_manager.py shadow_overrides):
@@ -219,6 +224,12 @@ export interface RenderStrand {
   control_points: [Point, Point];
   control_point_center: Point | null;
   control_point_center_locked: boolean;
+  // OSS keeps hidden strands in canvas.strands and gates only the PAINT on
+  // is_hidden (strand.py:2279, masked_strand.py:489); they still resolve mask
+  // components and has_circles. So the adapter forwards them WITH this flag
+  // instead of dropping them from the array. Absent/false == visible, so the
+  // fidelity oracle (whose fixtures never set it) is byte-identical.
+  is_hidden?: boolean;
   deletion_rectangles?: DeletionRect[];
   // Cap / side-line inputs the renderer reads (flat-end side lines, closed-knot
   // caps, folded/unfolded state, has_circles recompute).

@@ -10,8 +10,9 @@
 //   - history wrapper:     { type:"OpenStrandStudioHistory", states:[{step,data}], current_step }
 
 import type {
-  DeletionRect, EditorDocument, KnotConnection, Point, RGBA, StrandRecord, StrandType,
+  DeletionRect, EditorDocument, GroupRecord, KnotConnection, Point, RGBA, StrandRecord, StrandType,
 } from '../model/types';
+import { resolveGroupMembers } from '../model/group';
 
 // Keys consumed into typed StrandRecord fields — everything else goes to `extra`.
 const MODELED_KEYS = new Set([
@@ -22,6 +23,13 @@ const MODELED_KEYS = new Set([
   'knot_connections', 'attached_to', 'attachment_side',
   'deletion_rectangles', 'using_absolute_coords',
   'triangle_has_moved', 'control_point2_shown', 'control_point2_activated',
+]);
+
+// Project-level keys consumed into typed EditorDocument fields — everything else
+// (strand_colors, and whatever a future OSS release adds) rides `doc.extra`.
+const MODELED_PROJECT_KEYS = new Set([
+  'strands', 'groups', 'selected_strand_name', 'locked_layers', 'lock_mode',
+  'shadow_enabled', 'show_control_points', 'shadow_overrides',
 ]);
 
 function asPoint(v: unknown, fallback: Point): Point {
@@ -138,16 +146,103 @@ export function loadProject(data: unknown): EditorDocument {
     order.push(rec.layer_name);
   }
 
+  const extra: Record<string, unknown> = {};
+  for (const k of Object.keys(proj || {})) {
+    if (!MODELED_PROJECT_KEYS.has(k)) extra[k] = proj[k];
+  }
+
   return {
     order,
     strands,
     groups: proj.groups ?? {},
     selected_strand_name: proj.selected_strand_name ?? null,
-    locked_layers: proj.locked_layers ?? [],
+    locked_layers: lockedNamesFromFile(proj.locked_layers, order),
     lock_mode: !!proj.lock_mode,
     shadow_enabled: proj.shadow_enabled ?? true,
     show_control_points: !!proj.show_control_points,
     shadow_overrides: proj.shadow_overrides ?? {},
+    extra,
+  };
+}
+
+// ---- locked_layers: the desktop stores INDICES, we store NAMES --------------
+//
+// OSS's LayerPanel.locked_layers is a set of integer indices into canvas.strands
+// (layer_panel.py:2284 `button.set_locked(i in self.locked_layers)`, :2792 remaps
+// them by index after a deletion), and that is what save_load_manager writes. The
+// editor keys everything by layer_name, so translate at the file boundary in both
+// directions; index i == doc.order[i] == the strand whose serialized `index` is i.
+// Strings are accepted on load too, so files written by older builds of this
+// editor (which wrote names) still restore their locks.
+function lockedNamesFromFile(raw: unknown, order: string[]): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const entry of raw) {
+    let name: string | undefined;
+    if (typeof entry === 'number') name = order[entry];
+    else if (typeof entry === 'string') name = order.includes(entry) ? entry : order[Number(entry)];
+    if (name && !out.includes(name)) out.push(name);
+  }
+  return out;
+}
+
+function lockedIndicesForFile(doc: EditorDocument): number[] {
+  const out: number[] = [];
+  for (const name of doc.locked_layers) {
+    const i = doc.order.indexOf(name);
+    if (i >= 0 && !out.includes(i)) out.push(i);
+  }
+  return out.sort((a, b) => a - b);
+}
+
+// ---- groups: the desktop needs the resolved membership, not just main_strands --
+//
+// serialize_groups writes {layers, main_strands, strands, control_points} and the
+// loader indexes `group_info["strands"]` / `["layers"]` DIRECTLY
+// (save_load_manager.py:1320, :1350). A group written with only `main_strands`
+// therefore raised KeyError inside apply_loaded_strands — swallowed by
+// main_window.py:1684 `except Exception: pass` AFTER canvas.strands had already
+// been assigned, so the file appeared to load while groups, the button states,
+// the lock restore and the undo baseline were all silently skipped.
+//
+// Resolving on save (instead of trusting whatever was loaded) also keeps the
+// membership fresh: the editor only maintains `main_strands` through renames and
+// deletions, so a passed-through `strands` list goes stale. OSS re-resolves from
+// main_strands for its own operations anyway (group_layers.py resolve_group_data).
+function serializeGroup(doc: EditorDocument, name: string): Record<string, unknown> {
+  const rec = (doc.groups as Record<string, unknown>)[name] as (GroupRecord & Record<string, unknown>) | undefined;
+  const members = resolveGroupMembers(doc, name);
+  const owned = new Set<string>([...members.regular, ...members.masks]);
+  // Emit in z-order so the list reads like the layer panel.
+  let layers = doc.order.filter((n) => owned.has(n));
+
+  // Legacy/foreign records with no usable main_strands resolve to nothing; fall
+  // back to their stored membership so the group still survives the round-trip
+  // (OSS skips any group whose "strands" list comes back empty).
+  if (!layers.length && rec) {
+    const stored = (Array.isArray(rec.strands) ? rec.strands : rec.layers) as unknown;
+    if (Array.isArray(stored)) layers = stored.filter((n): n is string => typeof n === 'string' && !!doc.strands[n]);
+  }
+
+  const control_points: Record<string, unknown> = {};
+  for (const n of layers) {
+    const st = doc.strands[n];
+    if (!st || st.type === 'MaskedStrand') continue;
+    control_points[n] = {
+      control_point1: { x: st.control_points[0].x, y: st.control_points[0].y },
+      control_point2: { x: st.control_points[1].x, y: st.control_points[1].y },
+      control_point_center: st.control_point_center
+        ? { x: st.control_point_center.x, y: st.control_point_center.y } : null,
+      control_point_center_locked: !!st.control_point_center_locked,
+    };
+  }
+
+  return {
+    ...(rec ?? {}),
+    layers,
+    strands: layers,
+    main_strands: (rec?.main_strands ?? []).filter((n) => !!doc.strands[n]),
+    control_points,
   };
 }
 
@@ -196,11 +291,18 @@ function serializeStrand(s: StrandRecord, index: number): Record<string, unknown
 }
 
 export function serializeProject(doc: EditorDocument): Record<string, unknown> {
+  const groups: Record<string, unknown> = {};
+  for (const name of Object.keys(doc.groups ?? {})) groups[name] = serializeGroup(doc, name);
+
+  // Spread the project passthrough bag first, then write the modeled fields over
+  // it — same contract as serializeStrand, so unmodeled desktop keys
+  // (strand_colors, ...) survive while edited values win.
   return {
+    ...(doc.extra ?? {}),
     strands: doc.order.map((name, i) => serializeStrand(doc.strands[name], i)).filter(Boolean),
-    groups: doc.groups ?? {},
+    groups,
     selected_strand_name: doc.selected_strand_name,
-    locked_layers: doc.locked_layers,
+    locked_layers: lockedIndicesForFile(doc),
     lock_mode: doc.lock_mode,
     shadow_enabled: doc.shadow_enabled,
     show_control_points: doc.show_control_points,

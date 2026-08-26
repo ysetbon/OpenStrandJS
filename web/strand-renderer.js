@@ -658,6 +658,10 @@ function castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i) 
   let clip = null;              // PASS B clip = ⋃ receiver rendered geometry
   for (let j = 0; j < i; j++) {
     const o = strands[j];
+    // A hidden strand paints nothing, so it receives nothing (Qt
+    // draw_strand_shadow skips hidden receivers, shader_utils.py:623). Absent/
+    // false on every fixture, so the oracle is unchanged.
+    if (o.is_hidden === true) continue;
     // A mask CAN receive a shadow from a higher strand (Qt draw_strand_shadow uses
     // other_stroke_path = get_proper_masked_strand_path when the receiver has
     // get_mask_path, shader_utils.py:718-722). A hidden mask draws nothing so it
@@ -1430,8 +1434,8 @@ window.renderFixture = function (strands, meta) {
   for (let i = 0; i < strands.length; i++) {
     const s = strands[i];
     // Hidden strands do not cast a shadow (Qt draw_strand_shadow early-returns on
-    // is_hidden, shader_utils.py:457). Their body still routes to drawMasked/
-    // drawStrand below, matching the pre-existing (unmeasured) body behavior.
+    // is_hidden, shader_utils.py:457) and paint no body (gated below); they stay
+    // in the array only so masks/has_circles can still resolve them.
     // hide_shadow (OSS 1.109 per-layer "Hide Shadow", shader_utils.py:466): the
     // strand casts nothing but still receives and paints its body normally.
     const casts = shadowEnabled && s.is_hidden !== true && s.hide_shadow !== true;
@@ -1447,6 +1451,10 @@ window.renderFixture = function (strands, meta) {
     }
 
     if (casts) castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i);
+    // Hidden strand: no body (Qt strand.py:2279 / :3019 early-return on
+    // is_hidden). It stays in the array so masks can still resolve it as a
+    // component and has_circles still sees it, exactly like canvas.strands.
+    if (s.is_hidden === true) continue;
     // OSS shadow_only: the strand has already cast its shadow above; suppress its
     // own body/extension paint. Absent/false => normal full body (oracle-safe).
     // (Per-pair visibility/full/subtract overrides are handled inside
@@ -1593,6 +1601,7 @@ function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg, topo) {
   for (let i = 0; i < strands.length; i++) {
     const s = strands[i];
     if (!shouldDraw(s.layer_name)) continue;
+    if (s.is_hidden === true) continue; // same paint gate as renderFixture
     if (s.type === 'MaskedStrand') { drawMasked(s, byLayer, P, enableThird, S); continue; }
     // Apply the cached topology to the strand we are about to draw (the Map holds
     // every non-masked strand's value, computed once per gesture at bake).
