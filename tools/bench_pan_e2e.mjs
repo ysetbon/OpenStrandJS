@@ -92,7 +92,10 @@ const project = SYNTHETIC > 0 ? syntheticProject(SYNTHETIC) : loadProjectJson(FI
 const server = await createServer({
   root,
   configFile: path.join(root, 'vite.config.ts'),
-  server: { port: 5201, open: false, host: '127.0.0.1' },
+  // strictPort so listen() FAILS on a busy 5201 rather than quietly moving to
+  // another port while page.goto below still asks for 5201 — which would time out
+  // in a way that looks like the app failing to boot.
+  server: { port: 5201, strictPort: true, open: false, host: '127.0.0.1' },
   logLevel: 'error',
 });
 await server.listen();

@@ -138,39 +138,44 @@ const M = Number(declared[1]);
 
 const browser = await chromium.launch(
   process.env.OSS_CHROMIUM ? { executablePath: process.env.OSS_CHROMIUM } : {});
-const page = await browser.newPage({ deviceScaleFactor: 1 });
+
 const errs = [];
-page.on('pageerror', (e) => errs.push(String(e)));
-await page.setContent('<!doctype html><html><body><canvas id="c"></canvas></body></html>');
-await page.addScriptTag({ content: paperSrc });
-await page.addScriptTag({ content: rendererSrc });
-await page.waitForFunction(() => typeof window.renderPanFrame === 'function');
-
-// Shared pixel-diff helper, installed in the page. All pixel work happens there:
-// shipping two multi-megabyte buffers per case to node and diffing them here
-// dominated the runtime and told us nothing extra.
-await page.evaluate((visibleDelta) => {
-  window.__diff = (a, b) => {
-    let any = 0, visible = 0, max = 0, first = -1;
-    for (let i = 0; i < a.length; i += 4) {
-      let d = 0;
-      for (let k = 0; k < 4; k++) d = Math.max(d, Math.abs(a[i + k] - b[i + k]));
-      if (d) {
-        any++;
-        if (d > visibleDelta) visible++;
-        if (d > max) max = d;
-        if (first < 0) first = i / 4;
-      }
-    }
-    return { any, visible, max, first, total: a.length / 4 };
-  };
-}, VISIBLE_DELTA);
-
 let failures = 0, cases = 0, refbugs = 0;
 const rows = [];
 let worstAny = 0, worstVisible = 0;
 
+// Everything from the launch on is inside the try, page SETUP included: a
+// setContent or addScriptTag that rejects would otherwise leave the Chromium
+// process running, and a leaked browser on the failure path is the last thing
+// anyone debugging a diff needs.
 try {
+  const page = await browser.newPage({ deviceScaleFactor: 1 });
+  page.on('pageerror', (e) => errs.push(String(e)));
+  await page.setContent('<!doctype html><html><body><canvas id="c"></canvas></body></html>');
+  await page.addScriptTag({ content: paperSrc });
+  await page.addScriptTag({ content: rendererSrc });
+  await page.waitForFunction(() => typeof window.renderPanFrame === 'function');
+
+  // Shared pixel-diff helper, installed in the page. All pixel work happens there:
+  // shipping two multi-megabyte buffers per case to node and diffing them here
+  // dominated the runtime and told us nothing extra.
+  await page.evaluate((visibleDelta) => {
+    window.__diff = (a, b) => {
+      let any = 0, visible = 0, max = 0, first = -1;
+      for (let i = 0; i < a.length; i += 4) {
+        let d = 0;
+        for (let k = 0; k < 4; k++) d = Math.max(d, Math.abs(a[i + k] - b[i + k]));
+        if (d) {
+          any++;
+          if (d > visibleDelta) visible++;
+          if (d > max) max = d;
+          if (first < 0) first = i / 4;
+        }
+      }
+      return { any, visible, max, first, total: a.length / 4 };
+    };
+  }, VISIBLE_DELTA);
+
   // ---- controls ------------------------------------------------------------
   // Neither of these touches paper.js or the renderer. They establish that the
   // measurements below are real (determinism) and that a zero budget is not on
