@@ -5,7 +5,9 @@
 
 import { useEditorStore } from '../store/editorStore';
 import { screenToWorld, worldToScreen } from './viewTransform';
-import { cancelFrameTask, flushFrameTask, requestFrameTask, requestOverlay, requestRender } from '../renderer/renderScheduler';
+import {
+  cancelFrameTask, flushFrameTask, requestFrameTask, requestOverlay, requestRender, setPanGesture,
+} from '../renderer/renderScheduler';
 import { modes } from '../modes';
 import { SelectMode } from '../modes/SelectMode';
 import { addDeletionRect } from '../store/actions';
@@ -60,9 +62,30 @@ export class InteractionHost {
     });
   }
 
+  // Close a pan gesture: clear the local flag, free the snapshot the fast path was
+  // blitting from, and repaint once at full quality.
+  //
+  // The release render is what keeps the RESTING image canonical. Chromium's 2D
+  // rasterizer is not canvas-size invariant (proven in tools/pan_identity.mjs: the
+  // same geometry drawn into a wider canvas and cropped differs by a small number
+  // of pixels), so a frame served by cropping the oversized snapshot is very
+  // slightly not the frame a direct render produces. That is fine while the image
+  // is moving and nothing to leave on screen afterwards. It costs one full render
+  // per gesture — which is exactly what ONE of the ~60 frames of a pan cost before
+  // this path existed, so it is cost-neutral against the old behaviour rather than
+  // a new stall.
+  private endPanGesture(): void {
+    this.panning = false;
+    setPanGesture(false);
+    requestRender();
+  }
+
   detach(): void {
     this.unsubscribeMode();
     this.cancelPendingMove();
+    // Free the snapshot, but do NOT go through endPanGesture: its release render
+    // would be scheduled against a canvas that is being torn down.
+    if (this.panning) { this.panning = false; setPanGesture(false); }
     const el = this.el;
     el.removeEventListener('pointerdown', this.onPointerDown);
     el.removeEventListener('pointermove', this.onPointerMove);
@@ -121,6 +144,8 @@ export class InteractionHost {
       this.panning = true;
       this.panStart = this.toScreen(e);
       this.panOrigin = { x: view.panX, y: view.panY };
+      // Arms the renderer's pan fast path for the duration of the gesture.
+      setPanGesture(true);
       return;
     }
     if (e.button !== 0) return;
@@ -165,9 +190,16 @@ export class InteractionHost {
     this.pending = null;
     if (this.panning) {
       const screen = this.toScreen(e);
+      // Round the gesture delta to whole canvas pixels. This is what lets the pan
+      // fast path serve a frame by blitting its snapshot: at a fractional delta
+      // drawImage would resample (blurry, and no longer the pixels a real render
+      // produces), so the renderer refuses the blit and falls back to a full
+      // rebuild. The cursor is tracked to within half a backing pixel, which is
+      // also how OSS pans — Qt's mousePressEvent/mouseMoveEvent deltas are integer
+      // QPoints (strand_drawing_canvas.py:4432).
       useEditorStore.getState().setView({
-        panX: this.panOrigin.x + (screen.x - this.panStart.x),
-        panY: this.panOrigin.y + (screen.y - this.panStart.y),
+        panX: this.panOrigin.x + Math.round(screen.x - this.panStart.x),
+        panY: this.panOrigin.y + Math.round(screen.y - this.panStart.y),
       });
       // Ask for the repaint here rather than leaving it to CanvasStage's effect
       // on `view`: React commits that effect after this frame, so the pan would
@@ -200,7 +232,7 @@ export class InteractionHost {
     // Land the last reported position before the gesture closes over it.
     flushFrameTask(this.applyMove);
     this.pending = null;
-    if (this.panning) { this.panning = false; return; }
+    if (this.panning) { this.endPanGesture(); return; }
     // Finalize an Edit Mask erase: commit one deletion rectangle (one undo step),
     // OSS mouseReleaseEvent appends to deletion_rectangles + subtracts the path.
     if (this.maskErase) {
@@ -228,7 +260,7 @@ export class InteractionHost {
     // An abort throws the gesture away, so a queued move must NOT be applied —
     // drop it before the mode unwinds.
     this.cancelPendingMove();
-    if (this.panning) { this.panning = false; return; }
+    if (this.panning) { this.endPanGesture(); return; }
     if (this.maskErase) { this.maskErase = null; useEditorStore.getState().setEraser(null); requestOverlay(); return; }
     this.mode().onCancel?.(this.ctx());
   };

@@ -255,21 +255,48 @@ b = await openPage(B.url);
 for (const g of gestures) {
   const ra = await RUN(a.page, project, g);
   const rb = await RUN(b.page, project, g);
+  // The PAN gesture is deliberately no longer bit-identical to the baseline, and
+  // this harness must say so rather than quietly passing or quietly failing.
+  // The pan fast path changes two things on purpose:
+  //   * the gesture delta is rounded to whole canvas pixels, so a frame can be
+  //     served by an exact blit instead of a full rebuild (OSS pans on integer
+  //     QPoint deltas for the same reason). The view therefore lands up to half a
+  //     pixel from where the baseline put it — asserted as a BOUND below.
+  //   * mid-pan frames come from a snapshot, so they are not the byte-identical
+  //     output of a per-frame renderFixture. What they ARE is measured, per fixture
+  //     and per delta, by tools/pan_fidelity.mjs; repeating a strict pixel compare
+  //     here would just restate that measurement as a failure.
+  // Everything else — the document, history, selection — must still match exactly,
+  // and does: panning edits nothing.
+  const viewOk = g.pan
+    ? Math.abs(ra.view.panX - rb.view.panX) <= 0.5
+      && Math.abs(ra.view.panY - rb.view.panY) <= 0.5
+      && ra.view.zoom === rb.view.zoom
+    : eq(ra.view, rb.view);
   const checks = [
     ['doc after release', eq(ra.after, rb.after)],
     ['undo doc', eq(ra.undone, rb.undone)],
     ['redo doc', eq(ra.redone, rb.redone)],
     ['history depth', ra.histAfter === rb.histAfter],
     ['selection', eq(ra.selection, rb.selection)],
-    ['view (pan/zoom)', eq(ra.view, rb.view)],
+    [g.pan ? 'view (pan/zoom, <=0.5px)' : 'view (pan/zoom)', viewOk],
     ['pixels after press', eq(ra.afterPress.shot, rb.afterPress.shot)],
-    ['pixels after release', eq(ra.afterShot, rb.afterShot)],
     ['pixels after undo', eq(ra.undoneShot, rb.undoneShot)],
     ['pixels after redo', eq(ra.redoneShot, rb.redoneShot)],
-    ['mid-drag pixels', eq(ra.midShots, rb.midShots)],
     ['mid-drag angle/length read-out', eq(ra.midReadouts, rb.midReadouts)],
+    // Frame content during and after the gesture: exact for every gesture except
+    // pan, where tools/pan_fidelity.mjs owns it (see above).
+    ...(g.pan ? [] : [
+      ['pixels after release', eq(ra.afterShot, rb.afterShot)],
+      ['mid-drag pixels', eq(ra.midShots, rb.midShots)],
+    ]),
   ];
   const bad = checks.filter(([, ok]) => !ok).map(([n]) => n);
+  if (!bad.length && g.pan) {
+    rows.push(`  ok    ${g.id.padEnd(18)} ${checks.length} checks`
+      + ' (frame pixels intentionally excluded — see tools/pan_fidelity.mjs)');
+    continue;
+  }
   if (bad.length) {
     failures++;
     rows.push(`  FAIL  ${g.id.padEnd(18)} ${bad.join(', ')}`);
@@ -297,5 +324,6 @@ if (failures || bErrs) {
   console.error(`\nFAIL: ${failures} gesture(s) diverged${bErrs ? ` + ${bErrs} page error(s)` : ''}`);
   process.exit(1);
 }
-console.log('PASS: dragging and releasing behaves exactly as before.');
+console.log('PASS: dragging and releasing behaves exactly as before'
+  + (gestures.some((g) => g.pan) ? ', and panning to within the half-pixel it now rounds to.' : '.'));
 process.exit(0);

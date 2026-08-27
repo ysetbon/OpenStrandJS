@@ -344,6 +344,10 @@ export interface RenderMeta {
   // bakes everything EXCEPT these once, and renderDragFrame draws only these over
   // the bake each frame. Absent => normal full render.
   drag?: { moving: string[] };
+  // LIVE EDITOR ONLY. Redirects renderFixture's output to this canvas instead of
+  // the visible #c. The pan fast path uses it to take its oversized snapshot
+  // offscreen without disturbing what is on screen. Absent everywhere else.
+  target?: HTMLCanvasElement;
   // LIVE EDITOR ONLY (the offline oracle never sets this). When true, the ss×
   // supersampled offscreen is downscaled with the browser's native high-quality
   // filter (a fast GPU blit) instead of the exact-but-slow JS box-average loop the

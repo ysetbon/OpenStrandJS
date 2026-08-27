@@ -4,7 +4,10 @@
 // pixel-aligned.
 
 import { useEditorStore } from '../store/editorStore';
-import { callRender, callRenderDragBackground, callRenderDragFrame, callEndDrag } from './rendererBridge';
+import {
+  callRender, callRenderDragBackground, callRenderDragFrame, callEndDrag,
+  callRenderPanBackground, callRenderPanFrame, callEndPan,
+} from './rendererBridge';
 import { buildMeta, toRenderArray } from './toRenderArray';
 
 // Pending work for the coalescing rAF: 0 = idle, 1 = overlay-only, 2 = full
@@ -31,6 +34,44 @@ let bakedKey: string | null = null;
 // untouched, and PNG export can request ss2 explicitly. Bump to 2 to trade
 // responsiveness for crisper on-screen anti-aliasing.
 const EDITOR_SUPERSAMPLE = 1;
+// ---- pan gesture state --------------------------------------------------------
+// True between pan pointer-down and pointer-up. Deliberately NOT in the zustand
+// store: it is read only here, and putting it in the store would spend a React
+// commit on each end of every pan for nothing.
+let panGesture = false;
+// What the live pan snapshot was taken for — every renderNow input EXCEPT the pan
+// offset, which is the one thing the snapshot is allowed to differ in. `doc` is
+// compared by identity AND revision because mutateDocLive edits the document in
+// place, leaving the reference unchanged.
+type PanSig = {
+  doc: unknown; docRevision: number; settings: unknown; shadowPaths: unknown;
+  highlight: string | null; zoom: number; w: number; h: number; ss: number;
+};
+let panSig: PanSig | null = null;
+
+function samePanSig(a: PanSig | null, b: PanSig): boolean {
+  return !!a && a.doc === b.doc && a.docRevision === b.docRevision
+    && a.settings === b.settings && a.shadowPaths === b.shadowPaths
+    && a.highlight === b.highlight && a.zoom === b.zoom
+    && a.w === b.w && a.h === b.h && a.ss === b.ss;
+}
+
+// Unconditional: panSig can be null while the renderer still holds a snapshot (a
+// renderPanBackground that succeeded followed by a refused blit), and callEndPan is
+// idempotent, so gating this on panSig would be the one way to leak the bitmap.
+function dropPanSnapshot(): void {
+  panSig = null;
+  callEndPan();
+}
+
+// Called by InteractionHost around a pan gesture. Ending one frees the snapshot
+// (several megabytes) rather than holding it against a possible next pan, which
+// could also mean serving that pan from a pre-edit scene.
+export function setPanGesture(on: boolean): void {
+  panGesture = on;
+  if (!on) dropPanSnapshot();
+}
+
 let overlayCanvas: HTMLCanvasElement | null = null;
 let overlayDraw: ((ctx: CanvasRenderingContext2D) => void) | null = null;
 
@@ -145,7 +186,7 @@ export function requestRender(): void {
 // caller's job — schedule() always runs syncOverlay after this.
 function renderNow(): void {
   const {
-    doc, view, settings, dragging, dragMoving, selection, mode, visibleShadowPaths,
+    doc, docRevision, view, settings, dragging, dragMoving, selection, mode, visibleShadowPaths,
   } = useEditorStore.getState();
   try {
     // During an endpoint drag, highlight every strand that moves with the
@@ -158,6 +199,40 @@ function renderNow(): void {
     // without clearing the selection, so it reappears on leaving view mode.
     const highlightLayer = mode === 'view' && settings.view_hide_highlight ? null : selection.layerName;
     const arr = toRenderArray(doc, highlightLayer, highlightSet);
+    if (panGesture && !dragging) {
+      // PAN FAST-PATH. A pan moves no document coordinate — only x_offset/y_offset,
+      // which renderFixture folds into every point — so before this path every pan
+      // frame rebuilt the whole scene (measured ~1.2 s/frame on three_strand_braid).
+      // renderPanBackground takes ONE oversized render and renderPanFrame blits the
+      // matching sub-rectangle each frame; tools/pan_identity.mjs proves that
+      // sub-rectangle is pixel-identical to the full render it replaces, so this is
+      // a pure speedup with no change to what is drawn.
+      const meta = {
+        ...buildMeta(doc, view, settings, visibleShadowPaths),
+        supersample: EDITOR_SUPERSAMPLE,
+      };
+      const sig: PanSig = {
+        doc, docRevision, settings, shadowPaths: visibleShadowPaths,
+        highlight: highlightLayer, zoom: meta.zoom ?? 1,
+        w: meta.image_width, h: meta.image_height, ss: EDITOR_SUPERSAMPLE,
+      };
+      if (dragBaked) { callEndDrag(); dragBaked = false; bakedKey = null; }
+      // Order matters: when the signature changed, the live snapshot is for a
+      // different scene, so it must NOT be blitted first — && short-circuits past
+      // callRenderPanFrame straight to the re-snapshot.
+      if (!samePanSig(panSig, sig) || !callRenderPanFrame(meta)) {
+        panSig = null;
+        if (callRenderPanBackground(arr, meta) && callRenderPanFrame(meta)) {
+          panSig = sig;
+        } else {
+          // Renderer without the pan entry points: the old full-render behaviour,
+          // which is exactly what this path optimizes rather than replaces.
+          callEndPan();
+          callRender(arr, meta);
+        }
+      }
+      return;
+    }
     if (dragging && dragMoving.length) {
       // DRAG FAST-PATH (mirrors the original's draw-only-affected-strand path).
       // Render at native resolution with shadows off: bake every STATIC strand
@@ -204,6 +279,7 @@ function renderNow(): void {
       // ~30ms instead of the ~260ms a full ss2 render costs, so pointer-up no
       // longer hangs. Drop any drag background first so the next gesture re-bakes.
       if (dragBaked) { callEndDrag(); dragBaked = false; bakedKey = null; }
+      dropPanSnapshot();   // e.g. an undo landing while a pan snapshot is still live
       callRender(arr, {
         ...buildMeta(doc, view, settings, visibleShadowPaths),
         supersample: EDITOR_SUPERSAMPLE,

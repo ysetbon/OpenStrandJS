@@ -2045,7 +2045,11 @@ window.renderFixture = function (strands, meta) {
 
   paper.view.update();
 
-  const vis = document.getElementById('c');
+  // Normally the visible canvas. `meta.target` lets a caller receive the render
+  // into its own canvas instead — used by the pan fast path to take one OVERSIZED
+  // snapshot offscreen without disturbing what is currently on screen. Absent for
+  // every other caller (the fidelity oracle included), so this is inert there.
+  const vis = meta.target || document.getElementById('c');
   vis.width = W;
   vis.height = H;
   vis.style.width = W + 'px';
@@ -2387,6 +2391,103 @@ window.endDrag = function () {
   DRAG_BG = null;
   if (DRAG_MV_PROJECT) { DRAG_MV_PROJECT.remove(); DRAG_MV_PROJECT = null; }
 };
+
+// ---- pan fast path ------------------------------------------------------------
+// A pan changes NO document coordinate. The only thing that moves is
+// meta.x_offset / meta.y_offset — which renderFixture folds into every point via
+// P(pt) = pt * S + o * ss. That is exactly why panning was the slowest gesture in
+// the editor: the offsets are baked into the geometry, so every pan frame rebuilt
+// every body outline, every stroked outline, every mask boolean union and every
+// shadow region from raw points, at O(all strands). Measured at ~1.2 s/frame on
+// three_strand_braid.
+//
+// But since the offsets enter as a PURE TRANSLATION, one render taken on an
+// OVERSIZED canvas — the viewport grown by PAN_MARGIN on all four sides, with the
+// offsets grown to match — contains, as an exact sub-rectangle, the render for
+// every offset within +/- PAN_MARGIN of it. So a whole pan gesture is served by
+// one render plus a drawImage per frame.
+//
+// Two conditions make that sub-rectangle EXACT rather than approximate, and both
+// are enforced below by refusing the blit rather than by hoping:
+//   * the delta must be a whole number of canvas pixels, or drawImage resamples
+//     (blurry, and no longer the pixels a real render would produce). The pan
+//     handler quantizes the gesture delta to whole pixels for this reason.
+//   * the delta must stay inside the margin, or the read runs off the snapshot
+//     and exposes blank canvas at the leading edge.
+// When either fails the caller re-snapshots at the current offset — one slow
+// frame, then the next PAN_MARGIN px of travel are free again.
+//
+// tools/pan_identity.mjs proves the crop is pixel-identical to a direct render,
+// per fixture and per delta. It is the whole basis for this path being a pure
+// speedup and not a rendering change.
+let PAN_SNAP = null; // { canvas, M, W, H, ox, oy, zoom }
+
+// Backing pixels of slack rendered beyond each edge of the viewport. Larger =
+// fewer re-snapshots over a long pan, at the cost of a bigger snapshot render
+// (cost grows with area, but only in rasterization — the geometry work, which
+// dominates, is identical because the same strands are built either way).
+const PAN_MARGIN = 320;
+
+// Take the oversized snapshot the rest of the gesture blits from. `strands` and
+// `meta` are exactly what a full render would have received this frame, so the
+// snapshot is the real thing, shadows and all — not a reduced-quality preview.
+window.renderPanBackground = function (strands, meta) {
+  const W = meta.image_width, H = meta.image_height;
+  const M = PAN_MARGIN;
+  // Reuse the canvas object across re-snapshots within a gesture; renderFixture
+  // assigns .width/.height itself, which reallocates and clears it.
+  const c = (PAN_SNAP && PAN_SNAP.canvas) || document.createElement('canvas');
+  PAN_SNAP = null; // don't leave a stale snapshot live if the render throws
+  window.renderFixture(strands, {
+    ...meta,
+    image_width: W + 2 * M,
+    image_height: H + 2 * M,
+    x_offset: meta.x_offset + M,
+    y_offset: meta.y_offset + M,
+    target: c,
+  });
+  PAN_SNAP = { canvas: c, M, W, H, ox: meta.x_offset, oy: meta.y_offset, zoom: meta.zoom || 1 };
+  return { snapped: true, w: c.width, h: c.height };
+};
+
+// One pan frame: blit the snapshot at the current offset. Returns null when the
+// live snapshot cannot serve this offset exactly — the caller must then re-snapshot
+// rather than draw something approximate.
+window.renderPanFrame = function (meta) {
+  const S = PAN_SNAP;
+  if (!S) return null;
+  const W = meta.image_width, H = meta.image_height;
+  if (S.W !== W || S.H !== H || S.zoom !== (meta.zoom || 1)) return null;
+  // Both guards below are correctness, not optimization — see the header above.
+  // The delta is compared against the nearest integer rather than tested with
+  // Number.isInteger: the pan handler adds a whole number of pixels to a base that
+  // is usually fractional (zoom-to-cursor leaves panX fractional), and
+  // (o + 1) - (o + 0) is not exactly 1 in floating point. Demanding exactness here
+  // would fail on nearly every frame and silently drop the whole gesture back onto
+  // the slow path. The residue is ~1e-16 px, far below anything rasterization can
+  // resolve, so blitting at the rounded delta draws the same pixels a render at the
+  // true delta would.
+  const rawX = meta.x_offset - S.ox, rawY = meta.y_offset - S.oy;
+  const dx = Math.round(rawX), dy = Math.round(rawY);
+  if (Math.abs(rawX - dx) > 1e-6 || Math.abs(rawY - dy) > 1e-6) return null;
+  if (Math.abs(dx) > S.M || Math.abs(dy) > S.M) return null;
+  const vis = document.getElementById('c');
+  // Writing .width reallocates and clears, so only touch it on a real size change;
+  // the blit below repaints every pixel of the canvas anyway.
+  if (vis.width !== W) vis.width = W;
+  if (vis.height !== H) vis.height = H;
+  const wpx = W + 'px', hpx = H + 'px';
+  if (vis.style.width !== wpx) vis.style.width = wpx;
+  if (vis.style.height !== hpx) vis.style.height = hpx;
+  // Source origin: a world point sits at (p*S + (ox+M)) in the snapshot and at
+  // (p*S + ox + dx) on screen, so screen x maps to snapshot x + M - dx.
+  vis.getContext('2d').drawImage(S.canvas, S.M - dx, S.M - dy, W, H, 0, 0, W, H);
+  return { mode: 'panframe', dx, dy };
+};
+
+// Drop the snapshot at the end of a pan gesture. The canvas is several megabytes,
+// and holding it would also risk serving a later pan from a pre-edit scene.
+window.endPan = function () { PAN_SNAP = null; };
 
 // ---- auto_shadow geometry probe (OSS auto_shadow.py, 1.109) ---------------
 // For each requested {casting, receiving} pair, compute the RAW caster∩receiver
