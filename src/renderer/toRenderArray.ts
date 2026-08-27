@@ -77,6 +77,9 @@ export function toRenderArray(
       arrow_color: (ex.arrow_color as RenderStrand['arrow_color']) ?? null,
       arrow_transparency: ex.arrow_transparency as number | undefined,
       arrow_head_visible: ex.arrow_head_visible as boolean | undefined,
+      // Curvature bias — serialized by OSS under `bias_control`, so it rides the
+      // `extra` bag. The renderer only consults it when the setting is on.
+      bias_control: (ex.bias_control as RenderStrand['bias_control']) ?? null,
     };
     if (s.type === 'MaskedStrand') r.deletion_rectangles = s.deletion_rectangles ?? [];
     out.push(r);
@@ -95,6 +98,12 @@ export function buildMeta(doc: EditorDocument, view: ViewState, settings: Settin
     shadow_enabled: doc.shadow_enabled,
     shadow_overrides: doc.shadow_overrides,
     curve_params: settings.curve_params,
+    // OSS reads both of these off the canvas in _build_curve_profile. Passing them
+    // per render is what makes the two General-page toggles actually change the
+    // drawn curve; previously the third control point was inferred from the data
+    // (so the toggle did nothing) and bias was hardcoded to 0.5.
+    enable_third_control_point: settings.enable_third_control_point,
+    enable_curvature_bias_control: settings.enable_curvature_bias_control,
     // Grid is drawn IN the renderer (behind strands), not on the overlay, so it
     // composites under the bodies like OSS. The oracle builds its own meta and
     // never sets these, so fixtures stay byte-identical.

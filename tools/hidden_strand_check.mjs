@@ -141,7 +141,9 @@ try {
   ok('hiding the mask itself still changes the image', maskHidden.h !== base.h);
 
   console.log(fails ? `\n${fails} FAILURE(S)` : '\nall green');
-  process.exit(fails ? 1 : 0);
+  // exitCode, NOT process.exit(): the latter tears the process down before the
+  // finally block can await browser.close(), orphaning Chromium.
+  process.exitCode = fails ? 1 : 0;
 } finally {
   await browser.close();
   rmSync(outDir, { recursive: true, force: true });

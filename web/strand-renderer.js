@@ -63,12 +63,29 @@ const DRAG_SAMPLE_STEP = 3;
 const SHADOW_COLOR = { r: 0, g: 0, b: 0, a: 150 };
 const MAX_BLUR = 30;
 const NUM_STEPS = 2; // loaded reference setting (user_settings.txt NumSteps:2)
+// Curvature-bias gate (OSS canvas.enable_curvature_bias_control). Module-scoped
+// like CURVE/SHADOW_ENABLED because buildProfile is reached through a dozen
+// buildCenterline call sites. Set from meta at every render entry point; ABSENT
+// => false => bias pinned to 0.5, which is the pre-existing behavior and what
+// the Qt oracle renders (reference_render.py never enables it).
+let BIAS_ENABLED = false;
 let SHADOW_ENABLED = false; // set per-fixture from meta.shadow_enabled
 let SHADOW_PAINT = null;    // paper.Color for shadows (solid-core paint)
 let SHADOW_OVERRIDES = {};  // meta.shadow_overrides, keyed [caster][receiver] (consumed in the Port phase)
 
 // Faithful port of strand.py::_build_curve_profile. Returns {mode, segments}
 // in world coordinates; each segment is a cubic {p0, cp1, cp2, p3}.
+// enable_third_control_point is a USER SETTING in OSS (canvas.enable_third_control_point,
+// read by strand.py::_build_curve_profile), not a property of the data. Take it from
+// meta when the caller supplies it; fall back to inferring it from the strands when
+// absent, because that is exactly what the Qt oracle does
+// (reference_render.py:117-121 "Enable third control point if any strand uses one").
+// So the fidelity path is unchanged and the live editor now honors the toggle.
+function resolveEnableThird(strands, meta) {
+  if (meta && meta.enable_third_control_point != null) return !!meta.enable_third_control_point;
+  return strands.some((s) => s.control_point_center != null);
+}
+
 function buildProfile(s, enableThird) {
   const start = s.start, end = s.end;
   const cps = s.control_points || [];
@@ -77,7 +94,12 @@ function buildProfile(s, enableThird) {
   const base_fraction = CURVE.base_fraction;
   const dist_multiplier = CURVE.dist_multiplier;
   const exponent = CURVE.exponent;
-  const bias_triangle = 0.5, bias_circle = 0.5; // no bias control in fixtures
+  // OSS strand.py::_build_curve_profile reads bias_control.triangle_bias/circle_bias,
+  // but ONLY while canvas.enable_curvature_bias_control is on; otherwise both stay
+  // 0.5. Same gate here, same neutral default.
+  const bc = BIAS_ENABLED ? s.bias_control : null;
+  const bias_triangle = bc && bc.triangle_bias != null ? bc.triangle_bias : 0.5;
+  const bias_circle = bc && bc.circle_bias != null ? bc.circle_bias : 0.5;
 
   const thirdLocked = enableThird && s.control_point_center_locked && s.control_point_center;
 
@@ -1360,7 +1382,8 @@ window.renderFixture = function (strands, meta) {
   // world -> backing: position scaled by S (= ss*zoom), offset by ss. At zoom 1
   // this is exactly (pt + offset) * ss.
   const P = (pt) => new paper.Point(pt.x * S + ox * ss, pt.y * S + oy * ss);
-  const enableThird = strands.some((s) => s.control_point_center != null);
+  const enableThird = resolveEnableThird(strands, meta);
+  BIAS_ENABLED = !!(meta && meta.enable_curvature_bias_control);
 
   // Grid: painted AFTER the white background and BEFORE the strand loop so it
   // composites UNDER the bodies (OSS draws the grid behind the strands; the old
@@ -1559,8 +1582,9 @@ let DRAG_BG = null; // { bands, W, H, ox, oy, zoom, topo }
 // is the per-frame win. Returns { hasCircles: Map<layer_name,[bool,bool]>,
 // byLayer, enableThird }; has_circles is stored in the Map, NOT mutated onto s,
 // so the bake/frame callers apply it only to the strands they actually draw.
-function computeDragTopology(strands) {
-  const enableThird = strands.some((s) => s.control_point_center != null);
+function computeDragTopology(strands, meta) {
+  const enableThird = resolveEnableThird(strands, meta);
+  BIAS_ENABLED = !!(meta && meta.enable_curvature_bias_control);
   const byLayer = {};
   for (const s of strands) byLayer[s.layer_name] = s;
   const hasCircles = new Map();
@@ -1595,8 +1619,17 @@ function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg, topo) {
   const ox = meta.x_offset, oy = meta.y_offset;
   // Matches renderFixture's P at ss=1: P(pt) = pt*S + offset.
   const P = (pt) => new paper.Point(pt.x * S + ox, pt.y * S + oy);
-  if (!topo) topo = computeDragTopology(strands); // defensive self-contained fallback
-  const { hasCircles, byLayer, enableThird } = topo;
+  if (!topo) topo = computeDragTopology(strands, meta); // defensive self-contained fallback
+  const { hasCircles, enableThird } = topo;
+  // byLayer is a GEOMETRY lookup, not topology, so it must be rebuilt from THIS
+  // frame's array. Taking it from the bake (as hasCircles/enableThird correctly do)
+  // froze every mask at its pointer-down shape: drawMasked resolves a mask's two
+  // components through byLayer, and the store hands the renderer freshly cloned
+  // strand objects each frame, so a mask whose component was being dragged kept
+  // rendering the intersection computed from pre-drag positions until pointer-up.
+  const byLayer = {};
+  for (const s of strands) byLayer[s.layer_name] = s;
+  BIAS_ENABLED = !!(meta && meta.enable_curvature_bias_control);
   SHADOW_ENABLED = false; // no shadows while dragging (restored by renderFixture on release)
   for (let i = 0; i < strands.length; i++) {
     const s = strands[i];
@@ -1624,7 +1657,7 @@ function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg, topo) {
 window.renderDragBackground = function (strands, meta) {
   const W = meta.image_width, H = meta.image_height;
   const moving = new Set((meta.drag && meta.drag.moving) || []);
-  const topo = computeDragTopology(strands);
+  const topo = computeDragTopology(strands, meta);
   // Partition strands into ordered segments: maximal runs of static strands
   // alternating with the moving-set slots. A MaskedStrand whose components move is
   // already in the moving set (movingStrandSet), so testing layer membership is
@@ -1742,7 +1775,8 @@ window.computeShadowPairAreas = function (strands, meta, pairs) {
 
   const ox = meta.x_offset || 0, oy = meta.y_offset || 0;
   const P = (pt) => new paper.Point(pt.x * S + ox * ss, pt.y * S + oy * ss);
-  const enableThird = strands.some((s) => s.control_point_center != null);
+  const enableThird = resolveEnableThird(strands, meta);
+  BIAS_ENABLED = !!(meta && meta.enable_curvature_bias_control);
 
   const byLayer = {};
   for (const s of strands) byLayer[s.layer_name] = s;

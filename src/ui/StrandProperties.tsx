@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
-import { moveHandle, resetMask, setColor, setShadowOnly, setWidth } from '../store/actions';
+import { resetMask, setColor, setShadowOnly, setStrandAngleLength, setWidth } from '../store/actions';
 import { ColorField } from './ColorField';
 
 // Editor for the selected strand: fill/stroke color (RGBA), width + stroke width,
@@ -9,6 +9,9 @@ export function StrandProperties() {
   const name = useEditorStore((s) => s.selection.layerName);
   const strand = useEditorStore((s) => (name ? s.doc.strands[name] : null));
   const commitEdit = useEditorStore((s) => s.commitEdit);
+  // Threaded into the angle/length edit so a mask built on this strand drifts
+  // its deletion rectangles with the same centroid rule a drag uses.
+  const curve = useEditorStore((s) => s.settings.curve_params);
   const [wholeSet, setWholeSet] = useState(false);
 
   if (!name || !strand) return <div className="props empty">Select a strand to edit its color &amp; width.</div>;
@@ -23,17 +26,16 @@ export function StrandProperties() {
     );
   }
 
-  // Angle/Length: rotate the end around the start (length preserved when only
-  // the angle changes). Routed through moveHandle so attached children follow.
+  // Angle/Length: pivot on the start. Routed through setStrandAngleLength, which
+  // rotates and scales the control points with the endpoint the way OSS
+  // AngleAdjustMode does, so a curved strand rotates instead of deforming — and
+  // which goes on to moveHandle, so attached children still follow.
   const dx = strand.end.x - strand.start.x;
   const dy = strand.end.y - strand.start.y;
   const angle = Math.round(Math.atan2(dy, dx) * 180 / Math.PI);
   const length = Math.round(Math.hypot(dx, dy));
-  const setAngleLen = (angDeg: number, len: number) => {
-    const rad = (angDeg * Math.PI) / 180;
-    const end = { x: strand.start.x + len * Math.cos(rad), y: strand.start.y + len * Math.sin(rad) };
-    commitEdit((d) => moveHandle(d, name, 'end', end));
-  };
+  const setAngleLen = (angDeg: number, len: number) =>
+    commitEdit((d) => setStrandAngleLength(d, name, angDeg, len, curve));
 
   return (
     <div className="props">
