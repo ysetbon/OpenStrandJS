@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import {
   toggleHidden, setShadowOnly, setHideShadow, setColor,
-  resetMask, setCircleStrokeColor, toggleCircleVisible, toggleLineVisible, closeKnot,
+  resetMask, setCircleStrokeColor, setEndCircleStrokeColor, toggleCircleVisible, toggleLineVisible,
+  toggleExtensionVisible, closeKnot,
   toggleLock, toggleArrowVisible,
 } from '../store/actions';
 import { maskComponents } from '../model/layerName';
@@ -10,6 +11,7 @@ import type { RGBA } from '../model/types';
 import { ContextMenu, type MenuItem, type MenuRowButton } from './ContextMenu';
 import { StrandShadowEditorDialog } from './dialogs/StrandShadowEditorDialog';
 import { WidthConfigDialog } from './dialogs/WidthConfigDialog';
+import { ArrowCustomizeDialog } from './dialogs/ArrowCustomizeDialog';
 import {
   COPY_PROPERTIES, clipboardPropertyCount, pasteStrandData, snapshotStrandData,
   type CopyProperty,
@@ -148,11 +150,16 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
   const [shadowEditor, setShadowEditor] = useState(false);
   // Which Change Width variant is open (null = closed).
   const [widthDialog, setWidthDialog] = useState<{ wholeSet: boolean } | null>(null);
+  const [arrowDialog, setArrowDialog] = useState(false);
   const [copyPanel, setCopyPanel] = useState(false);
   const [badgeMenu, setBadgeMenu] = useState<{ x: number; y: number } | null>(null);
   const strandClipboard = useEditorStore((s) => s.strandClipboard);
   const setStrandClipboard = useEditorStore((s) => s.setStrandClipboard);
-  const [colorPick, setColorPick] = useState<'fill' | 'stroke' | null>(null);
+  // Which colour action is open: the channel plus its SCOPE. OSS has four
+  // separate handlers — change_color / change_stroke_color are set-wide, and
+  // 1.110 added change_layer_color / change_layer_stroke_color for this layer
+  // alone (numbered_layer_button.py:2833, 3289, 3339, 3376).
+  const [colorPick, setColorPick] = useState<{ kind: 'fill' | 'stroke'; wholeSet: boolean } | null>(null);
   const colorInputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -186,12 +193,10 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
   };
   // Edit Mask -> enter the per-mask deletion-rectangle erase session for this mask.
   const doEditMask = () => enterMaskEdit(name);
-  const applyColor = (kind: 'fill' | 'stroke', hex: string) => {
+  const applyColor = (kind: 'fill' | 'stroke', wholeSet: boolean, hex: string) => {
     const prev = kind === 'fill' ? strand?.color : strand?.stroke_color;
     const rgba = hexToRgba(hex, prev);
-    // Change Color (fill) propagates over the whole set; Change Stroke Color is
-    // this-strand-only (numbered_layer_button.py change_color vs change_stroke_color).
-    commitEdit((d) => setColor(d, name, kind, rgba, kind === 'fill'));
+    commitEdit((d) => setColor(d, name, kind, rgba, wholeSet));
   };
 
   // OSS WidthConfigDialog (numbered_layer_button.py:3892-4400). wholeSet -> the
@@ -318,8 +323,14 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
     // ---- regular / attached strand branch ----
     const isAttached = strand?.type === 'AttachedStrand';
     items.push(
-      { label: t('change_color', lang), onClick: () => setColorPick('fill') },
-      { label: t('change_stroke_color', lang), onClick: () => setColorPick('stroke') },
+      // OSS order: set-wide then this-layer-only, for fill, then stroke, then
+      // width (numbered_layer_button.py:854-909).
+      { label: t('change_color', lang), onClick: () => setColorPick({ kind: 'fill', wholeSet: true }) },
+      { label: t('change_layer_color', lang), onClick: () => setColorPick({ kind: 'fill', wholeSet: false }) },
+      // change_stroke_color is documented "the stroke color of every strand in the
+      // clicked strand's set" (:3290) — it is NOT this-strand-only.
+      { label: t('change_stroke_color', lang), onClick: () => setColorPick({ kind: 'stroke', wholeSet: true }) },
+      { label: t('change_layer_stroke_color', lang), onClick: () => setColorPick({ kind: 'stroke', wholeSet: false }) },
       { label: t('change_width', lang), onClick: () => doChangeWidth(true) },
       { label: t('change_layer_width', lang), onClick: () => doChangeWidth(false) },
       { label: '', separator: true },
@@ -348,6 +359,30 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
       }
     }
 
+    // Closing-knot END edge (numbered_layer_button.py:1410-1453). The END-edge twin
+    // of the start item above, but gated differently: it appears only once the end
+    // carries a CLOSED connection, and OSS precedes it with a separator. For an
+    // AttachedStrand either slot counts, because its free end is not always index 1.
+    {
+      const closed = strand?.extra?.closed_connections as [boolean, boolean] | undefined;
+      const hasClosedEnding = !!closed && (isAttached ? (closed[1] || closed[0]) : closed[1]);
+      if (hasClosedEnding) {
+        const endStroke = (strand?.extra?.end_circle_stroke_color as { a?: number } | undefined)
+          ?? strand?.circle_stroke_color;
+        const transparent = (endStroke?.a ?? 255) === 0;
+        items.push({ label: '', separator: true });
+        items.push(transparent
+          ? {
+            label: t('restore_default_closing_knot_stroke', lang),
+            onClick: () => commitEdit((d) => setEndCircleStrokeColor(d, name, { r: 0, g: 0, b: 0, a: 255 })),
+          }
+          : {
+            label: t('transparent_closing_knot_side', lang),
+            onClick: () => commitEdit((d) => setEndCircleStrokeColor(d, name, { r: 0, g: 0, b: 0, a: 0 })),
+          });
+      }
+    }
+
     // ---- Line group (start/end side-line visibility) ----
     // OSS renders this as one compound row: a "Line" label + inline Start/End
     // buttons (numbered_layer_button.py:820+). Rendered via ContextMenu's
@@ -370,6 +405,31 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
       });
       items.push({ label: '', separator: true });
       items.push({ label: '', rowLabel: t('line', lang), buttons });
+    }
+
+    // ---- Extension group (dashed start/end extension lines) ----
+    // OSS compound row: an "extension" label + inline Start/End toggles
+    // (numbered_layer_button.py:1457-1490). Unlike the Line group above there is no
+    // gate: start/end_extension_visible are initialized on EVERY Strand
+    // (strand.py:94-95), so the row always shows for a regular or attached layer.
+    {
+      const startExt = strand?.extra?.start_extension_visible === true;
+      const endExt = strand?.extra?.end_extension_visible === true;
+      items.push({ label: '', separator: true });
+      items.push({
+        label: '',
+        rowLabel: t('extension', lang),
+        buttons: [
+          {
+            label: startExt ? t('hide_start_extension', lang) : t('show_start_extension', lang),
+            onClick: () => commitEdit((d) => toggleExtensionVisible(d, name, 'start')),
+          },
+          {
+            label: endExt ? t('hide_end_extension', lang) : t('show_end_extension', lang),
+            onClick: () => commitEdit((d) => toggleExtensionVisible(d, name, 'end')),
+          },
+        ],
+      });
     }
 
     // ---- Circle group (start/end circle visibility) ----
@@ -422,6 +482,13 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
         label: fullArrow ? t('hide_full_arrow', lang) : t('show_full_arrow', lang),
         onClick: () => commitEdit((d) => toggleArrowVisible(d, name, 'full')),
       });
+      // OSS shows the customization panel ONLY while the full arrow is visible
+      // (numbered_layer_button.py:1093), because these settings drive that arrow
+      // alone. Same gate here; the panel itself is a dialog (see the file header).
+      if (fullArrow) {
+        items.push({ label: '', separator: true });
+        items.push({ label: t('arrow_customization', lang), onClick: () => setArrowDialog(true) });
+      }
     }
 
     // ---- Close the Knot (exactly one free end) ----
@@ -577,8 +644,8 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
         ref={colorInputRef}
         type="color"
         className="nlb-color-input"
-        defaultValue={rgbaToHex(colorPick === 'stroke' ? strand?.stroke_color : strand?.color)}
-        onChange={(e) => { if (colorPick) applyColor(colorPick, e.target.value); }}
+        defaultValue={rgbaToHex(colorPick?.kind === 'stroke' ? strand?.stroke_color : strand?.color)}
+        onChange={(e) => { if (colorPick) applyColor(colorPick.kind, colorPick.wholeSet, e.target.value); }}
         onBlur={() => setColorPick(null)}
       />
 
@@ -601,6 +668,10 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
           wholeSet={widthDialog.wholeSet}
           onClose={() => setWidthDialog(null)}
         />
+      )}
+
+      {arrowDialog && (
+        <ArrowCustomizeDialog layerName={name} onClose={() => setArrowDialog(false)} />
       )}
 
       {/* Copy-badge popup: clipboard hint + Clear (show_strand_data_badge_popup). */}

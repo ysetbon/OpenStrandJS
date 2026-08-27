@@ -80,6 +80,13 @@ export function toRenderArray(
       // Curvature bias — serialized by OSS under `bias_control`, so it rides the
       // `extra` bag. The renderer only consults it when the setting is on.
       bias_control: (ex.bias_control as RenderStrand['bias_control']) ?? null,
+      // Dashed extension rays (1.110 §extension). Per-strand booleans in `extra`,
+      // default false on every OSS Strand.
+      start_extension_visible: ex.start_extension_visible as boolean | undefined,
+      end_extension_visible: ex.end_extension_visible as boolean | undefined,
+      arrow_texture: ex.arrow_texture as RenderStrand['arrow_texture'],
+      arrow_shaft_style: ex.arrow_shaft_style as RenderStrand['arrow_shaft_style'],
+      arrow_casts_shadow: ex.arrow_casts_shadow as boolean | undefined,
     };
     if (s.type === 'MaskedStrand') r.deletion_rectangles = s.deletion_rectangles ?? [];
     out.push(r);
@@ -124,6 +131,17 @@ export function buildMeta(doc: EditorDocument, view: ViewState, settings: Settin
       line_length: settings.arrow_line_length,
       line_width: settings.arrow_line_width,
     },
+    // The four extension-line settings. These had no consumer at all before the
+    // rays landed — Tier 3 wired every other Layer-Panel setting and left these,
+    // because there was no geometry for them to drive.
+    extension_params: {
+      length: settings.extension_length,
+      dash_count: settings.extension_dash_count,
+      dash_width: settings.extension_dash_width,
+      dash_gap_length: settings.extension_dash_gap_length,
+    },
+    use_default_arrow_color: settings.use_default_arrow_color,
+    default_arrow_fill_color: settings.default_arrow_fill_color,
     // Grid is drawn IN the renderer (behind strands), not on the overlay, so it
     // composites under the bodies like OSS. The oracle builds its own meta and
     // never sets these, so fixtures stay byte-identical.
