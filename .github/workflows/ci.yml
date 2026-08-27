@@ -2,10 +2,11 @@
 #
 # The full pixel-fidelity harness (npm run prove) needs the Qt reference app
 # and can't run on a hosted runner, so CI covers everything that CAN run
-# headlessly: the TypeScript typecheck, the production editor build, and the
-# Chromium smoke tests in tools/ci_smoke.mjs (fixtures render non-empty, the
-# built editor boots without page errors). Rendered PNGs are uploaded as a
-# workflow artifact so reviewers can eyeball what a PR draws.
+# headlessly: the TypeScript typecheck, the production editor build, the
+# behavioural regression guards in tools/*_check.mjs, and the Chromium smoke
+# tests in tools/ci_smoke.mjs (fixtures render non-empty, the built editor boots
+# without page errors). Rendered PNGs are uploaded as a workflow artifact so
+# reviewers can eyeball what a PR draws.
 name: CI
 
 on:
@@ -16,6 +17,13 @@ on:
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+# Least privilege: both jobs only check out, build, run checks and upload
+# artifacts. Nothing here writes to the repository or calls the API, and
+# actions/upload-artifact authenticates with the runtime token rather than
+# GITHUB_TOKEN, so read access to contents is the whole requirement.
+permissions:
+  contents: read
 
 jobs:
   typecheck:
@@ -29,6 +37,16 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+
+      # Regression guards for the ported behaviour. These compile the modules
+      # under test with the repo's own tsc and need no browser, so they belong
+      # with the typecheck. Each assertion is written to FAIL if its fix is
+      # reverted (see the header comment in each tool).
+      - name: Guards — angle/length edit geometry
+        run: node tools/angle_edit_check.mjs
+
+      - name: Guards — rotate, angle dialog, renderer settings
+        run: node tools/tier3_check.mjs
 
   build-and-smoke:
     name: Build editor + headless smoke
@@ -57,6 +75,17 @@ jobs:
           fixtures/overhand_knot.json
           fixtures/attached_90.json
           fixtures/mask_receiver.json
+
+      # The other two guards drive the real renderer in Chromium, so they run
+      # here rather than in the typecheck job.
+      - name: Guards — hidden strands stay in the render array
+        run: node tools/hidden_strand_check.mjs
+
+      - name: Guards — drag masks, third control point, curvature bias
+        run: node tools/curve_and_mask_check.mjs
+
+      - name: Guards — rotate / angle dialog / width dialog reach the canvas
+        run: node tools/tier3_ui_check.mjs dist-editor
 
       - name: Editor smoke — built app boots cleanly
         run: node tools/ci_smoke.mjs editor dist-editor

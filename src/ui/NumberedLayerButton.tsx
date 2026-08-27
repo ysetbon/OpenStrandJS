@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import {
-  toggleHidden, setShadowOnly, setHideShadow, setColor, setWidth, setWidthGridUnits,
+  toggleHidden, setShadowOnly, setHideShadow, setColor,
   resetMask, setCircleStrokeColor, toggleCircleVisible, toggleLineVisible, closeKnot,
   toggleLock, toggleArrowVisible,
 } from '../store/actions';
@@ -9,6 +9,7 @@ import { maskComponents } from '../model/layerName';
 import type { RGBA } from '../model/types';
 import { ContextMenu, type MenuItem, type MenuRowButton } from './ContextMenu';
 import { StrandShadowEditorDialog } from './dialogs/StrandShadowEditorDialog';
+import { WidthConfigDialog } from './dialogs/WidthConfigDialog';
 import {
   COPY_PROPERTIES, clipboardPropertyCount, pasteStrandData, snapshotStrandData,
   type CopyProperty,
@@ -97,9 +98,6 @@ function qtDarker(c: RGBA | undefined | null, factor = 200): string {
   return `rgba(${r}, ${g}, ${b}, ${a})`;
 }
 
-// WidthConfigDialog constants (numbered_layer_button.py:3098-3102).
-const GRID_UNIT = 27;
-
 export interface NumberedLayerButtonProps {
   name: string;
   orderIdx: number;
@@ -148,6 +146,8 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
 
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [shadowEditor, setShadowEditor] = useState(false);
+  // Which Change Width variant is open (null = closed).
+  const [widthDialog, setWidthDialog] = useState<{ wholeSet: boolean } | null>(null);
   const [copyPanel, setCopyPanel] = useState(false);
   const [badgeMenu, setBadgeMenu] = useState<{ x: number; y: number } | null>(null);
   const strandClipboard = useEditorStore((s) => s.strandClipboard);
@@ -194,31 +194,12 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
     commitEdit((d) => setColor(d, name, kind, rgba, kind === 'fill'));
   };
 
-  // OSS WidthConfigDialog: total thickness conserved; the slider redistributes
-  // color vs stroke. total = squares*27, stroke clamped to [1, total/2], color =
-  // total - 2*stroke. wholeSet -> Change Width (whole set); else Change Width
-  // (This Layer Only). (numbered_layer_button.py:2698-2799, 3098-3396)
-  // TODO(oss-fidelity): WidthConfigDialog slider redistribution — using prompt
-  // for the grid-square count.
+  // OSS WidthConfigDialog (numbered_layer_button.py:3892-4400). wholeSet -> the
+  // set-wide "Change Width"; else "Change Width (This Layer Only)". The dialog owns
+  // the arithmetic and the commit; this only records which variant is open.
   const doChangeWidth = (wholeSet: boolean) => {
     if (!strand) return;
-    const curUnits = typeof strand.extra.width_in_grid_units === 'number'
-      ? (strand.extra.width_in_grid_units as number)
-      : Math.max(0.5, Math.round(((strand.width + 2 * strand.stroke_width) / GRID_UNIT) * 10) / 10);
-    const raw = window.prompt(t('change_width', lang), String(curUnits));
-    if (raw == null) return;
-    let squares = Number(raw);
-    if (!Number.isFinite(squares)) return;
-    if (squares < 0.5) squares = 0.5;
-    const total = squares * GRID_UNIT;
-    const maxStroke = Math.max(1, Math.floor(total / 2));
-    const stroke = Math.max(1, Math.min(maxStroke, Math.round(strand.stroke_width)));
-    const colorWidth = Math.max(0, total - 2 * stroke);
-    commitEdit((d) => {
-      setWidth(d, name, 'width', colorWidth, wholeSet);
-      setWidth(d, name, 'stroke_width', stroke, wholeSet);
-      setWidthGridUnits(d, name, squares, wholeSet);
-    });
+    setWidthDialog({ wholeSet });
   };
 
   // ---- Copy/Paste Strand Data (1.109 strand_data_menu.py) ----
@@ -612,6 +593,14 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
 
       {shadowEditor && (
         <StrandShadowEditorDialog layerName={name} onClose={() => setShadowEditor(false)} />
+      )}
+
+      {widthDialog && (
+        <WidthConfigDialog
+          layerName={name}
+          wholeSet={widthDialog.wholeSet}
+          onClose={() => setWidthDialog(null)}
+        />
       )}
 
       {/* Copy-badge popup: clipboard hint + Clear (show_strand_data_badge_popup). */}

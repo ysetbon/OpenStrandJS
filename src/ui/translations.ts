@@ -103,6 +103,7 @@ export const STRINGS: Record<string, Entry> = {
   cancel: { en: 'Cancel', fr: 'Annuler', de: 'Abbrechen', it: 'Annulla', es: 'Cancelar', pt: 'Cancelar', he: 'ביטול' },
   x_movement: { en: 'X Movement', fr: 'Mouvement X', de: 'X-Bewegung', it: 'Movimento X', es: 'Movimiento X', pt: 'Movimento X', he: 'תנועת X' },
   y_movement: { en: 'Y Movement', fr: 'Mouvement Y', de: 'Y-Bewegung', it: 'Movimento Y', es: 'Movimiento Y', pt: 'Movimento Y', he: 'תנועת Y' },
+  adjust_angle_and_length: { en: 'Adjust Angle and Length', fr: `Ajust. Angle`, de: 'Winkel/Länge anpassen', it: 'Regola Ang.', es: 'Ajust. Áng.', pt: 'Ajust. Âng.', he: 'התאם זווית ואורך' },
   angle_label: { en: 'Angle:', fr: 'Angle :', de: 'Winkel:', it: 'Angolo:', es: 'Ángulo:', pt: 'Ângulo:', he: 'זווית:' },
   length_label: { en: 'Length:', fr: 'Longueur :', de: 'Länge:', it: 'Lunghezza:', es: 'Longitud:', pt: 'Comprimento:', he: 'אורך:' },
   snap_to_grid: { en: 'Snap to grid', fr: 'Aligner sur la grille', de: 'Am Raster ausrichten', it: 'Aggancia alla griglia', es: 'Ajustar a la cuadrícula', pt: 'Ajustar à grade', he: 'הצמד לרשת' },
@@ -601,6 +602,11 @@ Aviso: Carregar histórico limpará suas etapas atuais de desfazer/refazer.`, he
   color_vs_stroke_label: { en: 'Color vs Stroke Distribution (total thickness fixed):', fr: 'Répartition Couleur / Contour (épaisseur totale fixe):', de: 'Verteilung Farbe vs. Kontur (Gesamtdicke fix):', it: 'Distribuzione Colore vs Contorno (spessore totale fisso):', es: 'Distribución Color vs Contorno (grosor total fijo):', pt: 'Répartition Couleur / Contour (épaisseur totale fixe):', he: 'חלוקת צבע מול קו (העובי הכולל קבוע):' },
   percent_available_color: { en: '% of Available Color Space', fr: `% de l'espace couleur disponible`, de: '% des verfügbaren Farbraums', it: '% dello Spazio Colore Disponibile', es: '% del Espacio de Color Disponible', pt: `% de l'espace couleur disponible`, he: '% מהשטח הזמין לצבע' },
   width_preview_label: { en: 'Total: {total}px | Color: {color}px | Stroke: {stroke}px each side', fr: 'Total : {total}px | Couleur : {color}px | Contour : {stroke}px de chaque côté', de: 'Gesamt: {total}px | Farbe: {color}px | Kontur: {stroke}px je Seite', it: 'Totale: {total}px | Colore: {color}px | Contorno: {stroke}px per lato', es: 'Total: {total}px | Color: {color}px | Contorno: {stroke}px cada lado', pt: 'Total : {total}px | Couleur : {color}px | Contour : {stroke}px de chaque côté', he: 'סה"כ: {total}px | צבע: {color}px | קו: {stroke}px בכל צד' },
+  // pt is French, deliberately: translations.py's `pt` block ends with a duplicate
+  // group of these width-dialog keys holding the French strings (:3505-3511), and a
+  // Python dict literal keeps the LAST value — so that is what the desktop app shows.
+  // The neighbouring pt entries already follow the same effective values.
+  stroke_pixels_label: { en: 'px stroke (each side)', fr: `px contour (chaque côté)`, de: 'px Kontur (je Seite)', it: 'px contorno (per lato)', es: 'px contorno (cada lado)', pt: `px contour (chaque côté)`, he: 'px קו (בכל צד)' },
   add_to_custom_colors: { en: 'Add to Custom Colors', fr: 'Ajouter aux couleurs personnalisées', de: 'Zu benutzerdefinierten Farben hinzufügen', it: 'Aggiungi ai colori personalizzati', es: 'Añadir a colores personalizados', pt: 'Adicionar às cores personalizadas', he: 'הוסף לצבעים מותאמים אישית' },
   basic_colors: { en: 'Basic colors', fr: 'Couleurs de base', de: 'Grundfarben', it: 'Colori di base', es: 'Colores básicos', pt: 'Cores básicas', he: 'צבעים בסיסיים' },
   blue: { en: 'Blue', fr: 'Bleu', de: 'Blau', it: 'Blu', es: 'Azul', pt: 'Azul', he: 'כחול' },

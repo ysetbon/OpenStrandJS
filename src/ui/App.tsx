@@ -29,6 +29,25 @@ export function App() {
   // Background session-history recorder (feeds the Settings → History page).
   useEffect(() => startHistoryRecorder(), []);
 
+  // Quit guard — OSS confirm_close_with_unsaved_tabs (main_window.py:2826-2861):
+  // leaving with ANY dirty tab prompts, unless "Skip the unsaved-changes prompt
+  // when quitting" is ticked. The setting was previously stored and round-tripped
+  // through settings JSON with nothing reading it, because the port had no quit
+  // guard at all. A browser will not render OSS's Quit anyway / Cancel buttons —
+  // preventDefault() is the whole API — so this is the same decision point in the
+  // shell's own words.
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      const s = useEditorStore.getState();
+      if (s.settings.skip_quit_warning) return;
+      if (!s.tabs.some((tab) => tab.dirty)) return;
+      e.preventDefault();
+      e.returnValue = '';   // required by older browsers to show the prompt
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, []);
+
   return (
     <div className="app">
       <div className="shell" style={{ ['--panel-w' as string]: `${panelW}px` }}>

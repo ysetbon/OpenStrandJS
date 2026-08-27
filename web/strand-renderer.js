@@ -60,9 +60,35 @@ const DRAG_SAMPLE_STEP = 3;
 //     width/alpha table computed from the formulas below (15px@150, 30px@75),
 //     FlatCap / RoundJoin. The blur is what produces the soft fringe beyond the
 //     caster body; the caster's own body (drawn after) covers the inner shadow.
-const SHADOW_COLOR = { r: 0, g: 0, b: 0, a: 150 };
-const MAX_BLUR = 30;
-const NUM_STEPS = 2; // loaded reference setting (user_settings.txt NumSteps:2)
+// These three are SETTINGS in the desktop app (Settings -> General: Shadow Color,
+// Shadow Blur Steps, Shadow Blur Radius). The values below are what the reference
+// user_settings.txt loads, and therefore what the Qt pixel oracle renders — so they
+// stay the defaults, and a meta that does not carry the keys (every fixture render)
+// produces byte-identical output. applyPaintSettings overrides them per render for
+// the live editor, where the three General-page controls previously did nothing.
+const SHADOW_COLOR_DEFAULT = { r: 0, g: 0, b: 0, a: 150 };
+let SHADOW_COLOR = SHADOW_COLOR_DEFAULT;
+let MAX_BLUR = 30;
+let NUM_STEPS = 2; // loaded reference setting (user_settings.txt NumSteps:2)
+// OSS canvas.highlight_color (default opaque red, strand_drawing_canvas.py:175),
+// used for the selected-strand halo and — with alpha forced to 128 — the selected
+// mask's outline (masked_strand.py:1228-1231).
+const HIGHLIGHT_COLOR_DEFAULT = { r: 255, g: 0, b: 0, a: 255 };
+let HIGHLIGHT_COLOR = HIGHLIGHT_COLOR_DEFAULT;
+
+// Apply the shadow/highlight settings carried on `meta`, falling back to the oracle
+// constants for any key the caller omits. Called at EVERY render entry point so a
+// value set by one frame can never leak into the next.
+function applyPaintSettings(meta) {
+  const m = meta || {};
+  SHADOW_COLOR = m.shadow_color && m.shadow_color.a != null ? m.shadow_color : SHADOW_COLOR_DEFAULT;
+  MAX_BLUR = typeof m.max_blur_radius === 'number' && m.max_blur_radius > 0 ? m.max_blur_radius : 30;
+  // Guard the step count: shadowBlurSteps divides by it and OSS's own spin box is
+  // bounded to 1..10 (settings_dialog.py), so a 0 would make every width NaN.
+  NUM_STEPS = Number.isFinite(m.num_steps) && m.num_steps >= 1 ? Math.round(m.num_steps) : 2;
+  HIGHLIGHT_COLOR = m.highlight_color && m.highlight_color.a != null ? m.highlight_color : HIGHLIGHT_COLOR_DEFAULT;
+  ARROW_PARAMS = Object.assign({}, ARROW_DEFAULTS, m.arrow_params || {});
+}
 // Curvature-bias gate (OSS canvas.enable_curvature_bias_control). Module-scoped
 // like CURVE/SHADOW_ENABLED because buildProfile is reached through a dozen
 // buildCenterline call sites. Set from meta at every render entry point; ABSENT
@@ -780,7 +806,7 @@ function drawHighlight(s, strands, P, enableThird, S) {
   const td = (w + 2 * sw) * S;       // total diameter (px)
   const cr = td / 2;                 // circle radius (px)
   const hcA = s.highlight_color;
-  const red = toColor(hcA && hcA.a != null ? hcA : { r: 255, g: 0, b: 0, a: 255 });
+  const red = toColor(hcA && hcA.a != null ? hcA : HIGHLIGHT_COLOR);
   const hc = s.has_circles || [false, false];
   const cc = s.closed_connections || [false, false];
   const startA = circleStrokeAlpha(effStartStroke(s));
@@ -1337,7 +1363,7 @@ function drawMasked(ms, byLayer, P, enableThird, S, shadowOnly) {
     const hl = buildMaskPath(ms, byLayer, P, enableThird, S);
     if (hl) {
       hl.fillColor = null;
-      hl.strokeColor = toColor({ r: 255, g: 0, b: 0, a: 128 });
+      hl.strokeColor = toColor({ r: HIGHLIGHT_COLOR.r, g: HIGHLIGHT_COLOR.g, b: HIGHLIGHT_COLOR.b, a: 128 });
       hl.strokeWidth = 6 * S;
       hl.strokeCap = 'round';
       hl.strokeJoin = 'round';
@@ -1384,6 +1410,7 @@ window.renderFixture = function (strands, meta) {
   const P = (pt) => new paper.Point(pt.x * S + ox * ss, pt.y * S + oy * ss);
   const enableThird = resolveEnableThird(strands, meta);
   BIAS_ENABLED = !!(meta && meta.enable_curvature_bias_control);
+  applyPaintSettings(meta);
 
   // Grid: painted AFTER the white background and BEFORE the strand loop so it
   // composites UNDER the bodies (OSS draws the grid behind the strands; the old
@@ -1431,7 +1458,6 @@ window.renderFixture = function (strands, meta) {
   const shadowEnabled = !!meta.shadow_enabled;
   SHADOW_ENABLED = shadowEnabled;
   SHADOW_PAINT = toColor(SHADOW_COLOR);
-  ARROW_PARAMS = Object.assign({}, ARROW_DEFAULTS, meta.arrow_params || {});
   // Stash the per-pair override dict module-scoped so castStrandShadow can read
   // it in the Port phase without threading a new param. Inert until that phase.
   SHADOW_OVERRIDES = meta.shadow_overrides || {};
@@ -1585,6 +1611,7 @@ let DRAG_BG = null; // { bands, W, H, ox, oy, zoom, topo }
 function computeDragTopology(strands, meta) {
   const enableThird = resolveEnableThird(strands, meta);
   BIAS_ENABLED = !!(meta && meta.enable_curvature_bias_control);
+  applyPaintSettings(meta);
   const byLayer = {};
   for (const s of strands) byLayer[s.layer_name] = s;
   const hasCircles = new Map();
@@ -1630,6 +1657,7 @@ function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg, topo) {
   const byLayer = {};
   for (const s of strands) byLayer[s.layer_name] = s;
   BIAS_ENABLED = !!(meta && meta.enable_curvature_bias_control);
+  applyPaintSettings(meta);
   SHADOW_ENABLED = false; // no shadows while dragging (restored by renderFixture on release)
   for (let i = 0; i < strands.length; i++) {
     const s = strands[i];
@@ -1678,6 +1706,12 @@ window.renderDragBackground = function (strands, meta) {
     }
   }
   if (run) bands.push({ kind: 'band', names: run });
+  // "Draw only affected strand when dragging" (OSS Settings -> General; move_mode.py
+  // :668-671 "do NOT draw any strands in the background cache"). Every static band
+  // is dropped, leaving the 'move' slot as the only thing renderDragFrame
+  // composites over the backdrop, so a drag shows the moved strand alone. Absent
+  // from meta => false => every band is baked, which is the existing behaviour.
+  const onlyAffected = !!(meta && meta.draw_only_affected_strand);
   // Bake each static run into its own TRANSPARENT bitmap. The white backdrop is
   // painted once on the visible canvas in renderDragFrame (not baked into any
   // band) so the bands composite cleanly in any order regardless of which one is
@@ -1685,6 +1719,7 @@ window.renderDragBackground = function (strands, meta) {
   // BELOW band exists.
   for (const b of bands) {
     if (b.kind !== 'band') continue;
+    if (onlyAffected) { b.canvas = null; delete b.names; continue; }
     const c = document.createElement('canvas');
     _dragPaint(c, strands, meta, (name) => b.names.has(name), false, topo);
     paper.project.remove();
@@ -1743,7 +1778,7 @@ window.renderDragFrame = function (strands, meta) {
   // strokes at their z-slot. Per-frame work = k band blits + the one mv blit.
   for (const b of DRAG_BG.bands) {
     if (b.kind === 'move') ctx.drawImage(mv, 0, 0);
-    else ctx.drawImage(b.canvas, 0, 0);
+    else if (b.canvas) ctx.drawImage(b.canvas, 0, 0);  // null when draw_only_affected_strand suppressed the bake
   }
   return { drawn: moving.size, mode: 'dragframe', bands: DRAG_BG.bands.length };
 };
@@ -1777,6 +1812,7 @@ window.computeShadowPairAreas = function (strands, meta, pairs) {
   const P = (pt) => new paper.Point(pt.x * S + ox * ss, pt.y * S + oy * ss);
   const enableThird = resolveEnableThird(strands, meta);
   BIAS_ENABLED = !!(meta && meta.enable_curvature_bias_control);
+  applyPaintSettings(meta);
 
   const byLayer = {};
   for (const s of strands) byLayer[s.layer_name] = s;

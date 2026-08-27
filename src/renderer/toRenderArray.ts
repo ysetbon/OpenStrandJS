@@ -104,6 +104,26 @@ export function buildMeta(doc: EditorDocument, view: ViewState, settings: Settin
     // (so the toggle did nothing) and bias was hardcoded to 0.5.
     enable_third_control_point: settings.enable_third_control_point,
     enable_curvature_bias_control: settings.enable_curvature_bias_control,
+    // Same story for the shadow trio and the highlight colour: OSS reads them off
+    // the canvas at paint time. Passing them per render is what makes the General
+    // page's Shadow Color / Blur Steps / Blur Radius and the Selected-Strand page's
+    // highlight colour actually change what is drawn — they were previously stored,
+    // round-tripped through settings JSON, and then ignored by the renderer.
+    shadow_color: settings.shadow_color,
+    num_steps: settings.num_steps,
+    max_blur_radius: settings.max_blur_radius,
+    highlight_color: settings.highlight_color,
+    draw_only_affected_strand: settings.draw_only_affected_strand,
+    // The six arrow-dimension settings. The renderer already merged
+    // meta.arrow_params over its defaults; this is the missing half of that wire.
+    arrow_params: {
+      head_length: settings.arrow_head_length,
+      head_width: settings.arrow_head_width,
+      head_stroke_width: settings.arrow_head_stroke_width,
+      gap_length: settings.arrow_gap_length,
+      line_length: settings.arrow_line_length,
+      line_width: settings.arrow_line_width,
+    },
     // Grid is drawn IN the renderer (behind strands), not on the overlay, so it
     // composites under the bodies like OSS. The oracle builds its own meta and
     // never sets these, so fixtures stay byte-identical.
