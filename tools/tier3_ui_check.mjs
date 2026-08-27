@@ -172,6 +172,41 @@ try {
     }
   }
 
+  // The width dialog from the previous section is still up, and its modal backdrop
+  // covers the layer panel. Close it before driving the menu again.
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+
+  // ---- the colour picker opens on the channel being edited --------------
+  // `defaultValue` seeds an UNCONTROLLED input only at mount, so an input that
+  // survives from one pick to the next opens on the colour chosen last. Picking a
+  // fill colour and then opening Change Stroke Color showed the FILL. The input is
+  // a SIBLING of each layer button, so both locators must be scoped to the same
+  // .lp-item or this reads a different layer's swatch and proves nothing.
+  {
+    const item = page.locator('.lp-item').filter({ has: page.locator('.nlb') })
+      .filter({ hasText: /^\d+_\d+$/ }).first();
+    const btn = item.locator('.nlb').first();
+    const swatch = item.locator('.nlb-color-input').first();
+    const openItem = async (label) => {
+      await btn.click({ button: 'right' });
+      await page.waitForTimeout(300);
+      await page.getByText(label, { exact: true }).first().click();
+      await page.waitForTimeout(300);
+    };
+    await openItem('Change Color');
+    const fillSwatch = await swatch.inputValue();
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(250);
+    await openItem('Change Stroke Color');
+    const strokeSwatch = await swatch.inputValue();
+    ok('the stroke picker opens on the stroke colour, not the last fill',
+      strokeSwatch !== fillSwatch,
+      `both opened on ${strokeSwatch} — the input kept its previous mount`);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(250);
+  }
+
   ok('no page errors along the way', errors.length === 0, errors.slice(0, 3).join(' | '));
 } finally {
   // browser.close() can hang on some platforms; race it so the process still exits.

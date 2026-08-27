@@ -639,8 +639,16 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
         )}
       </div>
 
-      {/* Hidden native color input driven by the menu "Change (Stroke) Color" items. */}
+      {/* Hidden native color input driven by the menu "Change (Stroke) Color" items.
+          KEYED on the active pick: `defaultValue` seeds an UNCONTROLLED input only
+          at mount, so without a key the element survives from one pick to the next
+          and opens on whatever colour was chosen last — picking a fill colour and
+          then opening Change Stroke Color showed the fill, not the stroke. The key
+          forces a remount so the swatch always opens on the channel being edited.
+          React attaches refs before effects, so the click below still lands on the
+          fresh element. */}
       <input
+        key={colorPick ? colorPick.kind : 'idle'}
         ref={colorInputRef}
         type="color"
         className="nlb-color-input"
