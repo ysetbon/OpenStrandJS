@@ -46,6 +46,17 @@ const strip = (dir) => {
   }
 };
 strip(out);
+// A leftover import.meta means the DEV-block shape changed and strip() missed it;
+// require() would then throw a bare SyntaxError that names no cause.
+const leftover = [];
+(function scan(dir) {
+  for (const e of readdirSync(dir)) {
+    const p = path.join(dir, e);
+    if (statSync(p).isDirectory()) { scan(p); continue; }
+    if (p.endsWith('.js') && readFileSync(p, 'utf8').includes('import.meta')) leftover.push(path.relative(out, p));
+  }
+})(out);
+ok('no import.meta survives the CJS strip', leftover.length === 0, leftover.join(', '));
 writeFileSync(path.join(out, 'package.json'), '{"type":"commonjs"}');
 try { symlinkSync(path.join(root, 'node_modules'), path.join(out, 'node_modules'), 'dir'); } catch { /* exists */ }
 
@@ -97,7 +108,9 @@ const CURVE = { base_fraction: 1.0, dist_multiplier: 2.0, exponent: 2.0 };
   d3.strands['1_1'].control_point2_activated = false;
   setStrandAngleLength(d3, '1_1', 90, 100);
   const a3 = d3.strands['1_1'];
-  ok('a passive cp2 lands exactly on the new endpoint',
+  // Not via moveHandle's snap (which is suppressed for this call) but via the
+  // rotation itself: carry() maps the old endpoint to exactly the new one.
+  ok('a cp2 coincident with the endpoint stays exactly on it after rotating',
     a3.control_points[1].x === a3.end.x && a3.control_points[1].y === a3.end.y);
 }
 
@@ -108,15 +121,24 @@ const CURVE = { base_fraction: 1.0, dist_multiplier: 2.0, exponent: 2.0 };
   const [a, b, c, d] = maskName.split('_');
   const over = `${a}_${b}`, under = `${c}_${d}`;
 
-  // An eraser window inside the crossing, so the tracking path engages at all.
-  const mid = { x: (doc.strands[over].start.x + doc.strands[under].start.x) / 2,
-                y: (doc.strands[over].start.y + doc.strands[under].start.y) / 2 };
+  // The eraser window has to land ON the crossing. Anchoring it to the mask's own
+  // region centroid does that by construction; the midpoint of the two START points
+  // does not, and a window that misses the region makes maskCentroid return the same
+  // value with and without deletions, so the assertions below would pass without
+  // exercising anything. The overlap is asserted explicitly further down.
+  const base = maskCentroid(doc.strands[over], doc.strands[under], CURVE);
+  ok('the mask has a resolvable region', !!base);
   doc.strands[maskName].deletion_rectangles = [{
-    top_left: [mid.x - 15, mid.y - 15], top_right: [mid.x + 15, mid.y - 15],
-    bottom_left: [mid.x - 15, mid.y + 15], bottom_right: [mid.x + 15, mid.y + 15],
+    top_left: [base.x - 15, base.y - 15], top_right: [base.x + 15, base.y - 15],
+    bottom_left: [base.x - 15, base.y + 15], bottom_right: [base.x + 15, base.y + 15],
   }];
 
   const s = doc.strands[over];
+  // A PASSIVE cp2 sitting well away from the endpoint — the combination that appears
+  // 550 times across this repo's fixtures, and the one where moveHandle's cp2 snap
+  // would otherwise measure a curve the re-impose then replaces.
+  s.control_point2_activated = false;
+  s.control_points[1] = { x: s.end.x + 120, y: s.end.y - 80 };
   const ang = Math.atan2(s.end.y - s.start.y, s.end.x - s.start.x) * 180 / Math.PI;
   const len = Math.hypot(s.end.x - s.start.x, s.end.y - s.start.y);
   setStrandAngleLength(doc, over, ang + 15, len, CURVE);
@@ -124,7 +146,11 @@ const CURVE = { base_fraction: 1.0, dist_multiplier: 2.0, exponent: 2.0 };
   const stored = doc.strands[maskName].edited_center_point;
   const truth = maskCentroid(doc.strands[over], doc.strands[under], CURVE,
                              doc.strands[maskName].deletion_rectangles);
+  const bare = maskCentroid(doc.strands[over], doc.strands[under], CURVE);
   ok('the probe produced a centroid at all', !!stored && !!truth);
+  ok('the eraser window actually overlaps the intersection region',
+    !!bare && !!truth && Math.hypot(truth.x - bare.x, truth.y - bare.y) > 1e-9,
+    'the window misses the crossing, so the tracking path is inert and the check below proves nothing');
   if (stored && truth) {
     const gap = Math.hypot(stored.x - truth.x, stored.y - truth.y);
     ok("a dependent mask's stored centre matches the final curve",

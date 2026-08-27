@@ -354,12 +354,24 @@ export function setStrandAngleLength(
   // handles go on first; moveHandle then carries the welded/attached peers and
   // tracks the masks against the final shape.
   applyHandles(s);
+  // moveHandle snaps a PASSIVE cp2 onto the new endpoint. That is NOT harmless here:
+  // control_point2_activated is serialized independently of where cp2 actually sits,
+  // and real files carry passive handles hundreds of px from the end (550 such records
+  // across this repo's own fixtures). The snap would land a different cp2 than the
+  // rotation produces, the mask tracking inside moveHandle would measure THAT, and the
+  // re-impose below would then move the curve out from under the measurement — the same
+  // staleness this ordering exists to prevent, just smaller. OSS AngleAdjustMode
+  // rebuilds cp2 from the rotated vector and does not re-apply the endpoint rule, so
+  // suppress the snap for the duration of the call and restore the flag after (the flag
+  // is the user's data; only the geometry is ours to change here).
+  const wasActivated = s.control_point2_activated;
+  s.control_point2_activated = true;
   moveHandle(draft, layerName, 'end', newEnd, curve);
-  // moveHandle snaps a PASSIVE cp2 onto the new endpoint. That is the same point the
-  // rotation produces (a passive cp2 sits on the old end, and carry() maps the old
-  // end to the new one), but re-impose to keep it exact rather than float-close.
   const t = draft.strands[layerName];
-  if (t) applyHandles(t);
+  if (t) {
+    t.control_point2_activated = wasActivated;
+    applyHandles(t);
+  }
 }
 
 // Create a free first strand of a brand-new set. Returns the new layer_name.
