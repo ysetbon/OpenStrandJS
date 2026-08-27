@@ -23,7 +23,6 @@ export function toRenderArray(
   for (const name of doc.order) {
     const s = doc.strands[name];
     if (!s) continue;
-    if (s.is_hidden) continue;
     // Side-line / cap flags live in the model's `extra` passthrough bag (see
     // factory.ts); the renderer reads them as top-level strand props, so surface
     // them here. Without this the renderer never draws flat-end side lines and
@@ -43,6 +42,13 @@ export function toRenderArray(
       control_points: s.control_points,
       control_point_center: s.control_point_center,
       control_point_center_locked: s.control_point_center_locked,
+      // Hidden strands stay IN the array (the renderer skips their paint and
+      // their shadow). Dropping them used to take their masks down with them:
+      // buildMaskPath resolves a mask's components through byLayer, which is
+      // built from this array, so hiding one component made the whole mask
+      // vanish. OSS keeps them in canvas.strands (masked_strand.py:489 gates
+      // only on the MASK's own is_hidden).
+      is_hidden: s.is_hidden,
       start_line_visible: ex.start_line_visible as boolean | undefined,
       end_line_visible: ex.end_line_visible as boolean | undefined,
       closed_connections: ex.closed_connections as [boolean, boolean] | undefined,

@@ -34,6 +34,7 @@ export function emptyDocument(): EditorDocument {
     shadow_enabled: true,
     show_control_points: true,
     shadow_overrides: {},
+    extra: {},
   };
 }
 
