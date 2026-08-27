@@ -86,7 +86,9 @@ export function requestRender(): void {
 // One full document render (renderFixture / drag fast-path). Overlay sync is the
 // caller's job — schedule() always runs syncOverlay after this.
 function renderNow(): void {
-  const { doc, view, settings, dragging, dragMoving, selection, mode } = useEditorStore.getState();
+  const {
+    doc, view, settings, dragging, dragMoving, selection, mode, visibleShadowPaths,
+  } = useEditorStore.getState();
   try {
     // During an endpoint drag, highlight every strand that moves with the
     // grabbed handle (weld group + attached/mask peers from movingStrandSet),
@@ -107,6 +109,9 @@ function renderNow(): void {
       // calls renderFixture directly and never sets meta.drag, so the oracle's
       // default output is unchanged.
       const meta = {
+        // No preview pairs on the drag path: the overlay lives in renderFixture,
+        // and renderDragFrame deliberately skips shadows entirely (see below), so
+        // passing them here would wire up something that cannot draw.
         ...buildMeta(doc, view, settings),
         supersample: 1,
         shadow_enabled: false,
@@ -130,7 +135,10 @@ function renderNow(): void {
       // ~30ms instead of the ~260ms a full ss2 render costs, so pointer-up no
       // longer hangs. Drop any drag background first so the next gesture re-bakes.
       if (dragBaked) { callEndDrag(); dragBaked = false; bakedKey = null; }
-      callRender(arr, { ...buildMeta(doc, view, settings), supersample: EDITOR_SUPERSAMPLE });
+      callRender(arr, {
+        ...buildMeta(doc, view, settings, visibleShadowPaths),
+        supersample: EDITOR_SUPERSAMPLE,
+      });
     }
   } catch (err) {
     // Surface renderer errors without killing the rAF loop.

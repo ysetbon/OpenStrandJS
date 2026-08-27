@@ -93,6 +93,9 @@ jobs:
       - name: Guards — extension rays, arrow textures, arrow shadow
         run: node tools/tier4_ui_check.mjs
 
+      - name: Guards — Tier 5 shadow-path preview overlay
+        run: node tools/tier5_check.mjs
+
       - name: Editor smoke — built app boots cleanly
         run: node tools/ci_smoke.mjs editor dist-editor
 

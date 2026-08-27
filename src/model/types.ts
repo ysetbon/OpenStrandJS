@@ -289,6 +289,11 @@ export interface RenderMeta {
   // but not yet consumed by the geometry. Absent == every pair visible (current
   // behavior), so the fidelity oracle (which never sets it) is byte-identical.
   shadow_overrides?: ShadowOverrides;
+  // Shadow Path preview pairs, [caster, receiver]. LIVE EDITOR ONLY, and never
+  // saved: OSS holds these on the canvas (strand_drawing_canvas.py:1317), not in
+  // the project file, because they are an inspection aid rather than a property
+  // of the drawing. Absent => the renderer paints no overlay.
+  visible_shadow_paths?: [string, string][];
   curve_params: { base_fraction: number; dist_multiplier: number; exponent: number };
   // The two curve-shaping USER SETTINGS. In OSS these live on the canvas and are
   // read by strand.py::_build_curve_profile; they are not properties of the data,

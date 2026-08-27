@@ -290,6 +290,53 @@ try {
     }
   }
 
+  // ---- the shadow editor's bulk row and Shadow Path preview ---------------
+  // Geometry is covered by tools/tier5_check.mjs; what this adds is that the
+  // React surface reaches it — a correct overlay is worth nothing if no button
+  // ever sets a pair, and OSS clears every pair when the editor closes
+  // (group_shadow_editor_dialog.py:677), which is easy to forget and leaves a
+  // blue overlay stranded on the canvas with no dialog left to switch it off.
+  {
+    // box_stitch's TOP layer casts onto everything under it, so its editor is
+    // guaranteed to list at least one row. Picking any layer would risk the
+    // bottom one, whose editor is legitimately empty.
+    const items = page.locator('.lp-item').filter({ has: page.locator('.nlb') })
+      .filter({ hasText: /^\d+_\d+$/ });
+    const top = items.first();
+    await top.locator('.nlb').first().click({ button: 'right' });
+    await page.waitForTimeout(400);
+    const editShadows = page.getByText('Edit Shadows', { exact: true }).first();
+    ok('the layer menu offers Edit Shadows', await editShadows.count() > 0);
+    if (await editShadows.count() > 0) {
+      await editShadows.click();
+      await page.waitForTimeout(500);
+      const dlg = page.locator('[role=dialog]');
+      const bulk = dlg.locator('.gd-shadow-global');
+      ok('the shadow editor opens with the bulk-toggle row (OSS :800-849)',
+        await bulk.count() > 0);
+      ok('...carrying all four toggles, not the three it had',
+        await bulk.locator('.gd-toggle-btn').count() === 4,
+        `${await bulk.locator('.gd-toggle-btn').count()} toggles`);
+
+      const pathBtns = dlg.locator('.gd-shadow-row-main .gd-toggle-btn');
+      const n = await pathBtns.count();
+      ok('every row carries a Shadow Path button', n > 0, `${n} rows`);
+      if (n > 0) {
+        const before = await snapshot();
+        await pathBtns.first().click();
+        await page.waitForTimeout(600);
+        const shown = await snapshot();
+        ok('toggling one row paints the preview on the canvas', shown !== before,
+          'the overlay never reached the renderer');
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(600);
+        ok('...and closing the editor clears it again (OSS :677)',
+          await snapshot() === before,
+          'the blue overlay outlived the dialog that could switch it off');
+      }
+    }
+  }
+
   ok('no page errors along the way', errors.length === 0, errors.slice(0, 3).join(' | '));
 } finally {
   // browser.close() can hang on some platforms; race it so the process still exits.

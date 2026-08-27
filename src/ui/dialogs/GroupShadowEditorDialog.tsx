@@ -7,6 +7,7 @@ import {
   setSubtractedLayers,
 } from '../../store/actions';
 import { resolveGroupMembers } from '../../model/group';
+import { requestRender } from '../../renderer/renderScheduler';
 import { t, isRTL } from '../i18n';
 
 // OSS-faithful Group Shadow Editor (group_shadow_editor_dialog.py).
@@ -45,6 +46,10 @@ export function GroupShadowEditorDialog(props: {
 
   const close = () => {
     useEditorStore.getState().commit();
+    // OSS clears every preview on close (group_shadow_editor_dialog.py:677) —
+    // otherwise a blue overlay is left on the canvas with no dialog to clear it.
+    useEditorStore.getState().setVisibleShadowPaths([]);
+    requestRender();
     onClose();
   };
 
@@ -83,6 +88,22 @@ export function GroupShadowEditorDialog(props: {
 
   const preview = (fn: (d: typeof live) => void) => useEditorStore.getState().mutateDoc(fn);
 
+  // Shadow Path preview pairs (OSS shadow_editor_dialog.py:947 _toggle_all_shadows,
+  // and the per-row button at :953). Store state, not doc state: OSS keeps them on
+  // the canvas, so they are neither saved nor undoable.
+  const shownPaths = useEditorStore((st) => st.visibleShadowPaths);
+  const pathShown = (c: string, r: string) => shownPaths.includes(`${c}|${r}`);
+  const togglePath = (c: string, r: string, on: boolean) => {
+    useEditorStore.getState().toggleVisibleShadowPath(c, r, on);
+    requestRender();
+  };
+  const setPathsFor = (pairs: { c: string; r: string }[], v: boolean) => {
+    const st = useEditorStore.getState();
+    pairs.forEach((p) => st.toggleVisibleShadowPath(p.c, p.r, v));
+    requestRender();
+  };
+  const pairsOf = (c: string) => receiversOf(c).map((r) => ({ c, r }));
+
   // ── Batch toggles (section + global) ──────────────────────────────────
   const setSectionVisible = (c: string, v: boolean) =>
     preview((d) => receiversOf(c).forEach((r) => setShadowVisibility(d, c, r, v)));
@@ -95,6 +116,8 @@ export function GroupShadowEditorDialog(props: {
   const setGlobalVisible = (v: boolean) => allCastings.forEach((c) => setSectionVisible(c, v));
   const setGlobalFull = (v: boolean) => allCastings.forEach((c) => setSectionFull(c, v));
   const setGlobalSubtract = (v: boolean) => allCastings.forEach((c) => setSectionSubtract(c, v));
+  const setSectionPaths = (c: string, v: boolean) => setPathsFor(pairsOf(c), v);
+  const setGlobalPaths = (v: boolean) => setPathsFor(allCastings.flatMap(pairsOf), v);
 
   const sectionVisibleAll = (c: string) => {
     const rs = receiversOf(c);
@@ -107,6 +130,10 @@ export function GroupShadowEditorDialog(props: {
   const sectionSubtractAll = (c: string) => {
     const rs = receiversOf(c);
     return rs.length > 0 && rs.every((r) => subsOf(c, r).length > 0);
+  };
+  const sectionPathsAll = (c: string) => {
+    const rs = receiversOf(c);
+    return rs.length > 0 && rs.every((r) => pathShown(c, r));
   };
   const globalAll = (pred: (c: string) => boolean) => allCastings.length > 0 && allCastings.every(pred);
 
@@ -147,6 +174,7 @@ export function GroupShadowEditorDialog(props: {
           <ToggleBtn active={globalAll(sectionVisibleAll)} label={t('shadow_visible_on', lang)} onClick={() => setGlobalVisible(!globalAll(sectionVisibleAll))} />
           <ToggleBtn active={globalAll(sectionFullAll)} label={t('shadow_full_on', lang)} title={t('shadow_stored_only_note', lang)} onClick={() => setGlobalFull(!globalAll(sectionFullAll))} />
           <ToggleBtn active={globalAll(sectionSubtractAll)} label={t('shadow_subtract_on', lang)} title={t('shadow_stored_only_note', lang)} onClick={() => setGlobalSubtract(!globalAll(sectionSubtractAll))} />
+          <ToggleBtn active={globalAll(sectionPathsAll)} label={t('shadow_show_all', lang)} onClick={() => setGlobalPaths(!globalAll(sectionPathsAll))} />
         </div>
 
         <div className="gd-member-list gd-shadow-scroll">
@@ -166,6 +194,7 @@ export function GroupShadowEditorDialog(props: {
                   <ToggleBtn active={sectionVisibleAll(casting)} label={t('shadow_visible_on', lang)} onClick={() => setSectionVisible(casting, !sectionVisibleAll(casting))} />
                   <ToggleBtn active={sectionFullAll(casting)} label={t('shadow_full_on', lang)} title={t('shadow_stored_only_note', lang)} onClick={() => setSectionFull(casting, !sectionFullAll(casting))} />
                   <ToggleBtn active={sectionSubtractAll(casting)} label={t('shadow_subtract_on', lang)} title={t('shadow_stored_only_note', lang)} onClick={() => setSectionSubtract(casting, !sectionSubtractAll(casting))} />
+                  <ToggleBtn active={sectionPathsAll(casting)} label={t('shadow_show_all', lang)} onClick={() => setSectionPaths(casting, !sectionPathsAll(casting))} />
                 </div>
 
                 {recvs.length === 0 ? (
@@ -208,6 +237,11 @@ export function GroupShadowEditorDialog(props: {
                           >
                             {(isOpen ? '▼ ' : '▶ ') + t('shadow_subtract_on', lang)}
                           </button>
+                          <ToggleBtn
+                            active={pathShown(casting, recv)}
+                            label={t('shadow_path_button', lang)}
+                            onClick={() => togglePath(casting, recv, !pathShown(casting, recv))}
+                          />
                         </div>
                         {isOpen && (
                           <div className="gd-shadow-subtract">
