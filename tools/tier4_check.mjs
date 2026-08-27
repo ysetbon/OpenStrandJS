@@ -9,7 +9,7 @@
 //
 // Usage: node tools/tier4_check.mjs
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, symlinkSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, symlinkSync, readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -205,16 +205,27 @@ const mkDoc = (strands) => ({
 
 // ============================================ F. translation-table completeness
 {
-  const py = readFileSync('/home/user/OpenStrandStudio/src/translations.py', 'utf8');
-  const heads = [...py.matchAll(/^\s{0,4}'(\w{2})'\s*:\s*\{/gm)].map((m) => [m.index, m[1]]);
-  const enSeg = py.slice(heads[0][0], heads[1][0]);
-  const ossKeys = new Set([...enSeg.matchAll(/^\s+'([a-z0-9_]+)'\s*:/gm)].map((m) => m[1]));
-  ossKeys.delete('en');   // the block header itself
   const ts = readFileSync(path.join(root, 'src/ui/translations.ts'), 'utf8');
   const jsKeys = new Set([...ts.matchAll(/^  ([a-z0-9_]+): \{/gm)].map((m) => m[1]));
-  const missing = [...ossKeys].filter((k) => !jsKeys.has(k));
-  ok('every key in the desktop app\'s table exists here',
-    missing.length === 0, `${missing.length} missing: ${missing.slice(0, 8).join(', ')}`);
+
+  // The desktop app is a SIBLING checkout (package.json: "../OpenStrandStudio"),
+  // present on a dev machine and absent on a CI runner, which only checks out this
+  // repo. Skip loudly rather than throw — and never silently: a skipped check that
+  // reads as a pass is worse than no check.
+  const pyPath = path.join(root, '..', 'OpenStrandStudio', 'src', 'translations.py');
+  if (!existsSync(pyPath)) {
+    console.log('SKIP  every key in the desktop app\'s table exists here'
+      + '  (no ../OpenStrandStudio checkout — run this on a dev machine)');
+  } else {
+    const py = readFileSync(pyPath, 'utf8');
+    const heads = [...py.matchAll(/^\s{0,4}'(\w{2})'\s*:\s*\{/gm)].map((m) => [m.index, m[1]]);
+    const enSeg = py.slice(heads[0][0], heads[1][0]);
+    const ossKeys = new Set([...enSeg.matchAll(/^\s+'([a-z0-9_]+)'\s*:/gm)].map((m) => m[1]));
+    ossKeys.delete('en');   // the block header itself
+    const missing = [...ossKeys].filter((k) => !jsKeys.has(k));
+    ok('every key in the desktop app\'s table exists here',
+      missing.length === 0, `${missing.length} missing: ${missing.slice(0, 8).join(', ')}`);
+  }
 
   // Each entry must carry all seven languages, or `t()` silently falls back to
   // English for the missing ones and the gap never surfaces.
