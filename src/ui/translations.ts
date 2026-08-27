@@ -127,8 +127,8 @@ export const STRINGS: Record<string, Entry> = {
   layers: { en: 'Layers', fr: 'Calques', de: 'Ebenen', it: 'Livelli', es: 'Capas', pt: 'Camadas', he: 'שכבות' },
   theme: { en: 'Theme', fr: 'Thème', de: 'Thema', it: 'Tema', es: 'Tema', pt: 'Tema', he: 'ערכת נושא' },
   language: { en: 'Language', fr: 'Langue', de: 'Sprache', it: 'Lingua', es: 'Idioma', pt: 'Idioma', he: 'שפה' },
-  showGrid: { en: 'Show grid', fr: 'Afficher la grille', it: 'Mostra griglia', es: 'Mostrar cuadrícula', pt: 'Mostrar grelha', he: 'הצג רשת' },
-  gridSize: { en: 'Grid size', fr: 'Taille de grille', it: 'Dimensione griglia', es: 'Tamaño de cuadrícula', pt: 'Tamanho da grelha', he: 'גודל רשת' },
+  showGrid: { en: 'Show grid', fr: 'Afficher la grille', de: 'Raster anzeigen', it: 'Mostra griglia', es: 'Mostrar cuadrícula', pt: 'Mostrar grelha', he: 'הצג רשת' },
+  gridSize: { en: 'Grid size', fr: 'Taille de grille', de: 'Rastergröße', it: 'Dimensione griglia', es: 'Tamaño de cuadrícula', pt: 'Tamanho da grelha', he: 'גודל רשת' },
   snap: { en: 'Snap to grid', fr: 'Aligner sur la grille', de: 'Am Raster ausrichten', it: 'Aggancia alla griglia', es: 'Ajustar a cuadrícula', pt: 'Ajustar à grelha', he: 'הצמדה לרשת' },
   curve: { en: 'Curve params', fr: 'Paramètres de courbe', de: 'Kurvenparameter', it: 'Parametri curva', es: 'Parámetros de curva', pt: 'Parâmetros de curva', he: 'פרמטרי עקומה' },
 
@@ -162,7 +162,7 @@ export const STRINGS: Record<string, Entry> = {
   x: { en: "X", fr: "X", de: "X", it: "X", es: "X", pt: "X", he: "X" },
   x_plus_180: { en: "180+X", fr: "180+X", de: "180+X", it: "180+X", es: "180+X", pt: "180+X", he: "180+X" },
   attachable: { en: "Attachable", fr: "Attachable", de: "Verbindbar", it: "Collegabile", es: "Unible", pt: "Anexável", he: "ניתן לחיבור" },
-  X_angle: { en: "Angle X:", de: "Winkel X:", it: "Angolo X:", es: "Ángulo X:", pt: "Ângulo X:", he: "זווית X:" },
+  X_angle: { en: "Angle X:", fr: "Angle X:", de: "Winkel X:", it: "Angolo X:", es: "Ángulo X:", pt: "Ângulo X:", he: "זווית X:" },
   select_main_strands: { en: "Select Main Strands", fr: "Sélectionner les principaux axes", de: "Hauptstränge auswählen", it: "Seleziona Trefoli Principali", es: "Seleccionar Cordones Principales", pt: "Selecionar Mechas Principais", he: "בחר חוטים עיקריים" },
   select_main_strands_to_include_in_the_group: { en: "Select main strands to include in the group:", fr: "Sélectionner les principaux axes à inclure dans le groupe:", de: "Hauptstränge auswählen, die in die Gruppe aufgenommen werden sollen:", it: "Seleziona i trefoli principali da includere nel gruppo:", es: "Seleccionar cordones principales para incluir en el grupo:", pt: "Selecionar mechas principais para incluir no grupo:", he: "בחר חוטים עיקריים לכלול בקבוצה:" },
   group_exists: { en: "Group Exists", fr: "Groupe Existant", de: "Gruppe existiert bereits", it: "Gruppo Esistente", es: "Grupo Existente", pt: "Grupo Existente", he: "קבוצה קיימת" },
@@ -175,8 +175,8 @@ export const STRINGS: Record<string, Entry> = {
   shadow_path_hide: { en: "Hide Path", fr: "Masquer Chemin", de: "Pfad verbergen", it: "Nascondi Percorso", es: "Ocultar Ruta", pt: "Ocultar Caminho", he: "הסתר נתיב" },
   shadow_subtract_off: { en: "Subtract", fr: "Soustraire", de: "Abziehen", it: "Sottrai", es: "Sustraer", pt: "Subtrair", he: "חיסור" },
   shadow_subtract_on: { en: "Subtract", fr: "Soustraire", de: "Abziehen", it: "Sottrai", es: "Sustraer", pt: "Subtrair", he: "חיסור" },
-  shadow_visible_off: { en: "Visible", fr: "Visible", de: "Sichtbar", it: "Visibile", es: "Visible", pt: "Visível", he: "גלה" },
-  shadow_visible_on: { en: "Visible", fr: "Visible", de: "Sichtbar", it: "Visibile", es: "Visible", pt: "Visível", he: "גלה" },
+  shadow_visible_off: { en: "Visible", fr: "Visible", de: "Sichtbar", it: "Visibile", es: "Visible", pt: "Visível", he: "גלוי" },
+  shadow_visible_on: { en: "Visible", fr: "Visible", de: "Sichtbar", it: "Visibile", es: "Visible", pt: "Visível", he: "גלוי" },
 
   // ---- Settings dialog: Tutorial / Button Guide / What's New / About / History / color picker (faithful from OpenStrandStudio/src/translations.py) ----
   selected_strand_settings: { en: 'Selected Strand', fr: 'Brin Sélectionné', de: 'Ausgewählter Strang', it: 'Filo Selezionato', es: 'Hebra Seleccionada', pt: 'Fio Selecionado', he: 'חוט נבחר' },

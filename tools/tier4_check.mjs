@@ -206,7 +206,11 @@ const mkDoc = (strands) => ({
 // ============================================ F. translation-table completeness
 {
   const ts = readFileSync(path.join(root, 'src/ui/translations.ts'), 'utf8');
-  const jsKeys = new Set([...ts.matchAll(/^  ([a-z0-9_]+): \{/gm)].map((m) => m[1]));
+  // [A-Za-z0-9_], not [a-z0-9_]: the table also holds camelCase (showGrid,
+  // gridSize) and capitalised (X_angle) keys, and a lowercase-only pattern made
+  // them invisible to both checks below — two real missing-language gaps rode
+  // through this hole until a reviewer spotted them by eye.
+  const jsKeys = new Set([...ts.matchAll(/^  ([A-Za-z0-9_]+): \{/gm)].map((m) => m[1]));
 
   // The desktop app is a SIBLING checkout (package.json: "../OpenStrandStudio"),
   // present on a dev machine and absent on a CI runner, which only checks out this
@@ -229,10 +233,11 @@ const mkDoc = (strands) => ({
 
   // Each entry must carry all seven languages, or `t()` silently falls back to
   // English for the missing ones and the gap never surfaces.
+  const LANGS = ['en', 'fr', 'de', 'it', 'es', 'pt', 'he'];
   const short = [];
-  for (const m of ts.matchAll(/^  ([a-z0-9_]+): \{(.*)\},$/gm)) {
-    const langs = new Set([...m[2].matchAll(/\b(en|fr|de|it|es|pt|he):/g)].map((x) => x[1]));
-    if (langs.size !== 7) short.push(`${m[1]}(${langs.size})`);
+  for (const m of ts.matchAll(/^  ([A-Za-z0-9_]+): \{(.*)\},$/gm)) {
+    const absent = LANGS.filter((l) => !new RegExp(`\\b${l}:\\s`).test(m[2]));
+    if (absent.length) short.push(`${m[1]}(no ${absent.join('/')})`);
   }
   ok('and every entry carries all seven languages',
     short.length === 0, short.slice(0, 6).join(', '));

@@ -8,6 +8,10 @@
 // picked from it, and fitPan (the same function the Load button calls) converts
 // that world point to a page coordinate.
 //
+// It has since become the general editor-side UI harness: booting the built app
+// costs ~80 lines of server + tsc plumbing, so later tiers' React-surface checks
+// (the colour well, the arrow dialog) live here rather than duplicating it.
+//
 // Usage: node tools/tier3_ui_check.mjs [distDir]
 //        OSS_CHROMIUM=/path/to/chrome node tools/tier3_ui_check.mjs
 import { chromium } from 'playwright';
@@ -203,8 +207,87 @@ try {
     ok('the stroke picker opens on the stroke colour, not the last fill',
       strokeSwatch !== fillSwatch,
       `both opened on ${strokeSwatch} — the input kept its previous mount`);
+
+    // The other half of the same trade-off. The key must NOT include the colour:
+    // a native picker emits an input event per drag frame, each one recolouring
+    // the strand, so a colour-bearing key destroys the element — and the open OS
+    // picker with it — on the first frame. A plain `el.value = ...` does not trip
+    // React's value tracker, so the setter is called through the prototype
+    // descriptor; without that this check passes vacuously. Reopen the FILL picker
+    // first — the button's background is the fill colour, so probing while the
+    // stroke pick is open would show no change and prove nothing.
     await page.keyboard.press('Escape');
     await page.waitForTimeout(250);
+    await openItem('Change Color');
+    await swatch.evaluate((el) => { el.dataset.probe = 'alive'; });
+    const bgBefore = await btn.evaluate((el) => getComputedStyle(el).backgroundColor);
+    await swatch.evaluate((el) => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, '#123456');
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await page.waitForTimeout(400);
+    const bgAfter = await btn.evaluate((el) => getComputedStyle(el).backgroundColor);
+    ok('the pick actually recolours the strand (guards the check below)', bgBefore !== bgAfter,
+      `button stayed ${bgAfter}`);
+    ok('...and the picker survives it, so a drag is not cut off after one colour',
+      await swatch.evaluate((el) => el.dataset.probe === 'alive'),
+      'the input remounted mid-pick — the key is keyed on the colour');
+
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(250);
+  }
+
+  // ---- an arrow-transparency drag is ONE undo step ------------------------
+  // The slider fires an onChange per pixel of travel. Routed through commitEdit
+  // each of those is its own gesture, so a single drag buries the pre-drag state
+  // under dozens of undo entries and Ctrl+Z steps back one notch at a time.
+  // Measured against the canvas rather than the store: one undo must restore the
+  // image the arrow had BEFORE the drag.
+  {
+    await regular.click({ button: 'right' });
+    await page.waitForTimeout(400);
+    const showArrow = page.getByText('Show Full Arrow', { exact: true }).first();
+    ok('the layer menu offers Show Full Arrow', await showArrow.count() > 0);
+    if (await showArrow.count() > 0) {
+      await showArrow.click();
+      await page.waitForTimeout(500);
+      await regular.click({ button: 'right' });
+      await page.waitForTimeout(400);
+      const custom = page.getByText('Arrow Customization', { exact: true }).first();
+      ok('...and Arrow Customization once the arrow is on', await custom.count() > 0);
+      if (await custom.count() > 0) {
+        await custom.click();
+        await page.waitForTimeout(500);
+        const dlg = page.locator('[role=dialog]');
+        const slider = dlg.locator('input[type=range]').first();
+        ok('the arrow dialog opens with its transparency slider', await slider.count() > 0);
+        if (await slider.count() > 0) {
+          const beforeDrag = await snapshot();
+          // A real pointer drag, so several input events fire — .fill() would emit
+          // one and the per-frame bug would be invisible.
+          const box = await slider.boundingBox();
+          await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2);
+          await page.mouse.down();
+          for (let i = 1; i <= 8; i++) {
+            await page.mouse.move(box.x + box.width - 2 - (box.width * 0.09 * i), box.y + box.height / 2);
+            await page.waitForTimeout(60);
+          }
+          await page.mouse.up();
+          await page.waitForTimeout(500);
+          const afterDrag = await snapshot();
+          ok('dragging arrow transparency repaints the arrow', afterDrag !== beforeDrag,
+            'the slider never moved — the drag missed the track');
+          // Close first: the modal owns the keyboard while it is up.
+          await page.keyboard.press('Escape');
+          await page.waitForTimeout(400);
+          await page.keyboard.press('Control+z');
+          await page.waitForTimeout(600);
+          ok('one undo restores the whole drag, not one slider notch',
+            await snapshot() === beforeDrag,
+            'the drag left one undo entry per frame — use mutateDoc + a single commit');
+        }
+      }
+    }
   }
 
   ok('no page errors along the way', errors.length === 0, errors.slice(0, 3).join(' | '));

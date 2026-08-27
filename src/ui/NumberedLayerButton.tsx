@@ -171,6 +171,11 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
     if (selected) rootRef.current?.scrollIntoView({ block: 'nearest' });
   }, [selected]);
 
+  // The hex the hidden colour well should be showing right now. Doubles as part of
+  // its key (see below), so the element remounts when either the channel or the
+  // colour underneath it moves.
+  const pickHex = rgbaToHex(colorPick?.kind === 'stroke' ? strand?.stroke_color : strand?.color);
+
   const isMasked = maskComponents(name) != null;
   const hidden = !!strand?.is_hidden;
   const shadowOnly = !!strand?.shadow_only;
@@ -645,14 +650,19 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
           and opens on whatever colour was chosen last — picking a fill colour and
           then opening Change Stroke Color showed the fill, not the stroke. The key
           forces a remount so the swatch always opens on the channel being edited.
+          The key deliberately does NOT include the colour: the native picker sends
+          an input event per drag frame, each one recolouring the strand, so a
+          colour-bearing key unmounts the element — and with it the open OS picker —
+          on the first frame. Measured: the node is destroyed as soon as the first
+          pick applies, so the user gets one colour per menu invocation.
           React attaches refs before effects, so the click below still lands on the
           fresh element. */}
       <input
-        key={colorPick ? colorPick.kind : 'idle'}
+        key={colorPick?.kind ?? 'idle'}
         ref={colorInputRef}
         type="color"
         className="nlb-color-input"
-        defaultValue={rgbaToHex(colorPick?.kind === 'stroke' ? strand?.stroke_color : strand?.color)}
+        defaultValue={pickHex}
         onChange={(e) => { if (colorPick) applyColor(colorPick.kind, colorPick.wholeSet, e.target.value); }}
         onBlur={() => setColorPick(null)}
       />

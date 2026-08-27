@@ -37,6 +37,9 @@ export function ArrowCustomizeDialog(props: { layerName: string; onClose: () => 
   const settings = useEditorStore((s) => s.settings);
   const setSettings = useEditorStore((s) => s.setSettings);
   const commitEdit = useEditorStore((s) => s.commitEdit);
+  const mutateDoc = useEditorStore((s) => s.mutateDoc);
+  const beginGesture = useEditorStore((s) => s.beginGesture);
+  const commit = useEditorStore((s) => s.commit);
 
   const ex = (strand?.extra ?? {}) as Record<string, unknown>;
   const [transparency, setTransparencyLocal] = useState(
@@ -51,7 +54,18 @@ export function ArrowCustomizeDialog(props: { layerName: string; onClose: () => 
   const headVisible = ex.arrow_head_visible !== false;
   const castsShadow = ex.arrow_casts_shadow === true;
 
+  // Discrete control (checkbox, select) -> one undo step per change.
   const edit = (fn: Parameters<typeof commitEdit>[0]) => { commitEdit(fn); requestRender(); };
+
+  // Continuous control (slider, colour well). These fire an onChange per pixel of
+  // drag; routing each one through commitEdit would open and close a gesture per
+  // frame and bury the pre-drag state under dozens of undo steps. beginGesture is
+  // idempotent while a gesture is open, so the whole drag shares one baseline and
+  // seal() closes it exactly once -- and commit() is a no-op when the document
+  // did not actually change, so a stray seal costs nothing.
+  const live = (fn: Parameters<typeof commitEdit>[0]) => { beginGesture(); mutateDoc(fn); requestRender(); };
+  const seal = () => commit();
+  const close = () => { seal(); onClose(); };
 
   // The six canvas-level dimensions the OSS "Arrow Sizes" popup edits. It writes
   // straight to the canvas AND mirrors into the settings dialog (:1293-1300), so
@@ -66,8 +80,8 @@ export function ArrowCustomizeDialog(props: { layerName: string; onClose: () => 
   ];
 
   return (
-    <Modal title={t('arrow_customization', lang)} onClose={onClose} lang={lang} width={430}
-      footer={<button onClick={onClose}>{t('ok', lang)}</button>}>
+    <Modal title={t('arrow_customization', lang)} onClose={close} lang={lang} width={430}
+      footer={<button onClick={close}>{t('ok', lang)}</button>}>
 
       <div className="gd-row">
         <span className="gd-label">{t('arrow_color', lang)}</span>
@@ -75,7 +89,8 @@ export function ArrowCustomizeDialog(props: { layerName: string; onClose: () => 
         <input
           type="color"
           value={rgbaToHex(arrowColor)}
-          onChange={(e) => edit((d) => setArrowColor(d, layerName, hexToRgba(e.target.value, arrowColor)))}
+          onChange={(e) => live((d) => setArrowColor(d, layerName, hexToRgba(e.target.value, arrowColor)))}
+          onBlur={seal}
         />
       </div>
 
@@ -86,8 +101,11 @@ export function ArrowCustomizeDialog(props: { layerName: string; onClose: () => 
           onChange={(e) => {
             const v = Number(e.target.value);
             setTransparencyLocal(v);
-            edit((d) => setArrowTransparency(d, layerName, v));
+            live((d) => setArrowTransparency(d, layerName, v));
           }}
+          onPointerUp={seal}
+          onKeyUp={seal}
+          onBlur={seal}
         />
         <span className="gd-value">{transparency}%</span>
       </div>
