@@ -137,7 +137,9 @@ try {
   }
 
   console.log(fails ? `\n${fails} FAILURE(S)` : '\nall green');
-  process.exit(fails ? 1 : 0);
+  // exitCode, NOT process.exit(): the latter tears the process down before the
+  // finally block can await browser.close(), orphaning Chromium.
+  process.exitCode = fails ? 1 : 0;
 } finally {
   await browser.close();
 }
