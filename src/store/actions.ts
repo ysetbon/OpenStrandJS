@@ -322,33 +322,44 @@ export function setStrandAngleLength(
   const cp1 = carry(s.control_points[1]);
   const cpc = s.control_point_center ? carry(s.control_point_center) : null;
 
+  // Impose the rotated handles, overriding moveHandle's endpoint-follow rule: OSS
+  // rebuilds them from the rotated vectors rather than snapping cp2 to the end.
+  const applyHandles = (t: StrandRecord) => {
+    t.control_points[0] = { x: cp0.x, y: cp0.y };
+    t.control_points[1] = { x: cp1.x, y: cp1.y };
+    const mid = { x: (cp0.x + cp1.x) / 2, y: (cp0.y + cp1.y) / 2 };
+    if (t.control_point_center_locked && cpc) {
+      // Same 0.5px auto-unlock as update_shape (strand.py:767-780).
+      if (Math.hypot(cpc.x - mid.x, cpc.y - mid.y) < 0.5) {
+        t.control_point_center_locked = false;
+        t.control_point_center = mid;
+      } else {
+        t.control_point_center = { x: cpc.x, y: cpc.y };
+      }
+    } else {
+      t.control_point_center = mid;
+    }
+  };
+
   const newEnd: Point = {
     x: pivot.x + Math.cos(target) * newLen,
     y: pivot.y + Math.sin(target) * newLen,
   };
-  // moveHandle carries the welded/attached peers and drifts mask deletion rects.
-  moveHandle(draft, layerName, 'end', newEnd, curve);
 
-  // Now impose the rotated handles, overriding moveHandle's endpoint-follow rule:
-  // OSS rebuilds them from the rotated vectors rather than snapping cp2 to the end.
+  // ORDER MATTERS. moveHandle ends by re-measuring every dependent mask's centroid
+  // and drifting its deletion rectangles by the delta. Rotating the handles AFTER
+  // that call would measure a curve that is about to change, leaving the stored
+  // edited_center_point describing geometry that no longer exists — and since that
+  // value is the baseline for the NEXT edit's delta, the error compounds. So the
+  // handles go on first; moveHandle then carries the welded/attached peers and
+  // tracks the masks against the final shape.
+  applyHandles(s);
+  moveHandle(draft, layerName, 'end', newEnd, curve);
+  // moveHandle snaps a PASSIVE cp2 onto the new endpoint. That is the same point the
+  // rotation produces (a passive cp2 sits on the old end, and carry() maps the old
+  // end to the new one), but re-impose to keep it exact rather than float-close.
   const t = draft.strands[layerName];
-  if (!t) return;
-  t.control_points[0] = cp0;
-  t.control_points[1] = cp1;
-  const mid = {
-    x: (cp0.x + cp1.x) / 2,
-    y: (cp0.y + cp1.y) / 2,
-  };
-  if (t.control_point_center_locked && cpc) {
-    t.control_point_center = cpc;
-    // Same 0.5px auto-unlock as update_shape (strand.py:767-780).
-    if (Math.hypot(cpc.x - mid.x, cpc.y - mid.y) < 0.5) {
-      t.control_point_center_locked = false;
-      t.control_point_center = mid;
-    }
-  } else {
-    t.control_point_center = mid;
-  }
+  if (t) applyHandles(t);
 }
 
 // Create a free first strand of a brand-new set. Returns the new layer_name.
