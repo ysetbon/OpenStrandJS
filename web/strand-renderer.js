@@ -2198,10 +2198,20 @@ function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg, topo, pers
   BIAS_ENABLED = !!(meta && meta.enable_curvature_bias_control);
   applyPaintSettings(meta);
   SHADOW_ENABLED = false; // no shadows while dragging (restored by renderFixture on release)
-  // Memoize component outlines for this paint. Scoped to the project set up
-  // above: a strand that is a component of several masks in the same band is
-  // stroked once instead of once per mask.
-  geomCacheBegin();
+  // Memoize component outlines for this paint — but only when something can
+  // actually ask for the same outline twice, which on the drag path means a mask
+  // (its fill and stroke regions share component outlines, and a selected mask's
+  // highlight asks for the fill region again). A band of plain strands is all
+  // cold misses, and on a miss the memo costs an extra detach + clone per
+  // outline for nothing: measured ~10% on the pointer-down bake of a mask-free
+  // document. With no mask in the drawn set the builders fall through to exactly
+  // the un-memoized path.
+  let memo = false;
+  for (let i = 0; i < strands.length; i++) {
+    const s = strands[i];
+    if (s.type === 'MaskedStrand' && s.is_hidden !== true && shouldDraw(s.layer_name)) { memo = true; break; }
+  }
+  if (memo) geomCacheBegin();
   for (let i = 0; i < strands.length; i++) {
     const s = strands[i];
     if (!shouldDraw(s.layer_name)) continue;
@@ -2213,7 +2223,7 @@ function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg, topo, pers
     if (hc) s.has_circles = hc;
     drawStrand(s, strands, P, enableThird, S);
   }
-  geomCacheEnd();   // masters die with this paint's project
+  geomCacheEnd();   // no-op when the memo was never opened; masters die with this paint's project
   paper.view.update();
 }
 
