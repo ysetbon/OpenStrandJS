@@ -240,12 +240,14 @@ try {
   }, { project, moves: MOVES });
 
   out.errors = errors;
-  await browser.close();
 } finally {
+  // Both in the finally: the evaluate above throws whenever the page misbehaves,
+  // and that path must not leak a Chromium process or leave the port bound.
+  await browser.close().catch(() => {});
   await server.close();
 }
 
-if (!out.grabbed) {
+if (!out || !out.grabbed) {
   console.error('BENCH FAILED: pointerdown did not start a drag (no endpoint grabbed)');
   process.exit(1);
 }

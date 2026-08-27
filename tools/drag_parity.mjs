@@ -239,12 +239,18 @@ const RUN = async (page, project, g) => page.evaluate(async ({ project, g }) => 
   };
 }, { project, g });
 
-const a = await openPage(A.url);
-const b = await openPage(B.url);
-
 const rows = [];
 let failures = 0;
 const eq = (x, y) => JSON.stringify(x) === JSON.stringify(y);
+
+// Page setup and the gesture loop run inside a try/finally: RUN() throws in the
+// page context exactly when the app misbehaves, which is the case this harness
+// exists for, and that path must not leak a Chromium process or leave 5301/5302
+// bound for the next run.
+let a, b;
+try {
+a = await openPage(A.url);
+b = await openPage(B.url);
 
 for (const g of gestures) {
   const ra = await RUN(a.page, project, g);
@@ -275,17 +281,20 @@ for (const g of gestures) {
   }
 }
 
-await browser.close();
-await A.server.close();
-await B.server.close();
+} finally {
+  await browser.close().catch(() => {});
+  await A.server.close();
+  await B.server.close();
+}
 
 console.log(`\ndrag/release UX parity — ${FIXTURE}, ${gestures.length} gestures\n`);
 for (const r of rows) console.log(r);
-if (a.errors.length) console.log('\nbaseline page errors:', a.errors.slice(0, 4));
-if (b.errors.length) console.log('\nworking  page errors:', b.errors.slice(0, 4));
+if (a?.errors.length) console.log('\nbaseline page errors:', a.errors.slice(0, 4));
+if (b?.errors.length) console.log('\nworking  page errors:', b.errors.slice(0, 4));
 console.log(`\n${gestures.length - failures}/${gestures.length} gestures behave identically`);
-if (failures || b.errors.length) {
-  console.error(`\nFAIL: ${failures} gesture(s) diverged${b.errors.length ? ` + ${b.errors.length} page error(s)` : ''}`);
+const bErrs = b?.errors.length ?? 0;
+if (failures || bErrs) {
+  console.error(`\nFAIL: ${failures} gesture(s) diverged${bErrs ? ` + ${bErrs} page error(s)` : ''}`);
   process.exit(1);
 }
 console.log('PASS: dragging and releasing behaves exactly as before.');

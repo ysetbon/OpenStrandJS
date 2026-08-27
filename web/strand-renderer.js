@@ -74,16 +74,32 @@ const DRAG_SAMPLE_STEP = 3;
 // mutate it, feed it to boolean ops, remove it when done — and the pixels are
 // identical to rebuilding it from scratch.
 let GEOM_CACHE = null;
+// The paper project the masters in GEOM_CACHE belong to. A render that throws
+// between geomCacheBegin() and geomCacheEnd() leaves the cache open, and the
+// scheduler swallows renderer errors to keep the rAF loop alive — so the next
+// paint would otherwise find a populated cache whose masters belong to a project
+// that has since been removed, and serve clones of them. Pinning the project
+// makes that impossible by construction rather than by every entry point
+// remembering to clear first: a cache from another project simply reads as
+// closed, and the builders run fresh.
+let GEOM_PROJECT = null;
 
 function geomCacheBegin() {
   geomCacheEnd();
   GEOM_CACHE = new Map();
+  GEOM_PROJECT = paper.project;
+}
+
+// Is the memo open AND still owned by the project being drawn into?
+function geomCacheLive() {
+  return GEOM_CACHE !== null && GEOM_PROJECT === paper.project;
 }
 
 function geomCacheEnd() {
   const cache = GEOM_CACHE;
   GEOM_CACHE = null;                  // clear first: a render that threw must not
-  if (!cache) return;                 // leave a half-open cache behind
+  GEOM_PROJECT = null;                // leave a half-open cache behind
+  if (!cache) return;
   for (const e of cache.values()) {
     // The project these masters belong to may already be gone (a render that
     // threw part-way). Detaching a stale item is not worth failing the next frame.
@@ -108,7 +124,7 @@ function geomEntry(key, build) {
 // would sit. Falls through to a plain build when no cache is open (the module's
 // other entry points, and the auto-shadow probe, call these builders directly).
 function cachedGeom(key, build) {
-  if (!GEOM_CACHE) return build();
+  if (!geomCacheLive()) return build();
   const e = geomEntry(key, build);
   if (!e.item) return null;
   const c = e.item.clone({ insert: false });
@@ -119,13 +135,15 @@ function cachedGeom(key, build) {
 // Is a memo currently open? The keys carry no coordinates, so the cache is only
 // correct while it is scoped to a single paint; tools/drag_perf_check.mjs asserts
 // this is false after every render so a future edit cannot quietly widen the
-// scope and freeze the dragged strand at its pointer-down shape.
+// scope and freeze the dragged strand at its pointer-down shape. Deliberately the
+// LITERAL open flag, not geomCacheLive(): the guard should catch a cache left
+// behind even though the project pin would stop it being used.
 window.__geomCacheOpen = function () { return GEOM_CACHE !== null; };
 
 // Bounds of the memoized geometry WITHOUT paying for a clone — lets a caller run
 // a cheap bounding-box reject before it commits to the real path.
 function cachedGeomBounds(key, build) {
-  if (!GEOM_CACHE) return undefined;   // undefined = "unknown", caller must build
+  if (!geomCacheLive()) return undefined;  // undefined = "unknown", caller must build
   return geomEntry(key, build).bounds;
 }
 

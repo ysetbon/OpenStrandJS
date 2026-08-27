@@ -103,6 +103,12 @@ async function makePage(src) {
 const A = await makePage(rendererSrc.baseline);
 const B = await makePage(rendererSrc.working);
 
+// Everything from here on runs in a try/finally: every comparison below throws
+// exactly when this harness finds what it exists to find, and a leaked Chromium
+// on the failure path is the last thing anyone debugging a diff needs.
+let failures = 0, cases = 0;
+const rows = [];
+
 // Render one case and return the raw RGBA of #c as a plain array (transferable).
 async function shoot({ page }, strands, meta, kind, moving) {
   return page.evaluate(({ strands, meta, kind, moving }) => {
@@ -123,7 +129,19 @@ async function shoot({ page }, strands, meta, kind, moving) {
     }
     const m = { ...meta, supersample: 1, shadow_enabled: false, drag: { moving } };
     window.renderDragBackground(JSON.parse(JSON.stringify(strands)), m);
-    if (kind === 'bake') { const h = hash(); window.endDrag(); return h; }
+    if (kind === 'bake') {
+      // renderDragBackground paints ONLY into offscreen per-band canvases — it
+      // never touches #c. Hashing #c straight after it therefore measured
+      // whatever the previous case left behind (the 'full' render, which runs
+      // first in the loop), so this case silently duplicated 'full' and asserted
+      // nothing about the bake. Composite the bands onto #c the way a real frame
+      // does, but with an EMPTY moving set, so what gets hashed is exactly the
+      // baked static background and nothing else.
+      window.renderDragFrame(JSON.parse(JSON.stringify(strands)), { ...m, drag: { moving: [] } });
+      const h = hash();
+      window.endDrag();
+      return h;
+    }
     if (kind === 'frame') {
       window.renderDragFrame(s, m);
       const h = hash();
@@ -170,10 +188,9 @@ async function detail({ page }, strands, meta, kind, moving) {
   }, { strands, meta, kind, moving });
 }
 
-let failures = 0, cases = 0;
-const rows = [];
 mkdirSync(path.join(root, 'artifacts', 'render_identity'), { recursive: true });
 
+try {
 for (const name of fixtures) {
   const strands = loadStrands(name);
   if (!strands.length) continue;
@@ -211,7 +228,9 @@ for (const name of fixtures) {
   }
 }
 
-await browser.close();
+} finally {
+  await browser.close();
+}
 
 console.log(`\nrenderer pixel identity — ${cases} cases over ${fixtures.length} fixtures\n`);
 for (const r of rows) console.log(r);

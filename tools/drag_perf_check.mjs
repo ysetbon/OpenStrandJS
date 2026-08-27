@@ -242,9 +242,19 @@ try {
     }
 
     // ---- 5: the renderer's geometry memo is closed after every render ----
-    out.geomCacheOpenAfterRender = typeof window.__geomCacheOpen === 'function'
-      ? (window.__requestRender(), await settle(8), window.__geomCacheOpen())
-      : 'no-hook';
+    // Both hooks are dev-build only, so check both: calling a missing
+    // __requestRender would throw out of page.evaluate and leave `result`
+    // undefined, and the failure would surface as a confusing TypeError against
+    // the first guard rather than "the hook is gone".
+    if (typeof window.__geomCacheOpen !== 'function') {
+      out.geomCacheOpenAfterRender = 'no-geom-hook';
+    } else if (typeof window.__requestRender !== 'function') {
+      out.geomCacheOpenAfterRender = 'no-render-hook';
+    } else {
+      window.__requestRender();
+      await settle(8);
+      out.geomCacheOpenAfterRender = window.__geomCacheOpen();
+    }
 
     return out;
   }, { project });
