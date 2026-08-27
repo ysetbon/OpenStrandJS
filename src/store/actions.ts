@@ -402,7 +402,7 @@ export interface AngleAdjustSnapshot {
   initialAngle: number;        // degrees; 0 deg = +x, growing clockwise (y grows down)
   initialLength: number;
   maxLength: number;           // max(10, int(initial * 2))  (:68)
-  children: { name: string; end: Point; cp1: Point; cp2: Point }[];
+  children: { name: string; end: Point; cp1: Point; cp2: Point; cpCenter: Point | null }[];
 }
 
 export function snapshotAngleAdjust(doc: EditorDocument, name: string): AngleAdjustSnapshot | null {
@@ -420,6 +420,7 @@ export function snapshotAngleAdjust(doc: EditorDocument, name: string): AngleAdj
     children.push({
       name: other, end: { ...o.end },
       cp1: { ...o.control_points[0] }, cp2: { ...o.control_points[1] },
+      cpCenter: o.control_point_center ? { ...o.control_point_center } : null,
     });
   }
   return {
@@ -488,8 +489,11 @@ export function applyAngleAdjustSnapshot(
       x: (cs.control_points[0].x + cs.control_points[1].x) / 2,
       y: (cs.control_points[0].y + cs.control_points[1].y) / 2,
     };
-    if (cs.control_point_center_locked && cs.control_point_center) {
-      cs.control_point_center = { x: cs.control_point_center.x + ddx, y: cs.control_point_center.y + ddy };
+    // From c.cpCenter, NOT from cs.control_point_center: these appliers re-run on
+    // every frame against the same snapshot, so translating the live value would
+    // add each frame's delta on top of the last one instead of replacing it.
+    if (cs.control_point_center_locked && c.cpCenter) {
+      cs.control_point_center = { x: c.cpCenter.x + ddx, y: c.cpCenter.y + ddy };
     } else {
       cs.control_point_center = cmid;
     }
@@ -523,7 +527,10 @@ export interface RotateSnapshot {
   chordLen: number;            // preserved (calculate_new_position, :241-262)
   cp1: Point; cp2: Point; cpCenter: Point | null;
   cpCenterLocked: boolean;
-  children: { name: string; start: Point; end: Point; cp1: Point; cp2: Point }[];
+  // cpCenter is captured even though an UNLOCKED centre re-derives from the cp
+  // midpoint: a PINNED one has no other source of truth, and reading it back off the
+  // draft would translate an already-translated value once per frame.
+  children: { name: string; start: Point; end: Point; cp1: Point; cp2: Point; cpCenter: Point | null }[];
 }
 
 // Which endpoint a press grabs. OSS iterates canvas.strands FORWARD (bottom-first,
@@ -564,6 +571,7 @@ export function snapshotRotate(doc: EditorDocument, name: string, side: 0 | 1): 
       name: other,
       start: { ...o.start }, end: { ...o.end },
       cp1: { ...o.control_points[0] }, cp2: { ...o.control_points[1] },
+      cpCenter: o.control_point_center ? { ...o.control_point_center } : null,
     });
   }
   return {
@@ -631,8 +639,11 @@ export function applyRotateSnapshot(
       x: (cs.control_points[0].x + cs.control_points[1].x) / 2,
       y: (cs.control_points[0].y + cs.control_points[1].y) / 2,
     };
-    if (cs.control_point_center_locked && cs.control_point_center) {
-      cs.control_point_center = { x: cs.control_point_center.x + ddx, y: cs.control_point_center.y + ddy };
+    // From c.cpCenter, NOT from cs.control_point_center: these appliers re-run on
+    // every frame against the same snapshot, so translating the live value would
+    // add each frame's delta on top of the last one instead of replacing it.
+    if (cs.control_point_center_locked && c.cpCenter) {
+      cs.control_point_center = { x: c.cpCenter.x + ddx, y: c.cpCenter.y + ddy };
     } else {
       cs.control_point_center = cmid;
     }

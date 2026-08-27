@@ -18,6 +18,13 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege: both jobs only check out, build, run checks and upload
+# artifacts. Nothing here writes to the repository or calls the API, and
+# actions/upload-artifact authenticates with the runtime token rather than
+# GITHUB_TOKEN, so read access to contents is the whole requirement.
+permissions:
+  contents: read
+
 jobs:
   typecheck:
     name: Typecheck (tsc)

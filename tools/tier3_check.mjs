@@ -218,6 +218,56 @@ const mkDoc = (strands) => ({
     near(dist(rc.control_points[0], childBefore.control_points[0]), 0, 1e-6));
 }
 
+// ============ D2. a LOCKED child centre is absolute, not accumulated per call
+//
+// Both appliers run on every frame of a drag / every slider tick against the SAME
+// snapshot, so each one has to be a pure function of (snapshot, inputs). A locked
+// child centre is the one field with no other source of truth in the snapshot, so
+// it is the one that can silently be read back out of the draft and re-translated
+// — turning "translate by the delta" into "translate by the sum of every delta so
+// far". Applying twice and comparing against applying once is what catches it;
+// section C/D use an UNLOCKED centre, which re-derives from the midpoint and so
+// cannot drift.
+for (const [label, build] of [
+  ['rotate', (doc) => {
+    const snap = snapshotRotate(doc, '1_1', 1);
+    return (n) => { for (let i = 0; i < n; i++) applyRotateSnapshot(doc, snap, snap.origAngle + 0.4, CURVE); };
+  }],
+  ['the angle dialog', (doc) => {
+    const snap = snapshotAngleAdjust(doc, '1_1');
+    return (n) => {
+      for (let i = 0; i < n; i++) {
+        applyAngleAdjustSnapshot(doc, snap, snap.initialAngle + 20, snap.initialLength * 1.5, CURVE);
+      }
+    };
+  }],
+]) {
+  const mkPair = () => mkDoc([
+    mkStrand({ has_circles: [false, true] }),
+    mkStrand({
+      layer_name: '1_2', type: 'AttachedStrand', attached_to: '1_1', attachment_side: 1,
+      start: P(200, 100), end: P(260, 160),
+      control_points: [P(220, 120), P(240, 140)],
+      // PINNED, so it does not re-derive from the cp midpoint.
+      control_point_center: P(215, 145), control_point_center_locked: true,
+      has_circles: [true, false],
+    }),
+  ]);
+  const once = mkPair(); build(once)(1);
+  const twice = mkPair(); build(twice)(2);
+  const a = once.strands['1_2'].control_point_center;
+  const b = twice.strands['1_2'].control_point_center;
+  ok(`[${label}] a locked child centre does not drift when applied twice`,
+    near(a.x, b.x, 1e-9) && near(a.y, b.y, 1e-9),
+    `drifted ${dist(a, b).toFixed(2)}px on the second call — it is being read back out of the draft`);
+  ok(`[${label}] and it stays pinned rather than snapping to the midpoint`,
+    once.strands['1_2'].control_point_center_locked === true &&
+    dist(a, {
+      x: (once.strands['1_2'].control_points[0].x + once.strands['1_2'].control_points[1].x) / 2,
+      y: (once.strands['1_2'].control_points[0].y + once.strands['1_2'].control_points[1].y) / 2,
+    }) > 1e-9);
+}
+
 // ================================ E. dependent masks follow both operations
 //
 // Two independent properties, because either alone can pass while the other is
