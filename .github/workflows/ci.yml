@@ -48,6 +48,9 @@ jobs:
       - name: Guards — rotate, angle dialog, renderer settings
         run: node tools/tier3_check.mjs
 
+      - name: Guards — colour scopes, arrow + extension data, i18n completeness
+        run: node tools/tier4_check.mjs
+
   build-and-smoke:
     name: Build editor + headless smoke
     runs-on: ubuntu-latest
@@ -86,6 +89,9 @@ jobs:
 
       - name: Guards — rotate / angle dialog / width dialog reach the canvas
         run: node tools/tier3_ui_check.mjs dist-editor
+
+      - name: Guards — extension rays, arrow textures, arrow shadow
+        run: node tools/tier4_ui_check.mjs
 
       - name: Editor smoke — built app boots cleanly
         run: node tools/ci_smoke.mjs editor dist-editor

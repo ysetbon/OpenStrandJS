@@ -895,6 +895,63 @@ export function toggleArrowVisible(
   s.extra[key] = s.extra[key] !== true;
 }
 
+// ---- Arrow customization (1.109 §7 tail, numbered_layer_button.py:1092-1350) --
+//
+// Every one of these is a plain serialized per-strand field with a documented
+// default, so they ride the `extra` passthrough bag. Defaults, from strand.py:
+//   arrow_color        None  -> the renderer falls back to stroke_color
+//   arrow_transparency 100   (percent, 0..100)
+//   arrow_texture      'none'
+//   arrow_shaft_style  'solid'
+//   arrow_head_visible true
+//   arrow_casts_shadow false
+//
+// NOTE on arrow_casts_shadow: OSS is self-contradictory. Every drawing path reads
+// it with a False default (strand.py:1055, 1113, 2281) while the menu checkbox
+// reads it with True (numbered_layer_button.py:1227), so a fresh strand shows a
+// ticked box that casts nothing. We follow the BEHAVIOURAL default, false, in
+// both the data and the checkbox — reproducing a control that misreports its own
+// state would be copying a bug with no upside.
+export type ArrowTexture = 'none' | 'stripes' | 'dots' | 'crosshatch';
+export type ArrowShaftStyle = 'solid' | 'tiles' | 'stripes' | 'dots';
+
+export function setArrowColor(draft: EditorDocument, name: string, color: RGBA | null): void {
+  const s = draft.strands[name];
+  if (!s || s.type === 'MaskedStrand') return;
+  if (color) s.extra.arrow_color = { ...color };
+  else delete s.extra.arrow_color;   // back to "unset", i.e. stroke_color
+}
+
+export function setArrowTransparency(draft: EditorDocument, name: string, percent: number): void {
+  const s = draft.strands[name];
+  if (!s || s.type === 'MaskedStrand') return;
+  s.extra.arrow_transparency = Math.max(0, Math.min(100, Math.round(percent)));
+}
+
+export function setArrowTexture(draft: EditorDocument, name: string, texture: ArrowTexture): void {
+  const s = draft.strands[name];
+  if (!s || s.type === 'MaskedStrand') return;
+  s.extra.arrow_texture = texture;
+}
+
+export function setArrowShaftStyle(draft: EditorDocument, name: string, style: ArrowShaftStyle): void {
+  const s = draft.strands[name];
+  if (!s || s.type === 'MaskedStrand') return;
+  s.extra.arrow_shaft_style = style;
+}
+
+export function setArrowHeadVisible(draft: EditorDocument, name: string, visible: boolean): void {
+  const s = draft.strands[name];
+  if (!s || s.type === 'MaskedStrand') return;
+  s.extra.arrow_head_visible = visible;
+}
+
+export function setArrowCastsShadow(draft: EditorDocument, name: string, casts: boolean): void {
+  const s = draft.strands[name];
+  if (!s || s.type === 'MaskedStrand') return;
+  s.extra.arrow_casts_shadow = casts;
+}
+
 // OSS is_strand_deletable: deletable iff it has knot connections OR not all of
 // its endpoint circles are present. A strand with both circles and no knot
 // connections is a closed-on-both-ends interior strand and may not be deleted.
@@ -924,6 +981,35 @@ export function setCircleStrokeColor(draft: EditorDocument, name: string, color:
   }
   s.extra.start_circle_stroke_color = { ...c };
   s.circle_stroke_color = { ...c };
+}
+
+// OSS toggle_strand_extension_visibility (numbered_layer_button.py:3182-3196).
+// start/end_extension_visible are plain serialized booleans that default to False
+// on every Strand (strand.py:94-95), so they ride the `extra` passthrough bag.
+export function toggleExtensionVisible(draft: EditorDocument, name: string, end: 'start' | 'end'): void {
+  const s = draft.strands[name];
+  if (!s) return;
+  const key = `${end}_extension_visible`;
+  s.extra[key] = !s.extra[key];
+}
+
+// OSS set_end_circle_stroke_color, reached from the "Transparent Closing Knot
+// Side" / "Restore Default Closing Knot Stroke" menu entries
+// (numbered_layer_button.py:2089-2100). The END-edge twin of the function above:
+// it writes only end_circle_stroke_color, leaving the start edge and the legacy
+// circle_stroke_color field alone, because those describe the other end.
+export function setEndCircleStrokeColor(draft: EditorDocument, name: string, color: RGBA | null): void {
+  const s = draft.strands[name];
+  if (!s) return;
+  const c: RGBA = color ? { ...color } : { r: 0, g: 0, b: 0, a: 255 };
+  // Ground the start edge first if it has never been written, so that setting the
+  // END transparent cannot leave the start reading through to a now-divergent
+  // circle_stroke_color (the same grounding the start-edge setter does in reverse).
+  if (s.extra.start_circle_stroke_color == null) {
+    s.extra.start_circle_stroke_color = s.circle_stroke_color
+      ? { ...s.circle_stroke_color } : { r: 0, g: 0, b: 0, a: 255 };
+  }
+  s.extra.end_circle_stroke_color = { ...c };
 }
 
 // OSS toggle_strand_circle_visibility: flips has_circles[index] and records the

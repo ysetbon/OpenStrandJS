@@ -264,6 +264,15 @@ export interface RenderStrand {
   // renderer only while meta.enable_curvature_bias_control is on, matching
   // strand.py::_build_curve_profile. Rides the `extra` bag in the model.
   bias_control?: { triangle_bias?: number; circle_bias?: number } | null;
+  // Dashed extension rays out of each end (strand.py:2796-2815). Per-strand and
+  // absent-safe: the fidelity oracle never sets them, so nothing is drawn.
+  start_extension_visible?: boolean;
+  end_extension_visible?: boolean;
+  // Arrow customization (1.109 §7 tail). Absent => the plain values, so the
+  // fidelity oracle is unaffected.
+  arrow_texture?: 'none' | 'stripes' | 'dots' | 'crosshatch';
+  arrow_shaft_style?: 'solid' | 'tiles' | 'stripes' | 'dots';
+  arrow_casts_shadow?: boolean;
 }
 
 export interface RenderMeta {
@@ -312,6 +321,19 @@ export interface RenderMeta {
     head_length: number; head_width: number; head_stroke_width: number;
     gap_length: number; line_length: number; line_width: number;
   };
+  // Dashed extension-line dimensions (Settings -> Layer Panel). Absent => the
+  // renderer's own defaults; a null dash_width means "use the strand's
+  // stroke_width", which is what OSS's getattr fallback does (strand.py:2783).
+  extension_params?: {
+    length: number; dash_count: number;
+    dash_width: number | null; dash_gap_length: number | null;
+  };
+  // OSS's inverted "Use Default Arrow Color" rule: when it is FALSE the arrow head
+  // takes default_arrow_fill_color, when TRUE it takes the strand's own colour
+  // (strand.py:2310-2313). Absent => true => the strand colour, which is what the
+  // Qt oracle renders.
+  use_default_arrow_color?: boolean;
+  default_arrow_fill_color?: RGBA;
   // Interactive drag fast-path ONLY (the fidelity harness never sets this). The
   // layer_names whose geometry moves with the dragged endpoint: renderDragBackground
   // bakes everything EXCEPT these once, and renderDragFrame draws only these over

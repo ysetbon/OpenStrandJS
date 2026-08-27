@@ -88,6 +88,11 @@ function applyPaintSettings(meta) {
   NUM_STEPS = Number.isFinite(m.num_steps) && m.num_steps >= 1 ? Math.round(m.num_steps) : 2;
   HIGHLIGHT_COLOR = m.highlight_color && m.highlight_color.a != null ? m.highlight_color : HIGHLIGHT_COLOR_DEFAULT;
   ARROW_PARAMS = Object.assign({}, ARROW_DEFAULTS, m.arrow_params || {});
+  EXTENSION_PARAMS = Object.assign({}, EXTENSION_DEFAULTS, m.extension_params || {});
+  // Absent => true => the strand's own colour, which is what the oracle renders.
+  USE_DEFAULT_ARROW_COLOR = m.use_default_arrow_color !== false;
+  DEFAULT_ARROW_FILL = m.default_arrow_fill_color && m.default_arrow_fill_color.a != null
+    ? m.default_arrow_fill_color : null;
 }
 // Curvature-bias gate (OSS canvas.enable_curvature_bias_control). Module-scoped
 // like CURVE/SHADOW_ENABLED because buildProfile is reached through a dozen
@@ -665,6 +670,46 @@ function buildPairShadowRegion(s, i, o, j, strands, byLayer, P, enableThird, S, 
   return { region, recv, clipBlocker };
 }
 
+// The full arrow's own casting footprint (strand.py get_arrow_shadow_path,
+// :1110-1155): the whole centerline stroked at arrow_line_width, plus the head
+// triangle whose BASE sits on the endpoint and whose tip extends outward along
+// the tangent. Returns null unless the arrow is visible AND opted into casting.
+// Gated on arrow_casts_shadow, which every OSS drawing path defaults to false, so
+// a fixture that never sets it produces exactly the previous footprint.
+function buildArrowShadowPath(s, P, enableThird, S) {
+  if (s.full_arrow_visible !== true || s.arrow_casts_shadow !== true) return null;
+  const cl = buildCenterline(s, P, enableThird);
+  const len = cl.length;
+  if (len <= 0) { cl.remove(); return null; }
+  let out = strokedOutline(cl, ARROW_PARAMS.line_width * S);
+  if (out) {
+    const cleaned = out.resolveCrossings();
+    if (cleaned !== out) { out.remove(); out = cleaned; }
+  }
+  if (s.arrow_head_visible !== false) {
+    const a = tangentAngle(cl, len);
+    const ux = Math.cos(a), uy = Math.sin(a);
+    const px = -uy, py = ux;
+    const hw = (ARROW_PARAMS.head_width * S) / 2, hl = ARROW_PARAMS.head_length * S;
+    const e = P(s.end);
+    const head = new paper.Path([
+      new paper.Point(e.x + ux * hl, e.y + uy * hl),   // tip
+      new paper.Point(e.x + px * hw, e.y + py * hw),   // base left
+      new paper.Point(e.x - px * hw, e.y - py * hw),   // base right
+    ]);
+    head.closed = true;
+    if (out) {
+      const u = out.unite(head);
+      out.remove(); head.remove();
+      out = u;
+    } else {
+      out = head;
+    }
+  }
+  cl.remove();
+  return out;
+}
+
 function castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i) {
   // Caster footprint. A MaskedStrand caster uses its mask-crossing region as the
   // core and casts NO circles (Qt get_proper_masked_strand_path excludes circles);
@@ -685,6 +730,15 @@ function castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i) 
     // footprint (auto_shadow.py) and the two never desync.
     core = subtractTransparentEndCaps(core, s, P, S);
     if (!core) return;
+    // OSS unites the full arrow into the caster when arrow_casts_shadow is on
+    // (strand.py:2281). Added AFTER the transparent-end-cap subtraction so the
+    // arrow is not clipped by a cut that describes the body's own end.
+    const arrow = buildArrowShadowPath(s, P, enableThird, S);
+    if (arrow) {
+      const u = core.unite(arrow);
+      core.remove(); arrow.remove();
+      core = u;
+    }
     circles = buildShadowCasterCircles(s, P, S);
   }
 
@@ -890,11 +944,225 @@ function drawHighlight(s, strands, P, enableThird, S) {
 // ---- Arrows (OSS 1.109 §7: strand.py start/end arrows + full strand arrow) --
 // Canvas-level arrow dimensions (Qt settings dialog; the oracle renders with
 // these defaults). The editor may override via meta.arrow_params.
+// Dashed extension lines (Settings -> Layer Panel). Canvas-level like the arrow
+// dimensions; extension_dash_width falls back to the strand's own stroke_width
+// when unset (strand.py:2783).
+const EXTENSION_DEFAULTS = { length: 100, dash_count: 10, dash_width: null, dash_gap_length: null };
+let EXTENSION_PARAMS = EXTENSION_DEFAULTS;
+
 const ARROW_DEFAULTS = {
   head_length: 20, head_width: 10, gap_length: 10,
   line_length: 20, line_width: 10, head_stroke_width: 4,
 };
 let ARROW_PARAMS = ARROW_DEFAULTS;
+
+// ---- Dashed extension lines (strand.py:2779-2815) -------------------------
+// A straight dashed ray running OUT of each end along that end's tangent, gated
+// per-strand on start/end_extension_visible. Faithful details:
+//   * colour  = stroke_color with its alpha REPLACED by the fill colour's alpha
+//     (side_color, :2776-2777) — not the stroke's own alpha;
+//   * width   = extension_dash_width, defaulting to this strand's stroke_width;
+//   * dashes  = ext_len / (2 * dash_count) on and the same off. Qt expresses a
+//     CustomDashLine pattern in units of PEN WIDTH, so its pattern_len =
+//     dash_seg / dash_width becomes dash_seg once multiplied back out — which is
+//     what a canvas dash array wants directly;
+//   * offset  = extension_dash_gap_length NEGATED (:2788), applied to BOTH
+//     endpoints, so the ray slides along its own direction rather than growing.
+//     Absent, it defaults to dash_seg.
+// The rays are straight lines, not curve continuations: OSS takes the unit
+// tangent once and walks it (:2798-2815).
+// Absent flags => nothing drawn, so the fidelity oracle is unaffected.
+function drawExtensions(s, P, enableThird, S) {
+  const wantStart = s.start_extension_visible === true;
+  const wantEnd = s.end_extension_visible === true;
+  if (!wantStart && !wantEnd) return;
+
+  const ep = EXTENSION_PARAMS;
+  const extLen = ep.length;
+  const dashCount = ep.dash_count;
+  const dashWidth = ep.dash_width != null ? ep.dash_width : (s.stroke_width || 0);
+  const dashSeg = dashCount > 0 ? extLen / (2 * dashCount) : extLen;
+  const dashGap = -(ep.dash_gap_length != null ? ep.dash_gap_length : dashSeg);
+  if (dashWidth <= 0) return;
+
+  const col = toColor(s.stroke_color);
+  col.alpha = ((s.color && s.color.a != null ? s.color.a : 255)) / 255;
+
+  const cl = buildCenterline(s, P, enableThird);
+  const len = cl.length;
+  if (len <= 0) { cl.remove(); return; }
+
+  const ray = (worldPt, angle, sign) => {
+    // sign +1 walks along the tangent (the END ray), -1 against it (the START).
+    const ux = Math.cos(angle) * sign, uy = Math.sin(angle) * sign;
+    const a = P(worldPt);
+    const b = P({ x: worldPt.x + ux * extLen, y: worldPt.y + uy * extLen });
+    // OSS shifts BOTH endpoints by the same vector, expressed against the RAW
+    // tangent: +unit*dash_gap at the start (:2803-2804), -unit*dash_gap at the end
+    // (:2812-2813). `ux` already carries `sign`, so folding the two cases together
+    // leaves -ux*dash_gap, which slides the ray along its own direction (dash_gap
+    // is itself negated, so a positive gap setting pushes the ray outward).
+    const ox = -ux * dashGap * S, oy = -uy * dashGap * S;
+    const line = new paper.Path.Line(
+      new paper.Point(a.x + ox, a.y + oy),
+      new paper.Point(b.x + ox, b.y + oy),
+    );
+    line.strokeColor = col;
+    line.strokeWidth = dashWidth * S;
+    line.strokeCap = 'butt';
+    line.dashArray = [dashSeg * S, dashSeg * S];
+  };
+
+  if (wantStart) ray(s.start, tangentAngle(cl, 0), -1);
+  if (wantEnd) ray(s.end, tangentAngle(cl, len), 1);
+  cl.remove();
+}
+
+// ---- Arrow patterns (strand.py apply_arrow_texture_brush / draw_arrow_shaft_with_pattern)
+//
+// Qt paints these with QBrush(QPixmap) — a tiled bitmap brush. Paper.js has no
+// pattern fill, so the same tile is reproduced as GEOMETRY: the tile's strokes and
+// dots are emitted across the shape's bounding box and clipped to the shape. The
+// tile is a fixed pixel grid in Qt, and OSS never calls setBrushTransform, so the
+// brush rides the painter transform and the tile scales with zoom — hence * S.
+//
+// PORT-FOR-COMPLETENESS / UNMEASURED: no fixture in the corpus sets arrow_texture
+// or arrow_shaft_style (both default to the plain value), so the Qt pixel oracle
+// never exercises these paths and cannot confirm them. Same standing as
+// drawMaskShadow above.
+function tiledInside(shape, tilePx, emit) {
+  // `shape` is consumed: it becomes the clip mask of the returned group.
+  const b = shape.bounds;
+  if (!b || b.width <= 0 || b.height <= 0 || tilePx <= 0) { shape.remove(); return null; }
+  const items = [];
+  const x0 = Math.floor(b.left / tilePx) * tilePx;
+  const y0 = Math.floor(b.top / tilePx) * tilePx;
+  // Guard against a pathological tile/bounds ratio producing millions of items.
+  const cols = Math.ceil((b.right - x0) / tilePx), rows = Math.ceil((b.bottom - y0) / tilePx);
+  if (cols * rows > 20000) { shape.remove(); return null; }
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) emit(x0 + c * tilePx, y0 + r * tilePx, items);
+  }
+  if (!items.length) { shape.remove(); return null; }
+  const g = new paper.Group([shape, ...items]);
+  g.clipped = true;
+  return g;
+}
+
+// Head fill texture. Qt's tile is 10x10 with the ARROW FILL COLOUR as the pen
+// (strand.py:1002-1041), drawn over the already-filled triangle.
+function applyArrowTexture(shape, texture, fillColor, S) {
+  const tile = 10 * S;
+  if (texture === 'stripes') {
+    // pen(fill, 2), vertical lines at i = 0,3,6,9
+    return tiledInside(shape, tile, (tx, ty, out) => {
+      for (let i = 0; i < 10; i += 3) {
+        const ln = new paper.Path.Line(
+          new paper.Point(tx + i * S, ty), new paper.Point(tx + i * S, ty + tile));
+        ln.strokeColor = fillColor; ln.strokeWidth = 2 * S; ln.strokeCap = 'butt';
+        out.push(ln);
+      }
+    });
+  }
+  if (texture === 'dots') {
+    // NoPen, brush(fill), drawEllipse(x-1, y-1, 2, 2) for x,y in 2,6 -> r=1 dots
+    return tiledInside(shape, tile, (tx, ty, out) => {
+      for (let x = 2; x < 10; x += 4) {
+        for (let y = 2; y < 10; y += 4) {
+          const d = new paper.Path.Circle(new paper.Point(tx + x * S, ty + y * S), 1 * S);
+          d.fillColor = fillColor; d.strokeColor = null;
+          out.push(d);
+        }
+      }
+    });
+  }
+  if (texture === 'crosshatch') {
+    // pen(fill, 1), lines at i = 0,3,6,9 in BOTH axes
+    return tiledInside(shape, tile, (tx, ty, out) => {
+      for (let i = 0; i < 10; i += 3) {
+        const v = new paper.Path.Line(
+          new paper.Point(tx + i * S, ty), new paper.Point(tx + i * S, ty + tile));
+        const h = new paper.Path.Line(
+          new paper.Point(tx, ty + i * S), new paper.Point(tx + tile, ty + i * S));
+        for (const ln of [v, h]) { ln.strokeColor = fillColor; ln.strokeWidth = 1 * S; ln.strokeCap = 'butt'; }
+        out.push(v, h);
+      }
+    });
+  }
+  shape.remove();
+  return null;   // 'none' -> the solid fill already drawn is the whole story
+}
+
+// Shaft overlay. OSS always strokes the shaft SOLID first, then paints the
+// pattern inside the stroke outline (strand.py:871-882). The overlays are
+// translucent white/black diagonals, so they read as shading on any shaft colour.
+function applyArrowShaftPattern(shaftPath, style, lineW, S) {
+  if (style !== 'tiles' && style !== 'stripes' && style !== 'dots') return;
+  const outline = strokedOutline(shaftPath, lineW);
+  if (!outline) return;
+
+  if (style === 'tiles') {
+    // 12px tile, two diagonals, white @80/255, pen 3 (strand.py:896-912).
+    const tile = 12 * S;
+    const col = toColor({ r: 255, g: 255, b: 255, a: 80 });
+    tiledInside(outline, tile, (tx, ty, out) => {
+      for (const [x1, y1, x2, y2] of [[0, tile, tile, 0], [-tile / 2, tile, tile / 2, 0]]) {
+        const ln = new paper.Path.Line(
+          new paper.Point(tx + x1, ty + y1), new paper.Point(tx + x2, ty + y2));
+        ln.strokeColor = col; ln.strokeWidth = 3 * S; ln.strokeCap = 'butt';
+        out.push(ln);
+      }
+    });
+    return;
+  }
+
+  if (style === 'stripes') {
+    // Slash density derived from the shaft width (strand.py:928-931): stripe
+    // width = clamp(lineW * 0.22, 2, 6), spacing = max(stripe * 1.6, 5),
+    // tile = spacing * 2 so the period tiles exactly. Bright and dark pens
+    // alternate. lineW here is already in PIXELS, so undo S for the ratio.
+    const wWorld = lineW / S;
+    const stripeW = Math.max(2, Math.min(6, Math.trunc(wWorld * 0.22)));
+    const spacing = Math.max(Math.trunc(stripeW * 1.6), 5);
+    const tile = spacing * 2 * S;
+    const bright = toColor({ r: 255, g: 255, b: 255, a: 80 });
+    const dark = toColor({ r: 0, g: 0, b: 0, a: 80 });
+    tiledInside(outline, tile, (tx, ty, out) => {
+      const half = tile / 2;
+      const mk = (off, col) => {
+        const ln = new paper.Path.Line(
+          new paper.Point(tx + off, ty + tile), new paper.Point(tx + off + tile, ty));
+        ln.strokeColor = col; ln.strokeWidth = stripeW * S; ln.strokeCap = 'butt';
+        out.push(ln);
+      };
+      mk(0, bright);
+      mk(half, dark);
+    });
+    return;
+  }
+
+  // dots: a light stipple over the shaft.
+  const tile = 8 * S;
+  const col = toColor({ r: 255, g: 255, b: 255, a: 90 });
+  tiledInside(outline, tile, (tx, ty, out) => {
+    const d = new paper.Path.Circle(new paper.Point(tx + tile / 2, ty + tile / 2), Math.max(1, 1.5 * S));
+    d.fillColor = col; d.strokeColor = null;
+    out.push(d);
+  });
+}
+
+// Arrow-head FILL colour, with OSS's inverted default rule (strand.py:2310-2313,
+// 1098-1106; attached_strand.py:765-771). The setting is labelled "Use Default
+// Arrow Color", but the branch is `if NOT use_default_arrow_color: use
+// canvas.default_arrow_fill_color`. So leaving the box UNticked is what makes the
+// configured default colour apply; ticking it hands the head back to the strand's
+// own colour. Reproduced as-is — the label is upstream's to fix.
+let USE_DEFAULT_ARROW_COLOR = true;
+let DEFAULT_ARROW_FILL = null;
+function defaultArrowFill(s) {
+  if (!USE_DEFAULT_ARROW_COLOR && DEFAULT_ARROW_FILL) return DEFAULT_ARROW_FILL;
+  return s.color;
+}
 
 // Draw a strand's arrows AFTER its body (start/end arrows, then the full
 // arrow on top) — faithful to strand.py:2818-3000:
@@ -918,6 +1186,8 @@ function drawArrows(s, P, enableThird, S) {
     s.full_arrow_visible === true;
   if (!hasAny) return;
   const ap = ARROW_PARAMS;
+  const texture = s.arrow_texture || 'none';
+  const shaftStyle = s.arrow_shaft_style || 'solid';
   const headL = ap.head_length * S, headW = ap.head_width * S;
   const gapL = ap.gap_length * S, lineL = ap.line_length * S, lineW = ap.line_width * S;
   const borderW = ap.head_stroke_width * S;
@@ -934,6 +1204,9 @@ function drawArrows(s, P, enableThird, S) {
     poly.closed = true;
     poly.fillColor = fillColor;
     poly.strokeColor = null;
+    // Texture rides ON TOP of the solid fill (OSS sets the textured brush and
+    // fills the same triangle), and UNDER the border, which is stroked last.
+    if (texture !== 'none') applyArrowTexture(poly.clone(), texture, fillColor, S);
     const border = poly.clone();
     border.fillColor = null;
     border.strokeColor = toColor(s.stroke_color);
@@ -953,7 +1226,7 @@ function drawArrows(s, P, enableThird, S) {
     shaft.strokeColor = toColor(s.stroke_color);
     shaft.strokeWidth = lineW;
     shaft.strokeCap = 'butt';
-    drawHead(s1, dir, toColor(s.color));
+    drawHead(s1, dir, toColor(defaultArrowFill(s)));
   };
 
   if (s.start_arrow_visible === true) endArrow(s.start, tangentAngle(cl, 0), -1);
@@ -969,10 +1242,12 @@ function drawArrows(s, P, enableThird, S) {
     shaft.strokeWidth = lineW;
     shaft.strokeCap = 'butt';
     shaft.strokeJoin = 'round';
+    // The pattern overlay goes on after the solid shaft, clipped to its outline.
+    applyArrowShaftPattern(cl, shaftStyle, lineW, S);
     if (s.arrow_head_visible !== false) {
       const a = tangentAngle(cl, len);
       const dir = { x: Math.cos(a), y: Math.sin(a) };
-      const fill = toColor(s.arrow_color ? s.arrow_color : s.color);
+      const fill = toColor(s.arrow_color ? s.arrow_color : defaultArrowFill(s));
       fill.alpha = alpha;
       drawHead(P(s.end), dir, fill);
     }
@@ -1011,6 +1286,10 @@ function drawStrand(s, strands, P, enableThird, S) {
 
   // Paint stroke layer, then fill layer, then side bars (top), in order.
   new paper.Group([strokePath, fillPath, ...sideLines]);
+
+  // Extension rays sit above the body and BELOW the arrows, matching OSS's
+  // in-draw order (:2779 extensions, then :2818 arrow heads).
+  drawExtensions(s, P, enableThird, S);
 
   // Arrows go over this strand's body (start/end arrows, then the full arrow
   // on top) but under any later strand, exactly like OSS's in-draw ordering.
