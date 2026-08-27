@@ -94,7 +94,12 @@ export function toRenderArray(
   return out;
 }
 
-export function buildMeta(doc: EditorDocument, view: ViewState, settings: Settings): RenderMeta {
+export function buildMeta(
+  doc: EditorDocument,
+  view: ViewState,
+  settings: Settings,
+  visibleShadowPaths: string[] = [],
+): RenderMeta {
   return {
     image_width: Math.max(1, Math.round(view.width)),
     image_height: Math.max(1, Math.round(view.height)),
@@ -104,6 +109,12 @@ export function buildMeta(doc: EditorDocument, view: ViewState, settings: Settin
     zoom: view.zoom,
     shadow_enabled: doc.shadow_enabled,
     shadow_overrides: doc.shadow_overrides,
+    // Shadow Path preview. Defaulted to [] and omitted entirely when empty, so
+    // every non-editor caller — the fidelity oracle above all — passes a meta with
+    // no such key and the renderer's overlay stays inert.
+    ...(visibleShadowPaths.length
+      ? { visible_shadow_paths: visibleShadowPaths.map((k) => k.split('|') as [string, string]) }
+      : {}),
     curve_params: settings.curve_params,
     // OSS reads both of these off the canvas in _build_curve_profile. Passing them
     // per render is what makes the two General-page toggles actually change the

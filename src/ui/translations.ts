@@ -169,10 +169,16 @@ export const STRINGS: Record<string, Entry> = {
   group_shadow_editor_info: { en: "Shadow editor for all strands in group <b>{0}</b>:", fr: "Éditeur d'ombres pour tous les brins du groupe <b>{0}</b>:", de: "Schatten-Editor für alle Stränge in Gruppe <b>{0}</b>:", it: "Editor ombre per tutti i fili nel gruppo <b>{0}</b>:", es: "Editor de sombras para todos los hilos del grupo <b>{0}</b>:", pt: "Editor de sombras para todos os fios no grupo <b>{0}</b>:", he: "עורך צללים לכל הגדילים בקבוצה <b>{0}</b>:" },
   shadow_full_off: { en: "Full Shadow", fr: "Ombre Complète", de: "Voller Schatten", it: "Ombra Completa", es: "Sombra Completa", pt: "Sombra Completa", he: "צל מלא" },
   shadow_full_on: { en: "Full Shadow", fr: "Ombre Complète", de: "Voller Schatten", it: "Ombra Completa", es: "Sombra Completa", pt: "Sombra Completa", he: "צל מלא" },
+  // The _on/_off and show_all/hide_all pairs below are IDENTICAL in every language,
+  // and that is faithful, not a copy-paste: OSS's shadow-editor toggles signal
+  // their state with colour (QPushButton:checked turns blue), never by swapping
+  // the label, so both label slots carry the same word. This port previously
+  // invented distinct "Hide All" / "Hide Path" labels for buttons it had not
+  // built; the strings are now what the desktop app actually shows.
   shadow_show_all: { en: "Show All", fr: "Afficher", de: "Anzeigen", it: "Mostra", es: "Mostrar", pt: "Mostrar", he: "הצג" },
-  shadow_hide_all: { en: "Hide All", fr: "Masquer", de: "Verbergen", it: "Nascondi", es: "Ocultar", pt: "Ocultar", he: "הסתר" },
+  shadow_hide_all: { en: "Show All", fr: "Afficher", de: "Anzeigen", it: "Mostra", es: "Mostrar", pt: "Mostrar", he: "הצג" },
   shadow_path_button: { en: "Shadow Path", fr: "Chemin d'Ombre", de: "Schattenpfad", it: "Percorso Ombra", es: "Ruta de Sombra", pt: "Caminho de Sombra", he: "נתיב צל" },
-  shadow_path_hide: { en: "Hide Path", fr: "Masquer Chemin", de: "Pfad verbergen", it: "Nascondi Percorso", es: "Ocultar Ruta", pt: "Ocultar Caminho", he: "הסתר נתיב" },
+  shadow_path_hide: { en: "Shadow Path", fr: "Chemin d'Ombre", de: "Schattenpfad", it: "Percorso Ombra", es: "Ruta de Sombra", pt: "Caminho de Sombra", he: "נתיב צל" },
   shadow_subtract_off: { en: "Subtract", fr: "Soustraire", de: "Abziehen", it: "Sottrai", es: "Sustraer", pt: "Subtrair", he: "חיסור" },
   shadow_subtract_on: { en: "Subtract", fr: "Soustraire", de: "Abziehen", it: "Sottrai", es: "Sustraer", pt: "Subtrair", he: "חיסור" },
   shadow_visible_off: { en: "Visible", fr: "Visible", de: "Sichtbar", it: "Visibile", es: "Visible", pt: "Visível", he: "גלוי" },

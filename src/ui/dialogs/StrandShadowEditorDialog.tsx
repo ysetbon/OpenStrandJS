@@ -7,6 +7,7 @@ import {
   setSubtractedLayers,
 } from '../../store/actions';
 import { maskComponents } from '../../model/layerName';
+import { requestRender } from '../../renderer/renderScheduler';
 import { t, isRTL } from '../i18n';
 import '../groupPanel.css';
 
@@ -20,6 +21,11 @@ import '../groupPanel.css';
 // Visibility toggles route through setShadowVisibilityUser, which implements
 // the auto_shadow interplay: re-enabling an auto-hidden pair drops `auto` and
 // sets `pinned` so the recompute never touches that pair again.
+//
+// The header row mirrors OSS's (shadow_editor_dialog.py:800-849): four checkable
+// buttons that apply to EVERY row at once — Visible, Full, Subtract, Shadow Path.
+// Like OSS's, they signal their state by colour rather than by swapping the label,
+// which is why shadow_show_all and shadow_hide_all carry the same text.
 //
 // Like the group dialog: non-modal, applies immediately, one undo step per
 // session, Close is the only action. Full Shadow / Subtract are stored-only
@@ -39,6 +45,11 @@ export function StrandShadowEditorDialog(props: {
 
   const close = () => {
     useEditorStore.getState().commit();
+    // OSS clears every preview when the editor closes (group_shadow_editor_dialog.py
+    // :677). Leaving them on would strand a blue overlay on the canvas with no
+    // open dialog to switch it back off.
+    useEditorStore.getState().setVisibleShadowPaths([]);
+    requestRender();
     onClose();
   };
 
@@ -91,6 +102,54 @@ export function StrandShadowEditorDialog(props: {
   const keyOf = (c: string, r: string) => `${c}|${r}`;
   const preview = (fn: (d: typeof live) => void) => useEditorStore.getState().mutateDoc(fn);
 
+  // Shadow Path preview pairs. Store state rather than doc state: OSS holds these
+  // on the canvas, so they are not saved and not undoable.
+  const shownPaths = useEditorStore((st) => st.visibleShadowPaths);
+  const pathShown = (c: string, r: string) => shownPaths.includes(`${c}|${r}`);
+  const togglePath = (c: string, r: string, on: boolean) => {
+    useEditorStore.getState().toggleVisibleShadowPath(c, r, on);
+    requestRender();
+  };
+
+  // Every (casting, receiving) pair this dialog lists — the set the header row's
+  // buttons act on. Built from the same two lists the rows render from, so a
+  // bulk toggle can never touch a pair the user cannot see.
+  const allPairs: { c: string; r: string }[] = [
+    ...receivers.map((r) => ({ c: layerName, r })),
+    ...maskRows.map(({ mask, recv }) => ({ c: mask, r: recv })),
+  ];
+  const allAre = (pred: (p: { c: string; r: string }) => boolean) =>
+    allPairs.length > 0 && allPairs.every(pred);
+
+  const allVisible = allAre((p) => isVisible(p.c, p.r));
+  const allFull = allAre((p) => isFull(p.c, p.r));
+  const allSubtract = allAre((p) => subsOf(p.c, p.r).length > 0);
+  const allPaths = allAre((p) => pathShown(p.c, p.r));
+
+  const setAllVisible = (v: boolean) =>
+    preview((d) => allPairs.forEach((p) => setShadowVisibilityUser(d, p.c, p.r, v)));
+  const setAllFull = (v: boolean) =>
+    preview((d) => allPairs.forEach((p) => setAllowFullShadow(d, p.c, p.r, v)));
+  const setAllSubtract = (v: boolean) =>
+    preview((d) => allPairs.forEach((p) =>
+      setSubtractedLayers(d, p.c, p.r, v ? availableSubtract(p.r) : [])));
+  const setAllPaths = (v: boolean) => {
+    const st = useEditorStore.getState();
+    allPairs.forEach((p) => st.toggleVisibleShadowPath(p.c, p.r, v));
+    requestRender();
+  };
+
+  const ToggleBtn = (p: { active: boolean; label: string; onClick: () => void; title?: string }) => (
+    <button
+      type="button"
+      className={'gd-toggle-btn' + (p.active ? ' active' : '')}
+      onClick={p.onClick}
+      title={p.title}
+    >
+      {p.label}
+    </button>
+  );
+
   const viaMaskText = (mask: string, recv: string) =>
     t('shadow_via_mask', lang).replace('{0}', mask).replace('{1}', recv);
 
@@ -127,6 +186,11 @@ export function StrandShadowEditorDialog(props: {
           >
             {(isOpen ? '▼ ' : '▶ ') + t('shadow_subtract_on', lang)}
           </button>
+          <ToggleBtn
+            active={pathShown(casting, recv)}
+            label={t('shadow_path_button', lang)}
+            onClick={() => togglePath(casting, recv, !pathShown(casting, recv))}
+          />
         </div>
         {isOpen && (
           <div className="gd-shadow-subtract">
@@ -167,6 +231,25 @@ export function StrandShadowEditorDialog(props: {
       footer={<button onClick={close}>{t('close', lang)}</button>}
     >
       <div className="gd-shadow-editor">
+        {/* Bulk row (OSS shadow_editor_dialog.py:800-849). Hidden when there is
+            nothing to act on, so an empty editor shows only its explanation. */}
+        {allPairs.length > 0 && (
+          <div className="gd-shadow-toggle-row gd-shadow-global">
+            <span className="gd-swatch" style={{ background: cssColor(layerName) }} />
+            <span className="gd-member-name">{`${layerName} - ${t('select_all', lang)}`}</span>
+            <ToggleBtn active={allVisible} label={t('shadow_visible_on', lang)}
+              onClick={() => setAllVisible(!allVisible)} />
+            <ToggleBtn active={allFull} label={t('shadow_full_on', lang)}
+              title={t('shadow_stored_only_note', lang)}
+              onClick={() => setAllFull(!allFull)} />
+            <ToggleBtn active={allSubtract} label={t('shadow_subtract_on', lang)}
+              title={t('shadow_stored_only_note', lang)}
+              onClick={() => setAllSubtract(!allSubtract)} />
+            <ToggleBtn active={allPaths} label={t('shadow_show_all', lang)}
+              onClick={() => setAllPaths(!allPaths)} />
+          </div>
+        )}
+
         <div className="gd-member-list gd-shadow-scroll">
           {empty && (
             <div className="gd-member-row">

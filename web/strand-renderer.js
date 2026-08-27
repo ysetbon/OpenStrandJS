@@ -93,6 +93,11 @@ function applyPaintSettings(meta) {
   USE_DEFAULT_ARROW_COLOR = m.use_default_arrow_color !== false;
   DEFAULT_ARROW_FILL = m.default_arrow_fill_color && m.default_arrow_fill_color.a != null
     ? m.default_arrow_fill_color : null;
+  // Shadow Path preview pairs, [[caster, receiver], ...]. LIVE EDITOR ONLY: the
+  // shadow editor sets them while it is open and clears them on close. Absent =>
+  // [] => drawVisibleShadowPaths paints nothing, so the Qt oracle — which never
+  // sets the key — renders exactly as before.
+  VISIBLE_SHADOW_PATHS = Array.isArray(m.visible_shadow_paths) ? m.visible_shadow_paths : [];
 }
 // Curvature-bias gate (OSS canvas.enable_curvature_bias_control). Module-scoped
 // like CURVE/SHADOW_ENABLED because buildProfile is reached through a dozen
@@ -103,6 +108,7 @@ let BIAS_ENABLED = false;
 let SHADOW_ENABLED = false; // set per-fixture from meta.shadow_enabled
 let SHADOW_PAINT = null;    // paper.Color for shadows (solid-core paint)
 let SHADOW_OVERRIDES = {};  // meta.shadow_overrides, keyed [caster][receiver] (consumed in the Port phase)
+let VISIBLE_SHADOW_PATHS = []; // meta.visible_shadow_paths, [[caster, receiver], ...]
 
 // Faithful port of strand.py::_build_curve_profile. Returns {mode, segments}
 // in world coordinates; each segment is a cubic {p0, cp1, cp2, p3}.
@@ -710,10 +716,15 @@ function buildArrowShadowPath(s, P, enableThird, S) {
   return out;
 }
 
-function castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i) {
-  // Caster footprint. A MaskedStrand caster uses its mask-crossing region as the
-  // core and casts NO circles (Qt get_proper_masked_strand_path excludes circles);
-  // a body strand uses the stroked body core + visible end circles.
+// The caster half of castStrandShadow, lifted out verbatim so the Shadow Path
+// preview overlay computes its geometry through exactly this code rather than a
+// second copy of it. A preview that can disagree with the shadow it previews is
+// worse than no preview, and a copy WOULD drift: this block already carries four
+// separate Qt quirks (mask casters drop their circles, transparent end caps are
+// cut, the arrow unites in, the reject bounds are the CORE's).
+// Returns null when the caster has no drawable footprint. The caller owns both
+// returned paths and must remove() them.
+function buildCasterFootprint(s, byLayer, P, enableThird, S) {
   let core, circles = null;
   if (s.type === 'MaskedStrand') {
     core = buildMaskPath(s, byLayer, P, enableThird, S);
@@ -755,6 +766,76 @@ function castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i) 
   // (mirrors shader_utils.py:688-702). A receiver whose bounds don't overlap this
   // can't receive any blur fringe, so the pair is skipped before the boolean ops.
   const rejectBounds = core.bounds.expand(2 * MAX_BLUR * S);
+  return { core, circles, casterFootprint, rejectBounds };
+}
+
+// OSS's Shadow Path preview (strand_drawing_canvas.py:2794-2822): for each pair
+// the shadow editor has toggled on, paint that pair's computed shadow region as a
+// translucent blue overlay so the user can see WHERE a shadow actually lands.
+// Drawn last, over the finished image, and never persisted — it is an inspection
+// aid, not part of the drawing.
+//
+// The geometry comes from buildPairShadowRegion, the same function the real
+// shadow uses. OSS instead has a parallel implementation for the preview
+// (shader_utils.py calculate_shadow_for_layer_pair, :1936) which re-derives the
+// same pipeline and has already drifted from the renderer in one place — it
+// inflates the caster's circle geometry by max_blur_radius+2 where the render
+// path uses max_blur_radius. Sharing the one function is the point of a preview:
+// a preview that can disagree with the shadow it previews is worse than none.
+//
+// Visibility is gated exactly as castStrandShadow gates it, so a pair the port
+// would not draw previews as nothing — which is also what OSS does (:1986).
+function drawVisibleShadowPaths(strands, byLayer, P, enableThird, S) {
+  if (!VISIBLE_SHADOW_PATHS.length) return;
+  const rank = new Map();
+  for (let k = 0; k < strands.length; k++) rank.set(strands[k].layer_name, k);
+
+  for (const pair of VISIBLE_SHADOW_PATHS) {
+    if (!Array.isArray(pair) || pair.length < 2) continue;
+    const castName = pair[0], recvName = pair[1];
+    const i = rank.get(castName), j = rank.get(recvName);
+    // Shadow only falls downward, so a receiver at or above the caster has no
+    // region to show (OSS returns an empty path for it, :1957).
+    if (i == null || j == null || j >= i) continue;
+    const sCast = strands[i], oRecv = strands[j];
+    if (sCast.is_hidden === true || oRecv.is_hidden === true) continue;
+
+    const ov = (SHADOW_OVERRIDES[castName] || {})[recvName] || null;
+    if (ov && ov.visibility != null) {
+      if (ov.visibility === false) continue;
+    } else if (defaultShadowVisibilityFalse(sCast, oRecv)) {
+      continue;
+    }
+
+    const fp = buildCasterFootprint(sCast, byLayer, P, enableThird, S);
+    if (!fp) continue;
+    const pr = buildPairShadowRegion(
+      sCast, i, oRecv, j, strands, byLayer, P, enableThird, S,
+      fp.casterFootprint, ov, !!(ov && ov.allow_full_shadow), fp.rejectBounds);
+
+    if (pr.region && pr.region.area && Math.abs(pr.region.area) > 0.5) {
+      pr.region.fillColor = new paper.Color(0, 120 / 255, 1, 100 / 255);
+      pr.region.strokeColor = new paper.Color(0, 120 / 255, 1, 200 / 255);
+      // Scale by S like every other stroke here, so the 2px Qt pen stays 2px on
+      // screen instead of thinning as the supersample rises.
+      pr.region.strokeWidth = 2 * S;
+    } else if (pr.region) {
+      pr.region.remove();
+    }
+    if (pr.recv) pr.recv.remove();
+    fp.casterFootprint.remove();
+    fp.core.remove();
+    fp.circles && fp.circles.remove();
+  }
+}
+
+function castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i) {
+  // Caster footprint. A MaskedStrand caster uses its mask-crossing region as the
+  // core and casts NO circles (Qt get_proper_masked_strand_path excludes circles);
+  // a body strand uses the stroked body core + visible end circles.
+  const fp = buildCasterFootprint(s, byLayer, P, enableThird, S);
+  if (!fp) return;
+  const { core, circles, casterFootprint, rejectBounds } = fp;
 
   let combined = null;          // PASS A/B survivor union (caster ∩ receivers)
   let clip = null;              // PASS B clip = ⋃ receiver rendered geometry
@@ -1791,6 +1872,9 @@ window.renderFixture = function (strands, meta) {
     if (s.shadow_only) continue;
     drawStrand(s, strands, P, enableThird, S);
   }
+
+  // After every body, so the preview reads over the finished drawing.
+  drawVisibleShadowPaths(strands, byLayer, P, enableThird, S);
 
   paper.view.update();
 

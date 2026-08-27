@@ -148,6 +148,10 @@ export interface EditorState {
   pending: PendingStrand | null;     // new-strand / attach rubber-band preview
   maskPending: string[];             // 0..2 strands picked for an over/under mask
   eraser: { layerName: string; rect: { minX: number; minY: number; maxX: number; maxY: number } } | null;
+  // Shadow Path preview pairs, "caster|receiver". UI state, NOT document state:
+  // OSS keeps them on the canvas rather than in the project file, so they must
+  // not be saved, must not enter the undo stack, and must not survive a load.
+  visibleShadowPaths: string[];
   // Per-mask "Edit Mask" session (OSS canvas.mask_edit_mode + editing_masked_strand).
   // When set, the InteractionHost intercepts canvas drags as deletion-rectangle
   // erases on this mask (independent of the toolbar mode), the layer panel shows
@@ -213,6 +217,8 @@ export interface EditorState {
   setPending: (pending: PendingStrand | null) => void;
   setMaskPending: (maskPending: string[]) => void;
   setEraser: (eraser: EditorState['eraser']) => void;
+  toggleVisibleShadowPath: (casting: string, receiving: string, on: boolean) => void;
+  setVisibleShadowPaths: (pairs: string[]) => void;
   // Enter/exit the per-mask edit session. enterMaskEdit selects the mask and arms
   // erase interception; exitMaskEdit clears the target + any in-progress eraser.
   enterMaskEdit: (name: string) => void;
@@ -285,6 +291,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   pending: null,
   maskPending: [],
   eraser: null,
+  visibleShadowPaths: [],
   maskEditTarget: null,
   maskCreateMode: false,
   angleAdjust: null,
@@ -395,6 +402,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     past: [], future: [], gestureBase: null,    // a fresh load starts new history
     // Any in-flight mask edit/create session belongs to the old document — drop it.
     maskEditTarget: null, maskCreateMode: false, firstMaskedLayer: null, eraser: null,
+    // Preview pairs name layers in the OLD document — they mean nothing here.
+    visibleShadowPaths: [],
   })),
 
   setDoc: (doc) => set((s) => ({ doc, docRevision: s.docRevision + 1 })),
@@ -508,6 +517,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setPending: (pending) => set({ pending }),
   setMaskPending: (maskPending) => set({ maskPending }),
   setEraser: (eraser) => set({ eraser }),
+
+  // Pair key is "caster|receiver" so the set dedupes without a nested structure;
+  // buildMeta splits it back into the tuple the renderer wants.
+  toggleVisibleShadowPath: (casting, receiving, on) => set((s) => {
+    const key = `${casting}|${receiving}`;
+    const has = s.visibleShadowPaths.includes(key);
+    if (on === has) return {};
+    return {
+      visibleShadowPaths: on
+        ? [...s.visibleShadowPaths, key]
+        : s.visibleShadowPaths.filter((k) => k !== key),
+      docRevision: s.docRevision + 1,   // overlay is drawn by the renderer, so ask for a frame
+    };
+  }),
+  setVisibleShadowPaths: (pairs) => set((s) => ({
+    visibleShadowPaths: pairs, docRevision: s.docRevision + 1,
+  })),
 
   // OSS request_edit_mask -> enter_mask_edit_mode: only masked layers are editable.
   // Selects the mask (so its red outline shows), clears any pending pick, and opens
