@@ -62,16 +62,74 @@ export function requestOverlay(): void {
   schedule(1);
 }
 
+// Work that must run at the TOP of the next frame, before it paints. The pointer
+// handlers use this to apply a coalesced move: a 1000 Hz mouse fires ~16 moves
+// per displayed frame, and running the document edit for every one of them threw
+// away all but the last. Doing it here instead means one edit per painted frame,
+// with no added latency — the edit lands in the same frame that renders it, not
+// the next one. Tasks are deduplicated by identity, so a handler can register the
+// same drain function on every event.
+const frameTasks = new Set<() => void>();
+
+// Registering a task does NOT by itself ask for a render or an overlay redraw —
+// it only guarantees a frame will run. The task decides: a coalesced move that
+// edits the document calls requestRender, one that only updates hover calls
+// requestOverlay, and one that finds nothing changed leaves the frame empty.
+// That is what keeps plain mouse-over-the-canvas from forcing a full repaint at
+// display rate.
+export function requestFrameTask(task: () => void): void {
+  frameTasks.add(task);
+  ensureFrame();
+}
+
+// Run a registered task NOW and drop it from the queue. Pointer-up calls this so
+// the gesture finishes at the exact last position the pointer reported, rather
+// than wherever the previous frame left it.
+export function flushFrameTask(task: () => void): void {
+  if (!frameTasks.delete(task)) return;
+  runTask(task);
+}
+
+// Drop a queued task without running it — an aborted gesture must not have its
+// last move applied on the way out.
+export function cancelFrameTask(task: () => void): void {
+  frameTasks.delete(task);
+}
+
+function runTask(task: () => void): void {
+  try {
+    task();
+  } catch (err) {
+    console.error('[OpenStrandJS] frame task failed:', err);
+  }
+}
+
+let frameQueued = false;
+
+function ensureFrame(): void {
+  if (frameQueued) return;
+  frameQueued = true;
+  requestAnimationFrame(runFrame);
+}
+
+function runFrame(): void {
+  frameQueued = false;   // re-entrant requests queue a fresh frame
+  // Frame tasks first: they mutate the document this frame is about to draw, and
+  // they may raise the work level, so pendingWork is read only after they run.
+  if (frameTasks.size) {
+    const tasks = [...frameTasks];
+    frameTasks.clear();
+    for (const t of tasks) runTask(t);
+  }
+  const work = pendingWork;
+  pendingWork = 0; // reset BEFORE the work so re-entrant requests queue a fresh frame
+  if (work === 2) renderNow();
+  if (work >= 1) syncOverlay();
+}
+
 function schedule(level: 1 | 2): void {
-  const wasIdle = pendingWork === 0;
   if (level > pendingWork) pendingWork = level;
-  if (!wasIdle) return; // a frame is queued; it will pick up the (upgraded) level
-  requestAnimationFrame(() => {
-    const work = pendingWork;
-    pendingWork = 0; // reset BEFORE the work so re-entrant requests queue a fresh frame
-    if (work === 2) renderNow();
-    syncOverlay();
-  });
+  ensureFrame();
 }
 
 if (import.meta.env?.DEV) {
@@ -121,7 +179,18 @@ function renderNow(): void {
       // stale bake is still cached for a DIFFERENT moving set (re-grab after a
       // release). Same moving set => the static set is identical and unmoved, so
       // the cache is safely reused.
-      const key = dragMoving.join('|');
+      //
+      // The key carries the VIEW as well as the moving set. renderDragFrame
+      // refuses a bake whose size/pan/zoom no longer match and silently falls
+      // back to a full renderFixture — correct, but it never tells us, and this
+      // key only tracked the moving set, so a resize or pan mid-gesture (a
+      // splitter drag firing the ResizeObserver, say) dropped the rest of that
+      // drag onto the slow path with no way back. Keying on the view means the
+      // mismatch re-bakes once and every later frame is fast again.
+      // draw_only_affected_strand rides along because it decides whether the
+      // static bands are baked at all.
+      const key = `${dragMoving.join('|')}|${settings.draw_only_affected_strand ? 1 : 0}`
+        + `#${meta.image_width}x${meta.image_height}@${meta.x_offset},${meta.y_offset},${meta.zoom ?? 1}`;
       if (!dragBaked || bakedKey !== key) {
         if (dragBaked) callEndDrag(); // drop the stale bake from the prior gesture
         callRenderDragBackground(arr, meta);

@@ -11,7 +11,7 @@
 
 import type { EditorDocument, HandleKind, Point, Settings, StrandRecord } from '../model/types';
 import { distToPolyline, sampleCenterline } from './hitGeometry';
-import { buildConnTable } from './connections';
+import { revisionConnTable } from './connections';
 import { maskComponents } from '../model/layerName';
 
 export type HitResult =
@@ -197,7 +197,7 @@ function moveCpHandles(s: StrandRecord, enableThird: boolean): { handle: HandleK
 
 export type MoveGrab = { layerName: string; handle: HandleKind } | null;
 
-export function moveGrab(world: Point, doc: EditorDocument, settings: Settings): MoveGrab {
+export function moveGrab(world: Point, doc: EditorDocument, settings: Settings, revision = -1): MoveGrab {
   const enableThird = settings.enable_third_control_point;
   // Pass 1 — control points, ALL strands, FORWARD. First hit wins over any endpoint.
   for (const name of doc.order) {
@@ -225,7 +225,10 @@ export function moveGrab(world: Point, doc: EditorDocument, settings: Settings):
     }
   }
   if (direct.length) {
-    const table = buildConnTable(doc);
+    // Cached against the document revision: hover asks for this table on every
+    // frame the cursor sits inside an endpoint square, and it only changes when
+    // the document does. A gesture in flight keeps its own pinned table.
+    const table = revisionConnTable(doc, revision);
     const joint: { name: string; side: 0 | 1 }[] = [];
     const addJoint = (name: string, side: 0 | 1) => {
       if (!joint.some((e) => e.name === name)) joint.push({ name, side });

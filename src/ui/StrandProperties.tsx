@@ -8,6 +8,15 @@ import { ColorField } from './ColorField';
 export function StrandProperties() {
   const name = useEditorStore((s) => s.selection.layerName);
   const strand = useEditorStore((s) => (name ? s.doc.strands[name] : null));
+  // The angle/length read-out below is derived from the strand's live geometry
+  // and has always tracked a drag frame by frame. A drag now edits the strand
+  // object IN PLACE (see mutateDocLive), so the selector above returns the same
+  // object every frame and would never re-render on its own — subscribing to the
+  // revision counter is what keeps the read-out live. It is deliberately the
+  // ONLY view that does: everything else in the chrome (layer names, colours,
+  // lock state, groups) is unchanged by a drag, so it stays asleep until the
+  // gesture ends.
+  useEditorStore((s) => s.docRevision);
   const commitEdit = useEditorStore((s) => s.commitEdit);
   // Threaded into the angle/length edit so a mask built on this strand drifts
   // its deletion rectangles with the same centroid rule a drag uses.

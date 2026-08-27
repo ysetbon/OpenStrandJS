@@ -58,9 +58,10 @@ export const RotateMode: Mode = {
     const st = useEditorStore.getState();
     const angle = Math.atan2(p.world.y - g.snap.pivot.y, p.world.x - g.snap.pivot.x);
     g.rotated = true;
-    st.mutateDoc((d) => applyRotateSnapshot(d, g.snap, angle, st.settings.curve_params));
-    // mutateDoc bumps docRevision -> CanvasStage re-renders #c + overlay.
-    void ctx;
+    // In-place edit, same contract as MoveMode: snapshotRotate + beginGesture
+    // ran at pointer-down, so the undo baseline is already independent.
+    st.mutateDocLive((d) => applyRotateSnapshot(d, g.snap, angle, st.settings.curve_params));
+    ctx.requestRender();   // paint this move in THIS frame, not the next one
   },
 
   onPointerUp(_p: PointerInfo, ctx: ModeContext) {
