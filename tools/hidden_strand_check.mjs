@@ -7,10 +7,19 @@
 // byLayer — built from that array — hiding one component silently took the whole
 // mask down with it.
 //
+// The fix has two halves and this checks BOTH, because either one alone would
+// resurrect the bug: the ADAPTER (src/renderer/toRenderArray.ts) has to keep
+// hidden strands in the array, and the RENDERER has to skip painting them. The
+// adapter is compiled on the fly with the repo's own tsc — it imports nothing at
+// runtime (its only import is `import type`), so it loads standalone.
+//
 // Usage: node tools/hidden_strand_check.mjs
 //        OSS_CHROMIUM=/path/to/chrome node tools/hidden_strand_check.mjs
 import { chromium } from 'playwright';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 
@@ -31,6 +40,32 @@ const meta = {
   supersample: 2, shadow_enabled: true,
   curve_params: { base_fraction: 1.0, dist_multiplier: 2.0, exponent: 2.0 },
 };
+
+// ---- compile and load the real adapter -------------------------------------
+const outDir = mkdtempSync(path.join(tmpdir(), 'ossjs-adapter-'));
+execFileSync(
+  process.platform === 'win32' ? 'npx.cmd' : 'npx',
+  ['tsc', 'src/renderer/toRenderArray.ts', '--outDir', outDir,
+   '--module', 'commonjs', '--target', 'es2020', '--skipLibCheck'],
+  { cwd: root, stdio: 'inherit' },
+);
+const { toRenderArray } = createRequire(import.meta.url)(
+  path.join(outDir, 'renderer', 'toRenderArray.js'));
+
+// Minimal EditorDocument over the fixture's strands. The loader routes unmodeled
+// keys into `extra`, so mirror that here — it keeps the adapter's output faithful
+// without pulling the whole loader in. `omit` drops a layer entirely (the old
+// behavior); `hide` flags it (the new one).
+function makeDoc({ only, omit, hide } = {}) {
+  const doc = { order: [], strands: {} };
+  for (const s of strands) {
+    if (only && !only.includes(s.layer_name)) continue;
+    if (omit === s.layer_name) continue;
+    doc.strands[s.layer_name] = { ...s, extra: { ...s }, is_hidden: hide === s.layer_name };
+    doc.order.push(s.layer_name);
+  }
+  return doc;
+}
 
 const browser = await chromium.launch(
   process.env.OSS_CHROMIUM ? { executablePath: process.env.OSS_CHROMIUM } : {});
@@ -57,7 +92,8 @@ try {
   const hide = (name) => strands.map((s) => (s.layer_name === name ? { ...s, is_hidden: true } : { ...s }));
   const drop = (name) => strands.filter((s) => s.layer_name !== name).map((s) => ({ ...s }));
   // The mask plus its two components, so the mask's own ink is isolated.
-  const trio = strands.filter((s) => [mask.layer_name, over, under].includes(s.layer_name));
+  const trioNames = [mask.layer_name, over, under];
+  const trio = strands.filter((s) => trioNames.includes(s.layer_name));
 
   const base = await shoot(strands.map((s) => ({ ...s })));
   const componentHidden = await shoot(hide(over));
@@ -73,6 +109,27 @@ try {
     if (!cond) fails++;
   };
 
+  // ---- ADAPTER half: hidden strands must survive src/renderer/toRenderArray.ts.
+  // These are the assertions that go red if the `if (s.is_hidden) continue;`
+  // filter is ever reinstated there — the pixel checks below cannot see that,
+  // because they hand the renderer an array the adapter never touched.
+  const adapted = toRenderArray(makeDoc({ hide: over }));
+  const hiddenRow = adapted.find((s) => s.layer_name === over);
+  ok('adapter keeps a hidden strand in the array', !!hiddenRow,
+    `${over} was dropped by toRenderArray`);
+  ok('adapter flags it is_hidden for the renderer', hiddenRow?.is_hidden === true,
+    `is_hidden was ${hiddenRow?.is_hidden}`);
+  ok('adapter still emits the mask that depends on it',
+    adapted.some((s) => s.layer_name === mask.layer_name));
+
+  // End-to-end through the adapter: its output, rendered, still shows the mask.
+  const viaAdapter = await shoot(toRenderArray(makeDoc({ only: trioNames, hide: over })));
+  const viaAdapterDropped = await shoot(toRenderArray(makeDoc({ only: trioNames, omit: over })));
+  ok('adapter output renders the mask when a component is hidden',
+    viaAdapter.h !== viaAdapterDropped.h,
+    'hiding and dropping produced the same image — the adapter is filtering');
+
+  // ---- RENDERER half -------------------------------------------------------
   ok('canvas renders at all', base.ink > 0);
   ok('hiding a component drops its own body + shadow', componentHidden.ink < base.ink,
     `${componentHidden.ink} !< ${base.ink}`);
@@ -87,4 +144,5 @@ try {
   process.exit(fails ? 1 : 0);
 } finally {
   await browser.close();
+  rmSync(outDir, { recursive: true, force: true });
 }
