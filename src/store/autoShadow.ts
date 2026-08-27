@@ -73,10 +73,16 @@ function weldChainIds(doc: EditorDocument): Map<string, string> {
 // Never throws; returns true if the overrides changed.
 export function recomputeAutoShadowOverrides(
   draft: EditorDocument,
-  settings?: Pick<Settings, 'curve_params'>,
+  settings?: Partial<Pick<Settings, 'curve_params' | 'enable_third_control_point' | 'enable_curvature_bias_control'>>,
 ): boolean {
   try {
-    const curveParams = settings?.curve_params ?? useEditorStore.getState().settings.curve_params;
+    // The probe must build the SAME curves the renderer draws, or the areas it
+    // measures describe a shape the user never sees. That means the two
+    // curve-shaping settings travel with curve_params.
+    const live = useEditorStore.getState().settings;
+    const curveParams = settings?.curve_params ?? live.curve_params;
+    const enableThird = settings?.enable_third_control_point ?? live.enable_third_control_point;
+    const enableBias = settings?.enable_curvature_bias_control ?? live.enable_curvature_bias_control;
     const probe = (globalThis as Record<string, unknown>).computeShadowPairAreas as ProbeFn | undefined;
     let changed = false;
 
@@ -147,6 +153,8 @@ export function recomputeAutoShadowOverrides(
       shadow_enabled: true,
       shadow_overrides: overrides,
       curve_params: curveParams,
+      enable_third_control_point: enableThird,
+      enable_curvature_bias_control: enableBias,
       layer_order: [...draft.order],
     };
     const results = probe(arr as unknown[], meta, pairs);

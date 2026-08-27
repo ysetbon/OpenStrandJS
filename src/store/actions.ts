@@ -272,13 +272,83 @@ export function setStrandAngle(
 ): void {
   const s = draft.strands[layerName];
   if (!s) return;
-  const len = Math.hypot(s.end.x - s.start.x, s.end.y - s.start.y);
-  const rad = (angleDeg * Math.PI) / 180;
-  const newEnd: Point = {
-    x: s.start.x + Math.cos(rad) * len,
-    y: s.start.y + Math.sin(rad) * len,
+  setStrandAngleLength(draft, layerName, angleDeg,
+    Math.hypot(s.end.x - s.start.x, s.end.y - s.start.y), curve);
+}
+
+// Set a strand's absolute angle AND length, pivoting on its START.
+//
+// Faithful to OSS AngleAdjustMode (angle_adjust_mode.py:340-392): the end moves,
+// and the control points come with it — cp1, cp2 and control_point_center are each
+// ROTATED about the start by the angle difference and SCALED by the length ratio
+// (`rotate_control_points_to_new_angle`, which rebuilds them from vectors captured
+// relative to the start). Without that the handles stay put while the endpoint
+// swings, so a curved strand DEFORMS instead of rotating — the divergence this
+// fixes.
+//
+// OSS works from vectors snapshotted when the dialog opened and applies an absolute
+// rotation; we are called per-edit with an absolute target, so we apply the delta
+// against the current geometry. For a single edit the two are identical, and across
+// a slider drag the deltas compose to the same total rotation.
+export function setStrandAngleLength(
+  draft: EditorDocument,
+  layerName: string,
+  angleDeg: number,
+  length: number,
+  curve?: Settings['curve_params'],
+): void {
+  const s = draft.strands[layerName];
+  if (!s) return;
+
+  const pivot = { x: s.start.x, y: s.start.y };
+  const curDx = s.end.x - pivot.x, curDy = s.end.y - pivot.y;
+  const curLen = Math.hypot(curDx, curDy);
+  const newLen = Math.max(0, length);
+  // A zero-length strand has no defined angle to rotate away from; treat the
+  // requested angle as absolute and leave the handles where they are.
+  const curAngle = curLen > 1e-9 ? Math.atan2(curDy, curDx) : (angleDeg * Math.PI) / 180;
+  const target = (angleDeg * Math.PI) / 180;
+  const delta = target - curAngle;
+  const scale = curLen > 1e-9 ? newLen / curLen : 1;
+
+  // Snapshot the handle vectors BEFORE moveHandle touches anything (it drags cp2
+  // onto the endpoint while cp2 is passive, which would otherwise clobber them).
+  const cos = Math.cos(delta), sin = Math.sin(delta);
+  const carry = (p: Point): Point => {
+    const vx = (p.x - pivot.x) * scale, vy = (p.y - pivot.y) * scale;
+    return { x: pivot.x + vx * cos - vy * sin, y: pivot.y + vx * sin + vy * cos };
   };
-  moveHandle(draft, layerName, 'end', newEnd, curve);   // curve -> faithful mask-rect tracking
+  const cp0 = carry(s.control_points[0]);
+  const cp1 = carry(s.control_points[1]);
+  const cpc = s.control_point_center ? carry(s.control_point_center) : null;
+
+  const newEnd: Point = {
+    x: pivot.x + Math.cos(target) * newLen,
+    y: pivot.y + Math.sin(target) * newLen,
+  };
+  // moveHandle carries the welded/attached peers and drifts mask deletion rects.
+  moveHandle(draft, layerName, 'end', newEnd, curve);
+
+  // Now impose the rotated handles, overriding moveHandle's endpoint-follow rule:
+  // OSS rebuilds them from the rotated vectors rather than snapping cp2 to the end.
+  const t = draft.strands[layerName];
+  if (!t) return;
+  t.control_points[0] = cp0;
+  t.control_points[1] = cp1;
+  const mid = {
+    x: (cp0.x + cp1.x) / 2,
+    y: (cp0.y + cp1.y) / 2,
+  };
+  if (t.control_point_center_locked && cpc) {
+    t.control_point_center = cpc;
+    // Same 0.5px auto-unlock as update_shape (strand.py:767-780).
+    if (Math.hypot(cpc.x - mid.x, cpc.y - mid.y) < 0.5) {
+      t.control_point_center_locked = false;
+      t.control_point_center = mid;
+    }
+  } else {
+    t.control_point_center = mid;
+  }
 }
 
 // Create a free first strand of a brand-new set. Returns the new layer_name.
@@ -1074,7 +1144,7 @@ export function createMaskGrid(
 // Dev-only debug handle for testing actions directly.
 if (import.meta.env?.DEV) {
   (globalThis as Record<string, unknown>).__actions = {
-    moveHandle, setStrandAngle, addNewStrand, attachChild, createMask, addDeletionRect, resetMask,
+    moveHandle, setStrandAngle, setStrandAngleLength, addNewStrand, attachChild, createMask, addDeletionRect, resetMask,
     deleteStrand, deleteAllStrands, reorderLayer, toggleHidden, toggleLock,
     setColor, setWidth, setWidthGridUnits, setShadowOnly, isStrandDeletable,
     setCircleStrokeColor, toggleCircleVisible, toggleLineVisible, closeKnot,

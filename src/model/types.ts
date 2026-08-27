@@ -258,6 +258,11 @@ export interface RenderStrand {
   arrow_color?: RGBA | null;
   arrow_transparency?: number;
   arrow_head_visible?: boolean;
+  // OSS curvature bias (curvature_bias_control.py). Shifts where the cubic's
+  // control handles sit along the profile; 0.5/0.5 is neutral. Read by the
+  // renderer only while meta.enable_curvature_bias_control is on, matching
+  // strand.py::_build_curve_profile. Rides the `extra` bag in the model.
+  bias_control?: { triangle_bias?: number; circle_bias?: number } | null;
 }
 
 export interface RenderMeta {
@@ -275,6 +280,14 @@ export interface RenderMeta {
   // behavior), so the fidelity oracle (which never sets it) is byte-identical.
   shadow_overrides?: ShadowOverrides;
   curve_params: { base_fraction: number; dist_multiplier: number; exponent: number };
+  // The two curve-shaping USER SETTINGS. In OSS these live on the canvas and are
+  // read by strand.py::_build_curve_profile; they are not properties of the data,
+  // so the editor must pass them per render. Both are absent-safe: without
+  // enable_third_control_point the renderer infers it from the strands exactly as
+  // the Qt oracle does (reference_render.py:117-121), and without
+  // enable_curvature_bias_control bias stays pinned at the neutral 0.5.
+  enable_third_control_point?: boolean;
+  enable_curvature_bias_control?: boolean;
   // Interactive drag fast-path ONLY (the fidelity harness never sets this). The
   // layer_names whose geometry moves with the dragged endpoint: renderDragBackground
   // bakes everything EXCEPT these once, and renderDragFrame draws only these over
