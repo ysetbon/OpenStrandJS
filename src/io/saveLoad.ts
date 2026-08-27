@@ -72,7 +72,13 @@ function loadStrand(raw: any): StrandRecord {
     cp2 = asPoint(raw.control_points[1], end);
   }
 
-  const extra: Record<string, unknown> = {};
+  // Null-prototype: JSON.parse makes "__proto__" an OWN property, so Object.keys
+  // yields it — and `bag[k] = v` on a normal object would hit the Object.prototype
+  // __proto__ SETTER instead of defining a key, silently dropping the field from
+  // the round trip (and re-pointing the bag's prototype). A passthrough bag whose
+  // whole job is "every unmodeled key survives verbatim" cannot have a key that
+  // vanishes. Object.create(null) has no such setter, so it stores plainly.
+  const extra: Record<string, unknown> = Object.create(null);
   for (const k of Object.keys(raw)) {
     if (!MODELED_KEYS.has(k)) extra[k] = raw[k];
   }
@@ -146,7 +152,7 @@ export function loadProject(data: unknown): EditorDocument {
     order.push(rec.layer_name);
   }
 
-  const extra: Record<string, unknown> = {};
+  const extra: Record<string, unknown> = Object.create(null); // see loadStrand
   for (const k of Object.keys(proj || {})) {
     if (!MODELED_PROJECT_KEYS.has(k)) extra[k] = proj[k];
   }
