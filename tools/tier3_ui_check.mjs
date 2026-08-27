@@ -1,0 +1,183 @@
+// End-to-end guard for the Tier-3 UI wiring, driven through the BUILT editor in
+// Chromium. The geometry itself is covered by tools/tier3_check.mjs; what this
+// adds is that the React surfaces reach it at all — a correct rotate action is
+// worth nothing if the toolbar never dispatches to RotateMode.
+//
+// The rotate drag is aimed deterministically rather than by sweeping the canvas:
+// the fixture is loaded with the editor's own loadProject, a free endpoint is
+// picked from it, and fitPan (the same function the Load button calls) converts
+// that world point to a page coordinate.
+//
+// Usage: node tools/tier3_ui_check.mjs [distDir]
+//        OSS_CHROMIUM=/path/to/chrome node tools/tier3_ui_check.mjs
+import { chromium } from 'playwright';
+import { createServer } from 'node:http';
+import { execFileSync } from 'node:child_process';
+import { readFileSync, existsSync, statSync, mkdtempSync, rmSync, writeFileSync, symlinkSync, readdirSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const dist = path.resolve(root, process.argv[2] || 'dist-editor');
+if (!existsSync(path.join(dist, 'index.html'))) {
+  console.error(`no built editor at ${dist} — run \`npm run build:editor\` first`);
+  process.exit(2);
+}
+
+let fails = 0;
+const ok = (n, c, x = '') => { console.log((c ? 'PASS  ' : 'FAIL  ') + n + (c ? '' : '  ' + x)); if (!c) fails++; };
+
+// ---- work out where to press, using the editor's own load + fit maths --------
+const out = mkdtempSync(path.join(tmpdir(), 'ossjs-t3ui-'));
+try {
+  execFileSync(process.platform === 'win32' ? 'npx.cmd' : 'npx',
+    ['tsc', 'src/io/saveLoad.ts', 'src/interaction/viewTransform.ts',
+     '--outDir', out, '--module', 'commonjs', '--target', 'es2020', '--skipLibCheck'],
+    { cwd: root, stdio: 'pipe' });
+} catch { /* tsc reports import.meta under --module commonjs; it still emits */ }
+const strip = (dir) => {
+  for (const e of readdirSync(dir)) {
+    const p = path.join(dir, e);
+    if (statSync(p).isDirectory()) { strip(p); continue; }
+    if (!p.endsWith('.js')) continue;
+    const s = readFileSync(p, 'utf8');
+    if (!s.includes('import.meta')) continue;
+    writeFileSync(p, s.replace(/if \(import\.meta\.env\?\.DEV\)\s*\{[\s\S]*?\n\}\n?/g, '')
+                     .replace(/if \(import\.meta\.env\?\.DEV\)[^\n]*\n(?:\s{4}[^\n]*\n)*/g, ''));
+  }
+};
+strip(out);
+writeFileSync(path.join(out, 'package.json'), '{"type":"commonjs"}');
+try { symlinkSync(path.join(root, 'node_modules'), path.join(out, 'node_modules'), 'dir'); } catch { /* exists */ }
+const require = createRequire(path.join(out, 'x.js'));
+const { loadProject } = require(path.join(out, 'io/saveLoad.js'));
+const { fitPan } = require(path.join(out, 'interaction/viewTransform.js'));
+
+const fixtureText = readFileSync(path.join(root, 'fixtures/box_stitch.json'), 'utf8');
+const doc = loadProject(JSON.parse(fixtureText));
+// A FREE endpoint (has_circles false) on a non-mask strand — the only thing
+// RotateMode will grab (rotate_mode.py:172-175).
+let grabWorld = null;
+for (const name of doc.order) {
+  const s = doc.strands[name];
+  if (!s || s.type === 'MaskedStrand') continue;
+  if (!s.has_circles[0]) { grabWorld = { ...s.start }; break; }
+  if (!s.has_circles[1]) { grabWorld = { ...s.end }; break; }
+}
+ok('the fixture has a free endpoint to rotate', !!grabWorld);
+
+// ---- serve the built editor -------------------------------------------------
+const BASE = '/OpenStrandJS/';
+const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
+const server = createServer((req, res) => {
+  let p = decodeURIComponent(req.url.split('?')[0]);
+  if (p.startsWith(BASE)) p = p.slice(BASE.length - 1);
+  let f = path.join(dist, p);
+  if (!existsSync(f) || statSync(f).isDirectory()) f = path.join(dist, 'index.html');
+  res.writeHead(200, { 'Content-Type': MIME[path.extname(f)] || 'application/octet-stream' });
+  res.end(readFileSync(f));
+});
+await new Promise((r) => server.listen(0, r));
+const url = `http://localhost:${server.address().port}${BASE}`;
+
+const browser = await chromium.launch(process.env.OSS_CHROMIUM ? { executablePath: process.env.OSS_CHROMIUM } : {});
+try {
+  const page = await browser.newPage({ viewport: { width: 1500, height: 950 } });
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+
+  await page.goto(url, { waitUntil: 'load', timeout: 30000 });
+  await page.waitForTimeout(1200);
+  // Load through the real hidden <input type=file> the Load button drives.
+  await page.setInputFiles('input[type=file]',
+    { name: 'box_stitch.json', mimeType: 'application/json', buffer: Buffer.from(fixtureText) });
+  await page.waitForTimeout(1500);
+
+  const layers = page.locator('.nlb');
+  ok('the project loaded and produced layer buttons', await layers.count() > 0);
+  // A REGULAR strand: OSS refuses the angle dialog and the width menu for masks
+  // (main_window.py:1250-1253), and this port must too.
+  const regular = layers.filter({ hasText: /^\d+_\d+$/ }).first();
+
+  const snapshot = () => page.evaluate(() => {
+    const c = document.getElementById('c');
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let h = 0;
+    for (let i = 0; i < d.length; i += 997) h = (h * 31 + d[i]) >>> 0;
+    return h;
+  });
+
+  // ---- rotate -------------------------------------------------------------
+  await page.locator('.tb-btn', { hasText: 'Rotate' }).first().click();
+  await page.waitForTimeout(300);
+  ok('rotate mode sets the OSS SizeAll cursor',
+    await page.locator('#c').evaluate((el) => getComputedStyle(el).cursor) === 'move');
+
+  const geom = await page.locator('#c').evaluate((c) => {
+    const r = c.getBoundingClientRect();
+    return { w: c.width, h: c.height, left: r.left, top: r.top };
+  });
+  // The editor calls fitPan on load, so screen = world * zoom + pan at zoom 1.
+  const pan = fitPan(doc, { zoom: 1, panX: 0, panY: 0, width: geom.w, height: geom.h, supersample: 2 });
+  const px = geom.left + grabWorld.x + pan.panX;
+  const py = geom.top + grabWorld.y + pan.panY;
+
+  const beforeRotate = await snapshot();
+  await page.mouse.move(px, py);
+  await page.mouse.down();
+  await page.mouse.move(px + 80, py + 80, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(600);
+  ok('a rotate drag on a free endpoint changes the canvas',
+    await snapshot() !== beforeRotate,
+    'RotateMode never fired — the toolbar or the mode registry is not wired');
+
+  // ---- the angle dialog ---------------------------------------------------
+  await page.locator('.tb-btn', { hasText: 'Move' }).first().click();
+  await regular.click();
+  await page.waitForTimeout(300);
+  await page.locator('.tb-btn', { hasText: 'Angle' }).first().click();
+  await page.waitForTimeout(500);
+  const dialog = page.locator('[role=dialog]');
+  ok('the Adjust Angle and Length dialog opens', await dialog.count() > 0);
+  if (await dialog.count() > 0) {
+    const sliders = dialog.locator('input[type=range]');
+    ok('it carries the angle + length sliders', await sliders.count() === 2, `${await sliders.count()} sliders`);
+    const beforePreview = await snapshot();
+    await sliders.first().fill('75');
+    await page.waitForTimeout(500);
+    ok('moving the angle slider previews on the canvas', await snapshot() !== beforePreview);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+    ok('Escape closes it', await page.locator('[role=dialog]').count() === 0);
+  }
+
+  // ---- the width dialog ---------------------------------------------------
+  await regular.click({ button: 'right' });
+  await page.waitForTimeout(400);
+  const widthItem = page.getByText('Change Width', { exact: true }).first();
+  ok('the layer menu offers Change Width', await widthItem.count() > 0);
+  if (await widthItem.count() > 0) {
+    await widthItem.click();
+    await page.waitForTimeout(400);
+    const d = page.locator('[role=dialog]');
+    ok('the Change Width dialog opens (it was a window.prompt)', await d.count() > 0);
+    if (await d.count() > 0) {
+      ok('it carries the thickness box and the stroke slider',
+        await d.locator('input[type=number]').count() === 1 &&
+        await d.locator('input[type=range]').count() === 1);
+    }
+  }
+
+  ok('no page errors along the way', errors.length === 0, errors.slice(0, 3).join(' | '));
+} finally {
+  // browser.close() can hang on some platforms; race it so the process still exits.
+  await Promise.race([browser.close().catch(() => {}), new Promise((r) => setTimeout(r, 1500))]);
+  server.close();
+  rmSync(out, { recursive: true, force: true });
+}
+console.log(fails ? `\n${fails} FAILURE(S)` : '\nall green');
+process.exitCode = fails ? 1 : 0;

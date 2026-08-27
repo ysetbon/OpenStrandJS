@@ -374,6 +374,281 @@ export function setStrandAngleLength(
   }
 }
 
+// ------------------------------------------------- angle-adjust dialog geometry
+//
+// OSS AngleAdjustMode (angle_adjust_mode.py) is the modal "Adjust Angle and Length"
+// tool, and it is NOT the same operation as dragging the endpoint:
+//
+//   * every update is ABSOLUTE from a snapshot taken at activate() (:43-71) — the
+//     handles are rebuilt from their initial vectors, scaled by length/initial_length
+//     and rotated by (angle - initial_angle) about the START (:360-388, 521-524), so
+//     dragging the slider back to where it began restores the exact original curve;
+//   * a glued child is re-anchored, not welded: its start snaps to the new endpoint,
+//     its far end stays PUT, and both its handles TRANSLATE by the endpoint delta
+//     (:419-456). moveHandle instead carries a child's handle only when it sat on the
+//     junction, which is right for a drag and wrong here.
+//
+// (OSS also recurses into grandchildren at :456. That walk re-anchors each one to its
+// parent's END, which this operation never moves, so it is a no-op; one level is
+// enough to reproduce it.)
+export interface AngleAdjustSnapshot {
+  name: string;
+  start: Point;                // the pivot — fixed for the whole dialog
+  end: Point;                  // endpoint at activate()
+  cp1Vec: Point;               // handle vectors relative to start, at activate()
+  cp2Vec: Point;
+  cpCenterVec: Point | null;
+  cpCenterLocked: boolean;
+  initialAngle: number;        // degrees; 0 deg = +x, growing clockwise (y grows down)
+  initialLength: number;
+  maxLength: number;           // max(10, int(initial * 2))  (:68)
+  children: { name: string; end: Point; cp1: Point; cp2: Point }[];
+}
+
+export function snapshotAngleAdjust(doc: EditorDocument, name: string): AngleAdjustSnapshot | null {
+  const s = doc.strands[name];
+  if (!s || s.type === 'MaskedStrand') return null;
+  const dx = s.end.x - s.start.x, dy = s.end.y - s.start.y;
+  const len = Math.hypot(dx, dy);
+  const children: AngleAdjustSnapshot['children'] = [];
+  for (const other of doc.order) {
+    const o = doc.strands[other];
+    if (!o || other === name || o.type === 'MaskedStrand') continue;
+    if (o.attached_to !== name) continue;
+    // OSS matches on MANHATTAN distance < 1 (:430), not exact equality.
+    if (Math.abs(o.start.x - s.end.x) + Math.abs(o.start.y - s.end.y) >= 1) continue;
+    children.push({
+      name: other, end: { ...o.end },
+      cp1: { ...o.control_points[0] }, cp2: { ...o.control_points[1] },
+    });
+  }
+  return {
+    name,
+    start: { ...s.start }, end: { ...s.end },
+    cp1Vec: { x: s.control_points[0].x - s.start.x, y: s.control_points[0].y - s.start.y },
+    cp2Vec: { x: s.control_points[1].x - s.start.x, y: s.control_points[1].y - s.start.y },
+    cpCenterVec: s.control_point_center
+      ? { x: s.control_point_center.x - s.start.x, y: s.control_point_center.y - s.start.y }
+      : null,
+    cpCenterLocked: !!s.control_point_center_locked,
+    initialAngle: (Math.atan2(dy, dx) * 180) / Math.PI,
+    initialLength: len,
+    maxLength: Math.max(10, Math.trunc(len * 2)),
+    children,
+  };
+}
+
+// Apply (angleDeg, length) absolutely from the snapshot. Idempotent — safe to call on
+// every slider tick, and re-applying the initial pair is an exact round-trip.
+export function applyAngleAdjustSnapshot(
+  draft: EditorDocument,
+  snap: AngleAdjustSnapshot,
+  angleDeg: number,
+  length: number,
+  curve?: Settings['curve_params'],
+): void {
+  const s = draft.strands[snap.name];
+  if (!s) return;
+  const rad = (angleDeg * Math.PI) / 180;
+  const newEnd: Point = {
+    x: snap.start.x + Math.cos(rad) * length,
+    y: snap.start.y + Math.sin(rad) * length,
+  };
+  s.end = newEnd;
+
+  const scale = snap.initialLength > 1e-9 ? length / snap.initialLength : 1;
+  const dRad = ((angleDeg - snap.initialAngle) * Math.PI) / 180;
+  const cos = Math.cos(dRad), sin = Math.sin(dRad);
+  const place = (v: Point): Point => {
+    const sx = v.x * scale, sy = v.y * scale;
+    return { x: snap.start.x + sx * cos - sy * sin, y: snap.start.y + sx * sin + sy * cos };
+  };
+  s.control_points = [place(snap.cp1Vec), place(snap.cp2Vec)];
+  // As in rotate: OSS places the centre explicitly and then lets update_shape
+  // re-derive it from the cp midpoint unless it is pinned (strand.py:767-780).
+  const mid = {
+    x: (s.control_points[0].x + s.control_points[1].x) / 2,
+    y: (s.control_points[0].y + s.control_points[1].y) / 2,
+  };
+  s.control_point_center = snap.cpCenterLocked && snap.cpCenterVec ? place(snap.cpCenterVec) : mid;
+  s.control_point_center_locked = snap.cpCenterLocked;
+
+  const ddx = newEnd.x - snap.end.x, ddy = newEnd.y - snap.end.y;
+  const moved = new Set<string>([snap.name]);
+  for (const c of snap.children) {
+    const cs = draft.strands[c.name];
+    if (!cs) continue;
+    cs.start = { x: newEnd.x, y: newEnd.y };
+    cs.end = { x: c.end.x, y: c.end.y };            // the far end is explicitly held
+    cs.control_points = [
+      { x: c.cp1.x + ddx, y: c.cp1.y + ddy },
+      { x: c.cp2.x + ddx, y: c.cp2.y + ddy },
+    ];
+    const cmid = {
+      x: (cs.control_points[0].x + cs.control_points[1].x) / 2,
+      y: (cs.control_points[0].y + cs.control_points[1].y) / 2,
+    };
+    if (cs.control_point_center_locked && cs.control_point_center) {
+      cs.control_point_center = { x: cs.control_point_center.x + ddx, y: cs.control_point_center.y + ddy };
+    } else {
+      cs.control_point_center = cmid;
+    }
+    moved.add(c.name);
+  }
+
+  // Same flagged deviation as rotate: OSS AngleAdjustMode leaves mask erase windows
+  // behind when it moves a component. Drift them by the centroid delta, as
+  // move_mode.py:2978-3031 does for the equivalent geometry change.
+  trackMaskDeletionRects(draft, moved, curve);
+}
+
+// ---------------------------------------------------------------- rotate mode
+//
+// OSS RotateMode (rotate_mode.py) swings ONE FREE endpoint of a strand around the
+// other endpoint, keeping the straight-line chord length fixed. It is a different
+// gesture from a move: the control points rotate rigidly with the body, and any
+// strand glued to the swinging endpoint is carried along WHOLE (start, end and both
+// handles all translate by the same delta) instead of pivoting on its junction.
+//
+// Everything is applied ABSOLUTELY from a snapshot taken at grab time rather than
+// incrementally per frame. OSS accumulates per-frame deltas (:296-307) which is
+// equivalent for a fixed pivot but accumulates float error across a long drag.
+
+export interface RotateSnapshot {
+  name: string;
+  side: 0 | 1;                 // which endpoint swings (0 = start, 1 = end)
+  pivot: Point;                // the other endpoint — fixed for the whole gesture
+  origPoint: Point;            // the swinging endpoint at grab time
+  origAngle: number;           // radians, pivot -> origPoint
+  chordLen: number;            // preserved (calculate_new_position, :241-262)
+  cp1: Point; cp2: Point; cpCenter: Point | null;
+  cpCenterLocked: boolean;
+  children: { name: string; start: Point; end: Point; cp1: Point; cp2: Point }[];
+}
+
+// Which endpoint a press grabs. OSS iterates canvas.strands FORWARD (bottom-first,
+// try_rotate_strand :166-178): masks are skipped, the hit area is a SQUARE of side
+// 2*width centred on the endpoint (get_end_rectangle :215-227), start is tested
+// before end, and an endpoint is grabbable only when it is FREE — has_circles[side]
+// false, i.e. nothing is attached there. Hidden strands are NOT skipped and lock
+// mode is not consulted; both are faithful to OSS.
+export function rotateGrab(doc: EditorDocument, w: Point): { name: string; side: 0 | 1 } | null {
+  for (const name of doc.order) {
+    const s = doc.strands[name];
+    if (!s || s.type === 'MaskedStrand') continue;
+    for (const side of [0, 1] as const) {
+      if (s.has_circles[side]) continue;
+      const p = side === 0 ? s.start : s.end;
+      if (Math.abs(w.x - p.x) <= s.width && Math.abs(w.y - p.y) <= s.width) return { name, side };
+    }
+  }
+  return null;
+}
+
+export function snapshotRotate(doc: EditorDocument, name: string, side: 0 | 1): RotateSnapshot | null {
+  const s = doc.strands[name];
+  if (!s) return null;
+  const origPoint = side === 0 ? { ...s.start } : { ...s.end };
+  const pivot = side === 0 ? { ...s.end } : { ...s.start };
+  // OSS matches children by EXACT equality against the moving endpoint
+  // (update_attached_strands :392-395). Only this strand's own attached children
+  // are considered — a knot peer or an unrelated strand that merely happens to
+  // touch the endpoint does not ride along in rotate mode.
+  const children: RotateSnapshot['children'] = [];
+  for (const other of doc.order) {
+    const o = doc.strands[other];
+    if (!o || other === name || o.type === 'MaskedStrand') continue;
+    if (o.attached_to !== name) continue;
+    if (o.start.x !== origPoint.x || o.start.y !== origPoint.y) continue;
+    children.push({
+      name: other,
+      start: { ...o.start }, end: { ...o.end },
+      cp1: { ...o.control_points[0] }, cp2: { ...o.control_points[1] },
+    });
+  }
+  return {
+    name, side, pivot, origPoint,
+    origAngle: Math.atan2(origPoint.y - pivot.y, origPoint.x - pivot.x),
+    chordLen: Math.hypot(origPoint.x - pivot.x, origPoint.y - pivot.y),
+    cp1: { ...s.control_points[0] },
+    cp2: { ...s.control_points[1] },
+    cpCenter: s.control_point_center ? { ...s.control_point_center } : null,
+    cpCenterLocked: !!s.control_point_center_locked,
+    children,
+  };
+}
+
+// Swing the snapshotted endpoint to `angleRad` (measured at the pivot). Absolute and
+// idempotent, so it is safe to call on every pointer-move frame.
+export function applyRotateSnapshot(
+  draft: EditorDocument,
+  snap: RotateSnapshot,
+  angleRad: number,
+  curve?: Settings['curve_params'],
+): void {
+  const s = draft.strands[snap.name];
+  if (!s) return;
+  const np: Point = {
+    x: snap.pivot.x + Math.cos(angleRad) * snap.chordLen,
+    y: snap.pivot.y + Math.sin(angleRad) * snap.chordLen,
+  };
+  if (snap.side === 0) s.start = np; else s.end = np;
+
+  const d = angleRad - snap.origAngle;
+  const cos = Math.cos(d), sin = Math.sin(d);
+  const rot = (p: Point): Point => {
+    const vx = p.x - snap.pivot.x, vy = p.y - snap.pivot.y;
+    return { x: snap.pivot.x + vx * cos - vy * sin, y: snap.pivot.y + vx * sin + vy * cos };
+  };
+  s.control_points = [rot(snap.cp1), rot(snap.cp2)];
+  // OSS rotates control_point_center explicitly (:304-306) and then calls
+  // update_shape, which re-derives it from the cp midpoint unless it is pinned
+  // (strand.py:767-780). Rotating and re-deriving agree whenever the centre sat on
+  // the midpoint, so deferring to the same recentre rule as moveHandle is faithful
+  // and keeps an UNLOCKED centre from going stale.
+  const mid = {
+    x: (s.control_points[0].x + s.control_points[1].x) / 2,
+    y: (s.control_points[0].y + s.control_points[1].y) / 2,
+  };
+  s.control_point_center = snap.cpCenterLocked && snap.cpCenter ? rot(snap.cpCenter) : mid;
+  s.control_point_center_locked = snap.cpCenterLocked;
+
+  // Glued children translate RIGIDLY by the endpoint delta — start, end and both
+  // handles (:398-412). Their own attached grandchildren do NOT follow: OSS walks a
+  // single level here (unlike AngleAdjustMode, which recurses).
+  const ddx = np.x - snap.origPoint.x, ddy = np.y - snap.origPoint.y;
+  const moved = new Set<string>([snap.name]);
+  for (const c of snap.children) {
+    const cs = draft.strands[c.name];
+    if (!cs) continue;
+    cs.start = { x: c.start.x + ddx, y: c.start.y + ddy };
+    cs.end = { x: c.end.x + ddx, y: c.end.y + ddy };
+    cs.control_points = [
+      { x: c.cp1.x + ddx, y: c.cp1.y + ddy },
+      { x: c.cp2.x + ddx, y: c.cp2.y + ddy },
+    ];
+    const cmid = {
+      x: (cs.control_points[0].x + cs.control_points[1].x) / 2,
+      y: (cs.control_points[0].y + cs.control_points[1].y) / 2,
+    };
+    if (cs.control_point_center_locked && cs.control_point_center) {
+      cs.control_point_center = { x: cs.control_point_center.x + ddx, y: cs.control_point_center.y + ddy };
+    } else {
+      cs.control_point_center = cmid;
+    }
+    moved.add(c.name);
+  }
+
+  // DELIBERATE DEVIATION, flagged rather than silent: OSS RotateMode never touches
+  // mask deletion rectangles, so rotating a component drags the mask REGION (it is
+  // recomputed from the components at paint time) but strands the erase windows
+  // where they were. move_mode.py:2978-3031 does drift them by the centroid delta
+  // for exactly this reason; omitting it in rotate reads as an oversight, and the
+  // visible result is the reported "mask does not follow the strand" bug. We apply
+  // the same tracking here.
+  trackMaskDeletionRects(draft, moved, curve);
+}
+
 // Create a free first strand of a brand-new set. Returns the new layer_name.
 // `defaults` threads the user's default strand colour/stroke/width settings (OSS
 // uses these for new strands); omitted fields fall back to the factory constants.

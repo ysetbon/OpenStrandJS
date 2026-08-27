@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import { SettingsDialog } from './SettingsDialog';
 import { LayerStateDialog } from './LayerStateDialog';
+import { AngleAdjustDialog } from './dialogs/AngleAdjustDialog';
 import { t } from './i18n';
 import { ossIcon } from './icons';
 import { loadProject, serializeProject } from '../io/saveLoad';
@@ -58,6 +59,15 @@ export function Toolbar() {
   const lang = useEditorStore((s) => s.settings.language);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [stateOpen, setStateOpen] = useState(false);
+  // The strand the angle dialog is editing, or null when it is closed. OSS keeps
+  // this on the canvas as angle_adjust_mode.active_strand.
+  const [angleTarget, setAngleTarget] = useState<string | null>(null);
+  const selectedLayer = useEditorStore((s) => s.selection.layerName);
+  const selectedType = useEditorStore((s) =>
+    (s.selection.layerName ? s.doc.strands[s.selection.layerName]?.type : undefined));
+  // OSS restores whatever mode was active before the dialog opened
+  // (main_window.previous_mode, :1254 / :2088-2097).
+  const prevMode = useRef<ModeName | null>(null);
 
   function applyDoc(json: unknown) {
     const doc = loadProject(json);
@@ -79,6 +89,21 @@ export function Toolbar() {
     downloadJSON('openstrand_project.json', serializeProject(useEditorStore.getState().doc));
   }
 
+  // OSS handle_angle_adjust_click (main_window.py:1245-1262): with no selection, or
+  // with a MASK selected, the button unpresses again immediately and nothing opens.
+  const openAngleAdjust = () => {
+    if (!selectedLayer || selectedType === 'MaskedStrand') return;
+    prevMode.current = mode;
+    setMode('angle');
+    setAngleTarget(selectedLayer);
+  };
+
+  const closeAngleAdjust = () => {
+    setAngleTarget(null);
+    setMode(prevMode.current ?? 'move');
+    prevMode.current = null;
+  };
+
   const checked = (b: Btn): boolean => {
     if (b.mode) return mode === b.mode;
     if (b.toggle === 'grid') return showGrid;
@@ -89,6 +114,7 @@ export function Toolbar() {
   };
 
   const onClick = (b: Btn) => {
+    if (b.mode === 'angle') { openAngleAdjust(); return; }
     if (b.mode) { setMode(b.mode); return; }
     if (b.toggle === 'grid') { setSettings({ show_grid: !showGrid }); return; }
     if (b.toggle === 'points') { mutateDoc((d) => { d.show_control_points = !d.show_control_points; }); return; }
@@ -122,6 +148,7 @@ export function Toolbar() {
         <img className="tb-gear-img" src={ossIcon('settings_icon')} alt="" draggable={false} />
       </button>
 
+      {angleTarget && <AngleAdjustDialog layerName={angleTarget} onClose={closeAngleAdjust} />}
       {stateOpen && <LayerStateDialog onClose={() => setStateOpen(false)} />}
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
       <input ref={fileRef} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={onFile} />

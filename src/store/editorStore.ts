@@ -158,6 +158,11 @@ export interface EditorState {
   // every layer button goes flat gray, the first clicked layer darkens, the second
   // click creates the over/under mask. firstMaskedLayer is the first pick (or null).
   maskCreateMode: boolean;
+  // Live "Adjust Angle and Length" session (OSS AngleAdjustMode). Holds the strand
+  // under adjustment and the cumulative angle_adjustment in degrees, which is all
+  // the overlay needs to draw OSS's arc + chord (angle_adjust_mode.py:641-676).
+  // Transient UI state: not part of the document, not undoable.
+  angleAdjust: { layerName: string; spanDeg: number } | null;
   firstMaskedLayer: string | null;
   // bumped whenever the document changes so subscribers can re-render the canvas
   docRevision: number;
@@ -216,6 +221,7 @@ export interface EditorState {
   enterMaskCreate: () => void;
   exitMaskCreate: () => void;
   setFirstMaskedLayer: (name: string | null) => void;
+  setAngleAdjust: (a: EditorState['angleAdjust']) => void;
 
   // chrome UI flags (OSS main window). Not part of the document / undo history.
   panMode: boolean;            // hand tool: left-drag pans the canvas
@@ -281,6 +287,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   eraser: null,
   maskEditTarget: null,
   maskCreateMode: false,
+  angleAdjust: null,
   firstMaskedLayer: null,
   docRevision: 0,
   past: [],
@@ -497,6 +504,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setDragging: (dragging) => set({ dragging }),
   setDragMoving: (dragMoving) => set({ dragMoving }),
   setHover: (hover) => set({ hover }),
+  setAngleAdjust: (angleAdjust) => set({ angleAdjust }),
   setPending: (pending) => set({ pending }),
   setMaskPending: (maskPending) => set({ maskPending }),
   setEraser: (eraser) => set({ eraser }),

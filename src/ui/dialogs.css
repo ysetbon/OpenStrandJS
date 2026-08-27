@@ -94,6 +94,22 @@
   min-height: 30px;
 }
 
+/* Stacked variant: OSS lays the "Color vs Stroke Distribution" control out as a
+ * QVBoxLayout (label over slider over the centered px readout), unlike the other
+ * label-beside-control rows. */
+.gd-row.gd-col {
+  flex-direction: column;
+  align-items: stretch;
+}
+.gd-row.gd-col > .gd-label {
+  min-width: 0;
+}
+.gd-row.gd-col > .gd-label:last-child {
+  text-align: center;
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+
 .gd-check {
   display: flex;
   align-items: center;

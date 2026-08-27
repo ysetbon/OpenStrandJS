@@ -18,12 +18,17 @@ export function TabChip(props: {
   const closeTab = useEditorStore((s) => s.closeTab);
   const duplicateTab = useEditorStore((s) => s.duplicateTab);
   const markTabSaved = useEditorStore((s) => s.markTabSaved);
+  // "Skip the unsaved-changes prompt when closing a tab" (Settings -> General).
+  // FLAGGED DEVIATION: OSS stores this setting and never reads it back
+  // (settings_dialog.py:69/138 are its only mentions), so ticking it there does
+  // nothing. The prompt it names exists here, so the box does what it says.
+  const skipCloseWarning = useEditorStore((s) => s.settings.skip_close_tab_warning);
 
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const onCloseClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (dirty) {
+    if (dirty && !skipCloseWarning) {
       setConfirmOpen(true);
       return;
     }

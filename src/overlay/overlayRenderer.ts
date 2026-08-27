@@ -33,6 +33,9 @@ export interface OverlayState {
   eraser: { layerName: string; rect: { minX: number; minY: number; maxX: number; maxY: number } } | null;
   mode: ModeName;
   dragging: boolean;
+  // Live "Adjust Angle and Length" session, or null. Drives the arc + chord that
+  // OSS's AngleAdjustMode.draw paints while the dialog is up.
+  angleAdjust: { layerName: string; spanDeg: number } | null;
 }
 
 // --- OSS glyph/handle constants (canvas/world units; * zoom -> screen px) ---
@@ -197,8 +200,14 @@ function drawMoveOverlays(ctx: CanvasRenderingContext2D, st: OverlayState): void
   const draw = (name: string, h: { handle: HandleKind; pos: Point }) => {
     const p = worldToScreen(h.pos, view);
     const isEnd = isEndpoint(h.handle);
-    const moving = dragging && selection.layerName === name && selection.handle === h.handle;
-    const hovered = !dragging && hover.layerName === name && hover.handle === h.handle;
+    // The pale-yellow square is OSS's draw_selection_square, which returns early
+    // when show_move_highlights is off (move_mode.py:987-989); the hover variant is
+    // a hover highlight and follows show_hover_highlights. Either way the handle
+    // still gets its idle square — only the yellow accent disappears.
+    const moving = dragging && selection.layerName === name && selection.handle === h.handle
+      && st.settings.show_move_highlights;
+    const hovered = !dragging && hover.layerName === name && hover.handle === h.handle
+      && st.settings.show_hover_highlights;
     const fill = moving || hovered ? FILL_HOT : isEnd ? FILL_ENDPOINT_IDLE : FILL_CP_IDLE;
     overlaySquare(ctx, p, isEnd ? ENDPOINT_HALF : CP_HALF, view.zoom, fill);
   };
@@ -385,8 +394,60 @@ function maskBodyHighlight(
 // + solid black border; picked = highlight_color (red) @128 fill + black @128 border.
 const MASK_HOVER_FILL = 'rgba(255,230,160,0.667)';
 const MASK_HOVER_OUTLINE = 'rgba(0,0,0,1)';
-const MASK_PICK_FILL = 'rgba(255,0,0,0.5)';
+// OSS mask_mode.py:265-270 takes canvas.highlight_color and forces alpha 128, so
+// the picked-strand fill follows the Selected-Strand page's colour rather than a
+// hard-coded red. The default highlight_color is opaque red, which reproduces the
+// previous literal exactly.
+const rgbaCss = (c: RGBA, alpha: number): string => `rgba(${c.r},${c.g},${c.b},${alpha})`;
+const maskPickFill = (st: OverlayState): string => rgbaCss(st.settings.highlight_color, 128 / 255);
 const MASK_PICK_OUTLINE = 'rgba(0,0,0,0.5)';
+
+// ---------------------------------------------------------------------------
+// "Adjust Angle and Length" overlay — AngleAdjustMode.draw (angle_adjust_mode.py
+// :641-676). Two marks anchored at the strand's START (the dialog's pivot):
+//
+//   * an arc in canvas.highlight_color, pen width 2, radius min(50, width*2),
+//     starting at the strand's CURRENT direction and sweeping by the cumulative
+//     angle adjustment;
+//   * the adjusted chord as a plain 2px green line from start to end.
+//
+// Qt's drawArc takes 1/16-degree angles that grow counter-clockwise ON SCREEN, and
+// OSS negates both, so the sweep runs clockwise from the strand direction. Canvas
+// angles already grow clockwise (y points down), so the same numbers apply directly
+// with anticlockwise=false.
+//
+// OSS also re-draws the strand itself at 0.5 opacity on top of the real one. That
+// ghost sits exactly over geometry the renderer has already painted, so it only
+// lightens the strand slightly; it is not reproduced here because doing so would
+// mean running the Paper.js body pipeline on the 2-D overlay context.
+function drawAngleAdjust(ctx: CanvasRenderingContext2D, st: OverlayState): void {
+  const aa = st.angleAdjust;
+  if (!aa) return;
+  const s = st.doc.strands[aa.layerName];
+  if (!s) return;
+  const z = st.view.zoom;
+  const c = worldToScreen(s.start, st.view);
+  const radius = Math.min(50, s.width * 2) * z;
+  const start = Math.atan2(s.end.y - s.start.y, s.end.x - s.start.x);
+  // OSS normalises the span into [0, 360) — including for a NEGATIVE adjustment,
+  // where -30 becomes 330 and the arc takes the long way round (:663). Faithful.
+  const spanDeg = aa.spanDeg < 0 ? ((aa.spanDeg + 360) % 360) : (aa.spanDeg % 360);
+
+  ctx.save();
+  ctx.lineWidth = 2 * z;
+  ctx.strokeStyle = rgbaCss(st.settings.highlight_color, st.settings.highlight_color.a / 255);
+  ctx.beginPath();
+  ctx.arc(c.x, c.y, radius, start, start + (spanDeg * Math.PI) / 180, false);
+  ctx.stroke();
+
+  const e = worldToScreen(s.end, st.view);
+  ctx.strokeStyle = 'rgb(0,255,0)';
+  ctx.beginPath();
+  ctx.moveTo(c.x, c.y);
+  ctx.lineTo(e.x, e.y);
+  ctx.stroke();
+  ctx.restore();
+}
 
 export function drawOverlay(ctx: CanvasRenderingContext2D, st: OverlayState): void {
   const { doc, selection, mode } = st;
@@ -400,14 +461,17 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, st: OverlayState): vo
   // with the identical QColor(255,230,160,170) fill + black 2px border. In mask mode
   // it is suppressed for an already-picked strand, and each picked strand instead
   // gets the red@128 selection highlight (mask_mode.py:272-312).
-  if (mode === 'select' && st.hover.layerName) {
+  // "Show hover highlights" (OSS select_mode.draw:80-82) gates the SELECT-mode
+  // hover highlight only — mask mode's identical-looking pick/hover highlight is
+  // NOT gated in OSS, so it stays unconditional here too.
+  if (mode === 'select' && st.hover.layerName && st.settings.show_hover_highlights) {
     maskBodyHighlight(ctx, st, st.hover.layerName, MASK_HOVER_FILL, MASK_HOVER_OUTLINE);
   } else if (mode === 'mask') {
     const hov = st.hover.layerName;
     if (hov && !st.maskPending.includes(hov)) {
       maskBodyHighlight(ctx, st, hov, MASK_HOVER_FILL, MASK_HOVER_OUTLINE);
     }
-    for (const layer of st.maskPending) maskBodyHighlight(ctx, st, layer, MASK_PICK_FILL, MASK_PICK_OUTLINE);
+    for (const layer of st.maskPending) maskBodyHighlight(ctx, st, layer, maskPickFill(st), MASK_PICK_OUTLINE);
   }
 
   // Mask-EDIT eraser rectangle (OSS mask_edit_mode paint, strand_drawing_canvas.py
@@ -456,4 +520,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, st: OverlayState): vo
   // Mode-specific endpoint/CP handles, drawn last (on top, translucent).
   if (mode === 'move') drawMoveOverlays(ctx, st);
   else if (mode === 'attach') drawAttachOverlays(ctx, st);
+
+  // Angle-adjust marks sit above everything (OSS paints them after the strands).
+  drawAngleAdjust(ctx, st);
 }

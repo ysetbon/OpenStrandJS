@@ -125,9 +125,10 @@ export interface ShadowOverride {
 }
 export type ShadowOverrides = Record<string, Record<string, ShadowOverride>>;
 
-// Interaction modes. select/move/attach/mask are fully implemented; view is a
-// read-only inspect mode; rotate/angle are registered stubs (toolbar parity with
-// OSS, wired to passive modes until their gestures land).
+// Interaction modes. select/move/attach/mask/rotate are canvas gestures; view is
+// a read-only inspect mode. `angle` is modal in OSS too — the toolbar button opens
+// the Adjust Angle and Length dialog and the mode itself only sets the cursor
+// (strand_drawing_canvas.py:5001-5004).
 export type ModeName = 'select' | 'move' | 'attach' | 'mask' | 'view' | 'rotate' | 'angle';
 
 export type HandleKind =
@@ -288,6 +289,29 @@ export interface RenderMeta {
   // enable_curvature_bias_control bias stays pinned at the neutral 0.5.
   enable_third_control_point?: boolean;
   enable_curvature_bias_control?: boolean;
+  // The three SHADOW settings plus the selection HIGHLIGHT colour. In OSS these
+  // live on the canvas (ShadowColor / NumSteps / MaxBlurRadius / highlight_color)
+  // and are read by shader_utils.draw_strand_shadow and the highlight painters, so
+  // like the two curve toggles above they are per-render inputs rather than data.
+  // Every one of them is absent-safe: the renderer falls back to exactly the values
+  // the reference user_settings.txt loads (0,0,0,150 / 2 / 30 / opaque red), which
+  // is what the Qt oracle renders, so a fixture render is byte-identical.
+  shadow_color?: RGBA;
+  num_steps?: number;
+  max_blur_radius?: number;
+  highlight_color?: RGBA;
+  // OSS "Draw only affected strand when dragging" (move_mode.py:668-671). Drag
+  // fast-path only: suppresses the static background bake so the moved strand is
+  // the only thing composited. Absent => false => every static band is baked.
+  draw_only_affected_strand?: boolean;
+  // Canvas-level arrow dimensions (Settings -> Layer Panel). The renderer has read
+  // these off meta since arrows landed; nothing populated the key, so the six spin
+  // boxes silently did nothing. Absent => the renderer's ARROW_DEFAULTS, which are
+  // the same six numbers the Qt oracle renders with.
+  arrow_params?: {
+    head_length: number; head_width: number; head_stroke_width: number;
+    gap_length: number; line_length: number; line_width: number;
+  };
   // Interactive drag fast-path ONLY (the fidelity harness never sets this). The
   // layer_names whose geometry moves with the dragged endpoint: renderDragBackground
   // bakes everything EXCEPT these once, and renderDragFrame draws only these over
