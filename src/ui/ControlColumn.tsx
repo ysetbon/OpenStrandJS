@@ -63,12 +63,16 @@ export function ControlColumn() {
   const toggleMulti = useEditorStore((s) => s.toggleMultiSelect);
   const lang = useEditorStore((s) => s.settings.language);
 
-  // OSS canvas.zoom_in / zoom_out (strand_drawing_canvas.py:1560-1583): one step
-  // is 10% OF THE CURRENT zoom, so the steps are geometric — x1.1 in, x0.9 out,
-  // deliberately not inverses, exactly as OSS computes them. OSS drops a step
-  // that would cross min_zoom/max_zoom; we clamp to the limit instead, so a
-  // press gets as far as the wheel can (which has always clamped to the same
-  // [0.1, 5]) and the two paths agree about where the range ends.
+  /**
+   * One press of Zoom In / Zoom Out, about the viewport centre.
+   *
+   * OSS canvas.zoom_in / zoom_out (strand_drawing_canvas.py:1560-1583): one step
+   * is 10% OF THE CURRENT zoom, so the steps are geometric — x1.1 in, x0.9 out,
+   * deliberately not inverses, exactly as OSS computes them. OSS drops a step
+   * that would cross min_zoom/max_zoom; we clamp to the limit instead, so a
+   * press gets as far as the wheel can (which has always clamped to the same
+   * [0.1, 5]) and the two paths agree about where the range ends.
+   */
   const zoomBy = (factor: number) => {
     const st = useEditorStore.getState();
     st.setView(zoomAbout(st.view, st.view.zoom * factor, viewCenter(st.view)));

@@ -87,10 +87,12 @@ try {
     if (minX === Infinity) return 0;
     return Math.max(maxX - minX, maxY - minY) / cv.width;
   });
+  // Presses are spaced: each one schedules a full render, and at 5x on this
+  // fixture a burst of clicks can hold the main thread long enough for the next
+  // click to time out — the tool would then fail on its own pacing rather than
+  // on the behaviour it is checking.
   const press = async (btn, n = 1) => {
-    // Short timeout: a regression that re-disables the buttons should fail in
-    // seconds rather than sitting in Playwright's default 30s retry loop.
-    for (let i = 0; i < n; i++) { await btn.click({ timeout: 5000 }); await page.waitForTimeout(30); }
+    for (let i = 0; i < n; i++) { await btn.click({ timeout: 15000 }); await page.waitForTimeout(120); }
     await page.waitForTimeout(700);   // let the render settle
   };
 
@@ -127,11 +129,16 @@ try {
     `${JSON.stringify(before)} -> ${JSON.stringify(afterOut)}`);
 
   // ------------------------------------------------ 3. OSS's [0.1, 5.0] limits
-  await setView({ zoom: 1, panX: 0, panY: 0 });
-  await press(zoomOut, 40);
+  // Started just inside each limit and pressed past it: the assertion is that
+  // the steps stop exactly ON the limit and stay there however often the button
+  // is pressed, which does not need the several dozen presses a walk all the
+  // way from 1.0 would cost.
+  await setView({ zoom: 0.13, panX: 0, panY: 0 });
+  await press(zoomOut, 8);
   v = await view();
   ok('Zoom Out stops at OSS min_zoom 0.1', near(v.zoom, 0.1), `zoom=${v.zoom}`);
-  await press(zoomIn, 60);
+  await setView({ zoom: 4.6 });
+  await press(zoomIn, 8);
   v = await view();
   ok('Zoom In stops at OSS max_zoom 5.0', near(v.zoom, 5), `zoom=${v.zoom}`);
   // The wheel shares the range, so the two paths cannot disagree about a limit.

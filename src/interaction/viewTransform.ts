@@ -16,19 +16,22 @@ export const MIN_ZOOM = 0.1;
 export const MAX_ZOOM = 5;
 export const ZOOM_PERCENTAGE = 0.1;
 
+/** Confine a zoom factor to OSS's [min_zoom, max_zoom]. */
 export function clampZoom(zoom: number): number {
   return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
 }
 
-// Set the zoom while pinning the world point currently under `anchor` (screen
-// px) — screen = world*zoom + pan, so pan = anchor - world*zoom.
-//
-// The zoom buttons anchor on the viewport centre. OSS instead keeps
-// pan_offset untouched and scales about the CANVAS centre (canvas point
-// width/2, height/2 — strand_drawing_canvas.py:1833), which is the same point
-// at OSS's default pan of 0; once panned, that point can sit off-screen, and
-// stepping the zoom there walks the drawing out of the viewport. Anchoring on
-// what the user is actually looking at keeps it in view.
+/**
+ * Set the zoom while pinning the world point currently under `anchor` (screen
+ * px) — screen = world*zoom + pan, so pan = anchor - world*zoom.
+ *
+ * The zoom buttons anchor on the viewport centre. OSS instead keeps
+ * pan_offset untouched and scales about the CANVAS centre (canvas point
+ * width/2, height/2 — strand_drawing_canvas.py:1833), which is the same point
+ * at OSS's default pan of 0; once panned, that point can sit off-screen, and
+ * stepping the zoom there walks the drawing out of the viewport. Anchoring on
+ * what the user is actually looking at keeps it in view.
+ */
 export function zoomAbout(
   view: ViewState, zoom: number, anchor: Point,
 ): { zoom: number; panX: number; panY: number } {
@@ -37,7 +40,7 @@ export function zoomAbout(
   return { zoom: z, panX: anchor.x - w.x * z, panY: anchor.y - w.y * z };
 }
 
-// Centre of the visible canvas in screen px.
+/** Centre of the visible canvas, in screen px. */
 export function viewCenter(view: ViewState): Point {
   return { x: view.width / 2, y: view.height / 2 };
 }
