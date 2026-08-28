@@ -90,12 +90,16 @@ export function ColorPickerDialog(props: {
   /** Colour the dialog opens on (QColorDialog.setCurrentColor). */
   value: RGBA;
   lang: Language;
+  /** QColorDialog.ShowAlphaChannel. Default true, as every OSS caller sets it —
+   *  except the arrow colour, whose alpha the renderer overwrites with the
+   *  separate transparency slider, so an alpha control there would do nothing. */
+  showAlpha?: boolean;
   /** Accepted: the chosen colour. Called once, on OK. */
   onAccept: (c: RGBA) => void;
   /** Cancelled or closed: nothing is applied. */
   onClose: () => void;
 }): JSX.Element {
-  const { title, value, lang, onAccept, onClose } = props;
+  const { title, value, lang, onAccept, onClose, showAlpha = true } = props;
 
   const [color, setColor] = useState<RGBA>({ ...value });
   // HSV is kept alongside RGB so dragging through a grey (S or V at 0, where hue is
@@ -263,10 +267,12 @@ export function ColorPickerDialog(props: {
             <div ref={hueRef} className="cpd-hue" onPointerDown={onHueDrag}>
               <span className="cpd-strip-knob" style={{ top: `${(1 - hsv.h / 359) * 100}%` }} />
             </div>
-            <div ref={alphaRef} className="cpd-alpha" onPointerDown={onAlphaDrag}>
-              <span className="cpd-alpha-fill" style={{ background: alphaBg }} />
-              <span className="cpd-strip-knob" style={{ top: `${(1 - color.a / 255) * 100}%` }} />
-            </div>
+            {showAlpha && (
+              <div ref={alphaRef} className="cpd-alpha" onPointerDown={onAlphaDrag}>
+                <span className="cpd-alpha-fill" style={{ background: alphaBg }} />
+                <span className="cpd-strip-knob" style={{ top: `${(1 - color.a / 255) * 100}%` }} />
+              </div>
+            )}
           </div>
 
           <div className="cpd-preview-row">
@@ -295,7 +301,8 @@ export function ColorPickerDialog(props: {
             {numRow(t('green', lang), color.g, 255, (n) => setFromRgb({ ...color, g: n }))}
             {numRow(t('val', lang), hsv.v, 255, (n) => setFromHsv({ ...hsv, v: n }))}
             {numRow(t('blue', lang), color.b, 255, (n) => setFromRgb({ ...color, b: n }))}
-            {numRow(t('alpha_channel', lang), color.a, 255, (n) => setColor({ ...color, a: n }))}
+            {showAlpha
+              && numRow(t('alpha_channel', lang), color.a, 255, (n) => setColor({ ...color, a: n }))}
           </div>
         </div>
       </div>

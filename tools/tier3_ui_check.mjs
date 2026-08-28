@@ -208,6 +208,9 @@ try {
     };
 
     ok('Change Color opens the colour dialog', await openItem('Change Color') > 0);
+    ok('...with the alpha controls OSS asks for (ShowAlphaChannel)',
+      await page.locator('.cpd-alpha').count() === 1
+      && await page.locator('.cpd-num').count() === 7);
     const fillHex = await dialogHex();
     await cancel();
     ok('...and Change Stroke Color opens the dialog too',
@@ -293,6 +296,20 @@ try {
             ok('...and leaves the arrow dialog it sits in open',
               await page.locator('.gd-color-well').count() > 0,
               'the parent dialog took the same Escape');
+
+            // The renderer replaces the arrow's alpha with arrow_transparency, so
+            // the arrow caller hides the alpha controls rather than offering a
+            // slider that cannot reach the canvas. The layer menu keeps them.
+            await well.click();
+            await page.waitForTimeout(400);
+            const arrowRows = await page.locator('.cpd-num').count();
+            const arrowStrips = await page.locator('.cpd-alpha').count();
+            await page.keyboard.press('Escape');
+            await page.waitForTimeout(300);
+            ok('the arrow colour dialog hides the alpha strip',
+              arrowStrips === 0, `${arrowStrips} alpha strips`);
+            ok('...and its Alpha channel field (6 rows, not 7)',
+              arrowRows === 6, `${arrowRows} numeric rows`);
           } else {
             ok('the arrow dialog carries a colour well', false);
           }

@@ -97,17 +97,22 @@ export function ArrowCustomizeDialog(props: { layerName: string; onClose: () => 
         <button
           type="button"
           className="gd-color-well"
-          style={{ backgroundColor: `rgba(${arrowColor.r}, ${arrowColor.g}, ${arrowColor.b}, ${arrowColor.a / 255})` }}
+          style={{ backgroundColor: `rgb(${arrowColor.r}, ${arrowColor.g}, ${arrowColor.b})` }}
           title={rgbaToHex(arrowColor)}
           onClick={() => setColorDialog(true)}
         />
       </div>
 
+      {/* No alpha control here: the renderer REPLACES the arrow's alpha with
+          arrow_transparency (strand-renderer.js:1460-1476, Qt setAlphaF), so an
+          alpha picked here would never reach the canvas. Transparency is the
+          slider directly below. The stored alpha rides along untouched. */}
       {colorDialog && (
         <ColorPickerDialog
           title={t('arrow_color', lang)}
           value={arrowColor}
           lang={lang}
+          showAlpha={false}
           onAccept={(c) => edit((d) => setArrowColor(d, layerName, { ...c, a: arrowColor.a }))}
           onClose={() => setColorDialog(false)}
         />
