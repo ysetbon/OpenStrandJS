@@ -141,7 +141,7 @@ export interface Selection {
 }
 
 export interface ViewState {
-  zoom: number;          // Phase 1 pinned to 1.0
+  zoom: number;          // OSS zoom_factor: 1.0 = 100%, range [0.1, 5]
   panX: number;          // world->screen translation (CSS px)
   panY: number;
   width: number;         // canvas client size (CSS px)

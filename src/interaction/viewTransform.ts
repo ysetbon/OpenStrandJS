@@ -2,11 +2,45 @@
 // hit-testing, and the overlay all use this exact math, so handles never drift
 // from the rendered bodies (the canvas-core spec's #1 risk).
 //
-// Phase 1: zoom is pinned to 1.0, so screen = world + pan (CSS px). Inverse:
-// world = screen - pan. When full zoom lands (Phase 6) this becomes the
-// center-anchored affine and the renderer gains meta.zoom/meta.pan.
+// screen = world * zoom + pan (CSS px); world = (screen - pan) / zoom. The
+// renderer takes the same pair as meta.zoom / meta.x_offset,y_offset, so the
+// wheel, the zoom buttons, hit-testing and the overlay all move together.
 
 import type { EditorDocument, Point, ViewState } from '../model/types';
+
+// OSS zoom limits and step (strand_drawing_canvas.py:192-197): zoom_factor
+// starts at 1.0, min_zoom 0.1, max_zoom 5.0, and zoom_in/zoom_out step by
+// zoom_percentage = 10% OF THE CURRENT zoom, so the scale is geometric
+// (1.1x in, 0.9x out) rather than a fixed 0.1 increment.
+export const MIN_ZOOM = 0.1;
+export const MAX_ZOOM = 5;
+export const ZOOM_PERCENTAGE = 0.1;
+
+export function clampZoom(zoom: number): number {
+  return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom));
+}
+
+// Set the zoom while pinning the world point currently under `anchor` (screen
+// px) — screen = world*zoom + pan, so pan = anchor - world*zoom.
+//
+// The zoom buttons anchor on the viewport centre. OSS instead keeps
+// pan_offset untouched and scales about the CANVAS centre (canvas point
+// width/2, height/2 — strand_drawing_canvas.py:1833), which is the same point
+// at OSS's default pan of 0; once panned, that point can sit off-screen, and
+// stepping the zoom there walks the drawing out of the viewport. Anchoring on
+// what the user is actually looking at keeps it in view.
+export function zoomAbout(
+  view: ViewState, zoom: number, anchor: Point,
+): { zoom: number; panX: number; panY: number } {
+  const z = clampZoom(zoom);
+  const w = screenToWorld(anchor, view);
+  return { zoom: z, panX: anchor.x - w.x * z, panY: anchor.y - w.y * z };
+}
+
+// Centre of the visible canvas in screen px.
+export function viewCenter(view: ViewState): Point {
+  return { x: view.width / 2, y: view.height / 2 };
+}
 
 export function worldToScreen(p: Point, view: ViewState): Point {
   return { x: p.x * view.zoom + view.panX, y: p.y * view.zoom + view.panY };

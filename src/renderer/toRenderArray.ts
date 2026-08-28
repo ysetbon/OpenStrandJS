@@ -1,10 +1,8 @@
 // Pure adapter: live EditorDocument -> the flat (strands, meta) the renderer
-// consumes. The renderer maps world->pixel as P(pt) = (pt + offset) * ss, so
-// the visible CSS-space transform is exactly `screen = world + offset` (ss
-// cancels between the offscreen render and the in-page downscale). We therefore
-// fold pan straight into offset; zoom is pinned to 1.0 in Phase 1, so no
-// renderer change is needed (full zoom is the one additive renderer edit in
-// Phase 6).
+// consumes. The renderer maps world->pixel as P(pt) = pt * (ss * zoom) + offset
+// * ss, so the visible CSS-space transform is exactly `screen = world * zoom +
+// offset` (ss cancels between the offscreen render and the in-page downscale).
+// We therefore fold pan straight into offset and pass view.zoom as meta.zoom.
 
 import type {
   EditorDocument, RenderMeta, RenderStrand, Settings, ViewState,

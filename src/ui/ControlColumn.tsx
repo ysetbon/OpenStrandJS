@@ -1,14 +1,13 @@
 import { useEditorStore } from '../store/editorStore';
 import { requestRender } from '../renderer/renderScheduler';
-import { fitPan } from '../interaction/viewTransform';
+import { fitPan, viewCenter, zoomAbout, ZOOM_PERCENTAGE } from '../interaction/viewTransform';
 import { STRINGS, t } from './i18n';
 import { ossIcon } from './icons';
 import type { Language } from '../model/types';
 
 // OSS left control column (main_window.py) — sits at the top of the layer panel.
 // Four rows of 40×40 circular buttons. Colors are theme-independent literals
-// (UI_PORT_PLAN.md §2.3). Zoom in/out are disabled placeholders until zoom is
-// unpinned in the renderer; pan/center/refresh/reset/undo/redo are functional.
+// (UI_PORT_PLAN.md §2.3). Every button is functional.
 
 interface V { bg: string; bgh: string; bgp: string; bd: string; gc: string; gs: number; }
 const vars = (v: V): React.CSSProperties => ({
@@ -64,6 +63,17 @@ export function ControlColumn() {
   const toggleMulti = useEditorStore((s) => s.toggleMultiSelect);
   const lang = useEditorStore((s) => s.settings.language);
 
+  // OSS canvas.zoom_in / zoom_out (strand_drawing_canvas.py:1560-1583): one step
+  // is 10% OF THE CURRENT zoom, so the steps are geometric — x1.1 in, x0.9 out,
+  // deliberately not inverses, exactly as OSS computes them. OSS drops a step
+  // that would cross min_zoom/max_zoom; we clamp to the limit instead, so a
+  // press gets as far as the wheel can (which has always clamped to the same
+  // [0.1, 5]) and the two paths agree about where the range ends.
+  const zoomBy = (factor: number) => {
+    const st = useEditorStore.getState();
+    st.setView(zoomAbout(st.view, st.view.zoom * factor, viewCenter(st.view)));
+  };
+
   const center = () => {
     const st = useEditorStore.getState();
     st.setView(fitPan(st.doc, st.view));
@@ -86,8 +96,8 @@ export function ControlColumn() {
         <CCBtn v={BLUE} icon="redo" title={tip('redo_tooltip', 'Redo', lang)} disabled={!canRedo} onClick={() => { redo(); requestRender(); }} />
       </div>
       <div className="cc-row cc-row-mid">
-        <CCBtn v={GOLD} icon="zoom_in" title={tip('zoom_in_tooltip', 'Zoom in (coming soon)', lang)} disabled />
-        <CCBtn v={GOLD} icon="zoom_out" title={tip('zoom_out_tooltip', 'Zoom out (coming soon)', lang)} disabled />
+        <CCBtn v={GOLD} icon="zoom_in" title={tip('zoom_in_tooltip', 'Zoom in', lang)} onClick={() => zoomBy(1 + ZOOM_PERCENTAGE)} />
+        <CCBtn v={GOLD} icon="zoom_out" title={tip('zoom_out_tooltip', 'Zoom out', lang)} onClick={() => zoomBy(1 - ZOOM_PERCENTAGE)} />
         <CCBtn v={RED} icon={panMode ? 'pan_closed' : 'pan_open'} title={tip('pan_tooltip', 'Pan (hand tool)', lang)} checked={panMode} onClick={togglePanMode} />
       </div>
       <div className="cc-row cc-row-mid">
