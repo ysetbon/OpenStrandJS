@@ -30,8 +30,14 @@ function computeGridLines(meta, scale, ox, oy, targetW, targetH) {
   const xs = [], ys = [];
   const worldLeft = (0 - ox) / scale, worldRight = (targetW - ox) / scale;
   const worldTop = (0 - oy) / scale, worldBottom = (targetH - oy) / scale;
-  for (let x = Math.floor(worldLeft / g) * g; x <= worldRight; x += g) xs.push(x * scale + ox);
-  for (let y = Math.floor(worldTop / g) * g; y <= worldBottom; y += g) ys.push(y * scale + oy);
+  // Index the lines (i * g) rather than accumulating (x += g). The accumulation
+  // starts at a different multiple of g for every pan offset, and floating-point
+  // addition is not associative, so the SAME grid line came out a few ULPs apart
+  // depending on where the walk began — enough to move a 1px line onto different
+  // anti-aliasing. Indexing makes line i the same double at every offset, so the
+  // grid translates with the content exactly instead of shimmering under a pan.
+  for (let i = Math.floor(worldLeft / g); i * g <= worldRight; i++) xs.push(i * g * scale + ox);
+  for (let i = Math.floor(worldTop / g); i * g <= worldBottom; i++) ys.push(i * g * scale + oy);
   return { xs, ys };
 }
 
@@ -1890,6 +1896,86 @@ function drawMasked(ms, byLayer, P, enableThird, S, shadowOnly) {
   }
 }
 
+// Widget background + grid, in VIEWPORT space (no pan transform). Mirrors the
+// order and the coordinate space OSS paints them in: _paintEventInner fills the
+// widget and calls draw_grid inside the painter transform but derives the lines
+// from the VISIBLE rect, so both track the current offset rather than the content.
+// strokeWidth ss => 1px after the ss downscale. LIVE EDITOR ONLY: computeGridLines
+// returns null when meta.show_grid is unset (the oracle never sets it).
+function paintBackdrop(meta, W, H, ss, S, ox, oy) {
+  const bg = new paper.Path.Rectangle(new paper.Point(0, 0), new paper.Size(W * ss, H * ss));
+  bg.fillColor = meta.canvas_bg || 'white'; // themed live editor (OSS dark #2C2C2C); oracle leaves it white
+  const grid = computeGridLines(meta, S, ox * ss, oy * ss, W * ss, H * ss);
+  if (!grid) return;
+  const gridColor = meta.grid_color || toColor({ r: 0, g: 0, b: 0, a: 20 }); // OSS #C8C8C8/#B4B4B4; legacy faint fallback
+  for (const x of grid.xs) {
+    const ln = new paper.Path.Line(new paper.Point(x, 0), new paper.Point(x, H * ss));
+    ln.strokeColor = gridColor; ln.strokeWidth = ss;
+  }
+  for (const y of grid.ys) {
+    const ln = new paper.Path.Line(new paper.Point(0, y), new paper.Point(W * ss, y));
+    ln.strokeColor = gridColor; ln.strokeWidth = ss;
+  }
+}
+
+// Copy the ss-supersampled offscreen `hi` down into the visible canvas. Shared by
+// renderFixture and renderPanFrame so a pan frame is composited by exactly the
+// same code as the render it stands in for.
+function compositeTo(vis, hi, W, H, ss, meta) {
+  vis.width = W;
+  vis.height = H;
+  vis.style.width = W + 'px';
+  vis.style.height = H + 'px';
+  const ctx = vis.getContext('2d');
+  if (ss === 1) {
+    ctx.drawImage(hi, 0, 0);
+    return;
+  }
+  if (meta.fast_downscale) {
+    // LIVE EDITOR ONLY (gated on meta.fast_downscale, which the offline oracle /
+    // fidelity harness never sets). Downscale the ss× supersampled offscreen with
+    // the browser's native high-quality filter — a GPU blit — instead of the exact
+    // JS box-average below (a W*ss × H*ss triple loop, ~200ms even for a single
+    // strand on a 1400×680 canvas). Still fully supersampled, so resting quality is
+    // ~indistinguishable; only the offline path keeps the exact Qt-matching box
+    // average for byte-identity.
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(hi, 0, 0, W * ss, H * ss, 0, 0, W, H);
+    return;
+  }
+  // Match the Qt reference, which downsamples the ss× image with
+  // QImage.scaled(..., Qt.SmoothTransformation). For an exact integer ss downscale
+  // that is an ss×ss box average in sRGB space. Reproduce it exactly here instead
+  // of relying on the browser's imageSmoothing filter (a wider, engine-specific
+  // kernel that leaves a ~1px seam on high-contrast curved edges versus Qt's
+  // average). The composited image is fully opaque (white background), so a
+  // straight per-channel average needs no alpha handling.
+  const src = hi.getContext('2d').getImageData(0, 0, W * ss, H * ss).data;
+  const out = ctx.createImageData(W, H);
+  const od = out.data;
+  const rowSpan = W * ss;
+  const inv = 1 / (ss * ss);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      let r = 0, g = 0, b = 0, a = 0;
+      for (let dy = 0; dy < ss; dy++) {
+        let si = ((y * ss + dy) * rowSpan + x * ss) * 4;
+        for (let dx = 0; dx < ss; dx++) {
+          r += src[si]; g += src[si + 1]; b += src[si + 2]; a += src[si + 3];
+          si += 4;
+        }
+      }
+      const oi = (y * W + x) * 4;
+      od[oi] = r * inv;
+      od[oi + 1] = g * inv;
+      od[oi + 2] = b * inv;
+      od[oi + 3] = a * inv;
+    }
+  }
+  ctx.putImageData(out, 0, 0);
+}
+
 // Render `strands` (flat array) using `meta` into the canvas #c.
 window.renderFixture = function (strands, meta) {
   if (meta.curve_params) CURVE = meta.curve_params;
@@ -1908,6 +1994,12 @@ window.renderFixture = function (strands, meta) {
   const zoom = meta.zoom || 1;
   const S = ss * zoom;
 
+  const ox = meta.x_offset, oy = meta.y_offset;
+
+  // A render replaces whatever scene was retained (see PAN_SCENE): each one owns a
+  // paper project and an offscreen canvas, and exactly one is ever live.
+  dropScene();
+
   const hi = document.createElement('canvas');
   // Opt out of paper.js's automatic devicePixelRatio scaling: this renderer does
   // its own supersampling via the W*ss offscreen canvas + manual downscale, so
@@ -1920,12 +2012,38 @@ window.renderFixture = function (strands, meta) {
   hi.height = H * ss;
   paper.setup(hi);
 
-  const bg = new paper.Path.Rectangle(new paper.Point(0, 0), new paper.Size(W * ss, H * ss));
-  bg.fillColor = meta.canvas_bg || 'white'; // themed live editor (OSS dark #2C2C2C); oracle leaves it white
+  // BACKDROP layer — VIEWPORT space, no pan transform. Qt fills the widget itself
+  // and derives the grid from the VISIBLE rect (draw_grid,
+  // strand_drawing_canvas.py), so neither rides the pan; both are rebuilt for the
+  // current offset. Painted first so it composites under the bodies.
+  const backdrop = paper.project.activeLayer;
+  paintBackdrop(meta, W, H, ss, S, ox, oy);
 
-  const ox = meta.x_offset, oy = meta.y_offset;
-  // world -> backing: position scaled by S (= ss*zoom), offset by ss. At zoom 1
-  // this is exactly (pt + offset) * ss.
+  // CONTENT layer — the strands, with the pan carried by this layer's MATRIX
+  // rather than rebuilt into the geometry. This is OSS's arrangement:
+  // _paintEventInner sets up the painter with
+  // `painter.translate(self.pan_offset_x, self.pan_offset_y)` and then builds every
+  // path in plain canvas coordinates, so a pan moves one transform and invalidates
+  // no geometry. renderPanFrame is what cashes that in.
+  //
+  // The layer is ANCHORED at this render's offset: geometry is built at the offset
+  // below (so the matrix starts out identity) and the matrix later carries the
+  // DELTA from it. Anchoring rather than building at a bare pt*S is deliberate.
+  // paper.js's boolean ops (resolveCrossings/unite) use ABSOLUTE epsilons, so their
+  // output is sensitive to coordinate magnitude — this renderer has a known
+  // coordinate-dependent degeneracy where a body comes out as a solid black band,
+  // and building at raw world*S walks three_strand_braid straight into it. Keeping
+  // the build coordinates exactly where they have always been makes every full
+  // render bit-identical to before this change, and costs the pan nothing: what a
+  // reused scene requires is that the geometry not depend on the CURRENT pan, and
+  // an anchor fixed for the scene's lifetime satisfies that just as well as zero.
+  const content = new paper.Layer();
+  content.applyMatrix = false;   // keep it a transform; don't bake it into children
+  content.activate();
+
+  // world -> content space, anchored at this scene's offset. Unchanged from the
+  // pre-refactor P: at the anchor the layer matrix is identity, so the coordinates
+  // that reach the rasterizer are the same doubles as before.
   const P = (pt) => new paper.Point(pt.x * S + ox * ss, pt.y * S + oy * ss);
   const enableThird = resolveEnableThird(strands, meta);
   BIAS_ENABLED = !!(meta && meta.enable_curvature_bias_control);
@@ -1934,27 +2052,6 @@ window.renderFixture = function (strands, meta) {
   // geometry memo near the top). Scoped to the paper project set up above and
   // closed before the frame is composited.
   geomCacheBegin();
-
-  // Grid: painted AFTER the white background and BEFORE the strand loop so it
-  // composites UNDER the bodies (OSS draws the grid behind the strands; the old
-  // port drew it on the overlay layer on top — the bug this fixes). Backing space
-  // uses scale S (= ss*zoom) and pan offset ox*ss / oy*ss; strokeWidth ss => 1px
-  // after the ss downscale, matching the previous 1px overlay lines. LIVE EDITOR
-  // ONLY: computeGridLines returns null when meta.show_grid is unset (oracle).
-  {
-    const grid = computeGridLines(meta, S, ox * ss, oy * ss, W * ss, H * ss);
-    if (grid) {
-      const gridColor = meta.grid_color || toColor({ r: 0, g: 0, b: 0, a: 20 }); // OSS #C8C8C8/#B4B4B4; legacy faint fallback
-      for (const x of grid.xs) {
-        const ln = new paper.Path.Line(new paper.Point(x, 0), new paper.Point(x, H * ss));
-        ln.strokeColor = gridColor; ln.strokeWidth = ss;
-      }
-      for (const y of grid.ys) {
-        const ln = new paper.Path.Line(new paper.Point(0, y), new paper.Point(W * ss, y));
-        ln.strokeColor = gridColor; ln.strokeWidth = ss;
-      }
-    }
-  }
 
   const byLayer = {};
   for (const s of strands) byLayer[s.layer_name] = s;
@@ -2044,70 +2141,15 @@ window.renderFixture = function (strands, meta) {
   geomCacheEnd();
 
   paper.view.update();
+  compositeTo(document.getElementById('c'), hi, W, H, ss, meta);
 
-  // Normally the visible canvas. `meta.target` lets a caller receive the render
-  // into its own canvas instead — used by the pan fast path to take one OVERSIZED
-  // snapshot offscreen without disturbing what is currently on screen. Absent for
-  // every other caller (the fidelity oracle included), so this is inert there.
-  const vis = meta.target || document.getElementById('c');
-  vis.width = W;
-  vis.height = H;
-  vis.style.width = W + 'px';
-  vis.style.height = H + 'px';
-  const ctx = vis.getContext('2d');
-  if (ss === 1) {
-    ctx.drawImage(hi, 0, 0);
-  } else if (meta.fast_downscale) {
-    // LIVE EDITOR ONLY (gated on meta.fast_downscale, which the offline oracle /
-    // fidelity harness never sets). Downscale the ss× supersampled offscreen with
-    // the browser's native high-quality filter — a GPU blit — instead of the exact
-    // JS box-average below (a W*ss × H*ss triple loop, ~200ms even for a single
-    // strand on a 1400×680 canvas, which is the dominant pointer-up cost). Still
-    // fully supersampled, so resting quality is ~indistinguishable; only the
-    // offline path keeps the exact Qt-matching box average for byte-identity.
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(hi, 0, 0, W * ss, H * ss, 0, 0, W, H);
-  } else {
-    // Match the Qt reference, which downsamples the ss× image with
-    // QImage.scaled(..., Qt.SmoothTransformation). For an exact integer ss
-    // downscale that is an ss×ss box average in sRGB space. Reproduce it exactly
-    // here instead of relying on the browser's imageSmoothing filter (a wider,
-    // engine-specific kernel that leaves a ~1px seam on high-contrast curved
-    // edges versus Qt's average). The composited image is fully opaque (white
-    // background), so a straight per-channel average needs no alpha handling.
-    const src = hi.getContext('2d').getImageData(0, 0, W * ss, H * ss).data;
-    const out = ctx.createImageData(W, H);
-    const od = out.data;
-    const rowSpan = W * ss;
-    const inv = 1 / (ss * ss);
-    for (let y = 0; y < H; y++) {
-      for (let x = 0; x < W; x++) {
-        let r = 0, g = 0, b = 0, a = 0;
-        for (let dy = 0; dy < ss; dy++) {
-          let si = ((y * ss + dy) * rowSpan + x * ss) * 4;
-          for (let dx = 0; dx < ss; dx++) {
-            r += src[si]; g += src[si + 1]; b += src[si + 2]; a += src[si + 3];
-            si += 4;
-          }
-        }
-        const oi = (y * W + x) * 4;
-        od[oi] = r * inv;
-        od[oi + 1] = g * inv;
-        od[oi + 2] = b * inv;
-        od[oi + 3] = a * inv;
-      }
-    }
-    ctx.putImageData(out, 0, 0);
-  }
-
-  // Tear down this frame's Paper project. renderFixture calls paper.setup() on a
-  // fresh offscreen canvas every call; without removing the project here, every
-  // render leaks a paper.Project into paper.projects. During a drag (one render
-  // per frame) these pile up, so successive frames get progressively slower and
-  // memory grows. The visible #c already holds the copied-out pixels, so dropping
-  // the project changes no output (the harness screenshots #c, not Paper's view).
-  paper.project.remove();
+  // RETAIN this render's project as the live scene. renderFixture used to remove
+  // it here, because a fresh project per render otherwise piles up in
+  // paper.projects and every later frame gets slower. That invariant is kept by
+  // dropScene() at the top of this function: exactly one project is ever retained,
+  // and the next render frees it. What retention buys is that a pan gesture never
+  // has to build anything — the resting render already left the scene it needs.
+  PAN_SCENE = { project: paper.project, hi, content, backdrop, key: meta.scene_key, W, H, ss, S, zoom, ox, oy };
 
   return { drawn: strands.length, width: W, height: H, supersample: ss };
 };
@@ -2392,102 +2434,82 @@ window.endDrag = function () {
   if (DRAG_MV_PROJECT) { DRAG_MV_PROJECT.remove(); DRAG_MV_PROJECT = null; }
 };
 
-// ---- pan fast path ------------------------------------------------------------
-// A pan changes NO document coordinate. The only thing that moves is
-// meta.x_offset / meta.y_offset — which renderFixture folds into every point via
-// P(pt) = pt * S + o * ss. That is exactly why panning was the slowest gesture in
-// the editor: the offsets are baked into the geometry, so every pan frame rebuilt
-// every body outline, every stroked outline, every mask boolean union and every
-// shadow region from raw points, at O(all strands). Measured at ~1.2 s/frame on
-// three_strand_braid.
+// ---- pan: OSS's painter transform, not a rebuild ------------------------------
+// OSS does no work at all to pan. strand_drawing_canvas.mouseMoveEvent (4430) sets
+// pan_offset_x/y and calls update(); _paintEventInner then does a FULL repaint with
+// `painter.translate(self.pan_offset_x, self.pan_offset_y)` in front of it. That is
+// affordable there because a Qt repaint is cheap — every strand body is
+// QPainterPathStroker.createStroke() plus drawPath() with WindingFill, i.e. native
+// C++ with no boolean algebra anywhere.
 //
-// But since the offsets enter as a PURE TRANSLATION, one render taken on an
-// OVERSIZED canvas — the viewport grown by PAN_MARGIN on all four sides, with the
-// offsets grown to match — contains, as an exact sub-rectangle, the render for
-// every offset within +/- PAN_MARGIN of it. So a whole pan gesture is served by
-// one render plus a drawImage per frame.
+// Ours is not cheap: ~95% of a render is paper.js resolveCrossings/unite/intersect
+// (measured 364ms + 294ms of a 702ms render on three_strand_braid). So we take the
+// half of OSS's design that matters — the pan is a TRANSFORM, not an input to the
+// geometry — and keep the geometry across frames. renderFixture leaves its content
+// layer anchored at the offset it was built for; renderPanFrame serves any later
+// offset by putting the delta on that layer's matrix and re-rasterizing. There is
+// no snapshot to retake, no margin to run out of, and no full-quality repaint owed
+// on pointer-up.
 //
-// Two conditions make that sub-rectangle EXACT rather than approximate, and both
-// are enforced below by refusing the blit rather than by hoping:
-//   * the delta must be a whole number of canvas pixels, or drawImage resamples
-//     (blurry, and no longer the pixels a real render would produce). The pan
-//     handler quantizes the gesture delta to whole pixels for this reason.
-//   * the delta must stay inside the margin, or the read runs off the snapshot
-//     and exposes blank canvas at the leading edge.
-// When either fails the caller re-snapshots at the current offset — one slow
-// frame, then the next PAN_MARGIN px of travel are free again.
+// WHAT A PAN FRAME IS, EXACTLY. It is the anchor render TRANSLATED by the delta —
+// tools/pan_fidelity.mjs asserts that per fixture and per delta, including that the
+// residual is uniquely minimal at the claimed delta. It is NOT bit-identical to a
+// fresh renderFixture at the panned offset, and cannot be: renderFixture is not
+// offset-invariant (paper.js boolean ops use absolute epsilons, and at some offsets
+// they hit the renderer's known body degeneracy). Between the two, the pan frame is
+// the stable side — one build serves the whole gesture instead of every frame
+// rolling the dice at a new offset.
 //
-// tools/pan_identity.mjs proves the crop is pixel-identical to a direct render,
-// per fixture and per delta. It is the whole basis for this path being a pure
-// speedup and not a rendering change.
-let PAN_SNAP = null; // { canvas, M, W, H, ox, oy, zoom }
+// The delta the caller sends is still rounded to whole pixels, but that is OSS
+// parity (Qt hands it integer QPoint deltas, strand_drawing_canvas.py:4430), not
+// something this path needs: a fractional delta is served here just as exactly.
+//
+// The retained scene lives in PAN_SCENE, tagged with the caller's `scene_key`:
+// every renderFixture input EXCEPT the pan offset. A key mismatch means the scene
+// is for a different document/view, and the caller must render instead.
+let PAN_SCENE = null; // { project, hi, content, backdrop, key, W, H, ss, S, zoom, ox, oy }
 
-// Backing pixels of slack rendered beyond each edge of the viewport. Larger =
-// fewer re-snapshots over a long pan, at the cost of a bigger snapshot render
-// (cost grows with area, but only in rasterization — the geometry work, which
-// dominates, is identical because the same strands are built either way).
-const PAN_MARGIN = 320;
+function dropScene() {
+  if (!PAN_SCENE) return;
+  const sc = PAN_SCENE;
+  PAN_SCENE = null;   // clear first: a remove() that throws must not leave it live
+  try { sc.project.remove(); } catch { /* project already torn down */ }
+}
 
-// Take the oversized snapshot the rest of the gesture blits from. `strands` and
-// `meta` are exactly what a full render would have received this frame, so the
-// snapshot is the real thing, shadows and all — not a reduced-quality preview.
-window.renderPanBackground = function (strands, meta) {
-  const W = meta.image_width, H = meta.image_height;
-  const M = PAN_MARGIN;
-  // Reuse the canvas object across re-snapshots within a gesture; renderFixture
-  // assigns .width/.height itself, which reallocates and clears it.
-  const c = (PAN_SNAP && PAN_SNAP.canvas) || document.createElement('canvas');
-  PAN_SNAP = null; // don't leave a stale snapshot live if the render throws
-  window.renderFixture(strands, {
-    ...meta,
-    image_width: W + 2 * M,
-    image_height: H + 2 * M,
-    x_offset: meta.x_offset + M,
-    y_offset: meta.y_offset + M,
-    target: c,
-  });
-  PAN_SNAP = { canvas: c, M, W, H, ox: meta.x_offset, oy: meta.y_offset, zoom: meta.zoom || 1 };
-  return { snapped: true, w: c.width, h: c.height };
-};
-
-// One pan frame: blit the snapshot at the current offset. Returns null when the
-// live snapshot cannot serve this offset exactly — the caller must then re-snapshot
-// rather than draw something approximate.
+// One pan frame. Returns null when the retained scene cannot serve this meta — the
+// caller must then do a full render, which retains a scene the next frame can use.
 window.renderPanFrame = function (meta) {
-  const S = PAN_SNAP;
-  if (!S) return null;
+  const sc = PAN_SCENE;
+  if (!sc) return null;
   const W = meta.image_width, H = meta.image_height;
-  if (S.W !== W || S.H !== H || S.zoom !== (meta.zoom || 1)) return null;
-  // Both guards below are correctness, not optimization — see the header above.
-  // The delta is compared against the nearest integer rather than tested with
-  // Number.isInteger: the pan handler adds a whole number of pixels to a base that
-  // is usually fractional (zoom-to-cursor leaves panX fractional), and
-  // (o + 1) - (o + 0) is not exactly 1 in floating point. Demanding exactness here
-  // would fail on nearly every frame and silently drop the whole gesture back onto
-  // the slow path. The residue is ~1e-16 px, far below anything rasterization can
-  // resolve, so blitting at the rounded delta draws the same pixels a render at the
-  // true delta would.
-  const rawX = meta.x_offset - S.ox, rawY = meta.y_offset - S.oy;
-  const dx = Math.round(rawX), dy = Math.round(rawY);
-  if (Math.abs(rawX - dx) > 1e-6 || Math.abs(rawY - dy) > 1e-6) return null;
-  if (Math.abs(dx) > S.M || Math.abs(dy) > S.M) return null;
-  const vis = document.getElementById('c');
-  // Writing .width reallocates and clears, so only touch it on a real size change;
-  // the blit below repaints every pixel of the canvas anyway.
-  if (vis.width !== W) vis.width = W;
-  if (vis.height !== H) vis.height = H;
-  const wpx = W + 'px', hpx = H + 'px';
-  if (vis.style.width !== wpx) vis.style.width = wpx;
-  if (vis.style.height !== hpx) vis.style.height = hpx;
-  // Source origin: a world point sits at (p*S + (ox+M)) in the snapshot and at
-  // (p*S + ox + dx) on screen, so screen x maps to snapshot x + M - dx.
-  vis.getContext('2d').drawImage(S.canvas, S.M - dx, S.M - dy, W, H, 0, 0, W, H);
-  return { mode: 'panframe', dx, dy };
+  const ss = meta.supersample || 2;
+  // The key covers everything but the offset; W/H/ss/zoom are re-checked because
+  // they size the offscreen and scale the content, and a caller that forgot to fold
+  // them into its key would otherwise get a silently wrong frame.
+  if (sc.key == null || sc.key !== meta.scene_key) return null;
+  if (sc.W !== W || sc.H !== H || sc.ss !== ss || sc.zoom !== (meta.zoom || 1)) return null;
+
+  sc.project.activate();   // every paper construction below targets the active project
+  // The pan itself: one matrix, exactly OSS's painter.translate(pan_offset). The
+  // scene's geometry sits at the offset it was built at (sc.ox/sc.oy), so what the
+  // matrix carries is the delta from there.
+  sc.content.matrix = new paper.Matrix(
+    1, 0, 0, 1, (meta.x_offset - sc.ox) * ss, (meta.y_offset - sc.oy) * ss);
+  // Background + grid are viewport-space (see paintBackdrop), so they are the one
+  // thing a pan does rebuild. It is a handful of straight lines — no geometry.
+  sc.backdrop.activate();
+  sc.backdrop.removeChildren();
+  paintBackdrop(meta, W, H, ss, sc.S, meta.x_offset, meta.y_offset);
+
+  sc.project.view.update();
+  compositeTo(document.getElementById('c'), sc.hi, W, H, ss, meta);
+  return { mode: 'panframe' };
 };
 
-// Drop the snapshot at the end of a pan gesture. The canvas is several megabytes,
-// and holding it would also risk serving a later pan from a pre-edit scene.
-window.endPan = function () { PAN_SNAP = null; };
+// Free the retained scene. Nothing requires this for correctness — the scene is
+// keyed, so a stale one can never be served — but a caller that knows no pan is
+// coming can hand back the project and its offscreen canvas early.
+window.endPan = function () { dropScene(); };
 
 // ---- auto_shadow geometry probe (OSS auto_shadow.py, 1.109) ---------------
 // For each requested {casting, receiving} pair, compute the RAW caster∩receiver

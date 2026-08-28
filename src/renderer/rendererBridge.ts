@@ -19,7 +19,6 @@ declare global {
     renderDragBackground?: (strands: RenderStrand[], meta: RenderMeta) => unknown;
     renderDragFrame?: (strands: RenderStrand[], meta: RenderMeta) => unknown;
     endDrag?: () => void;
-    renderPanBackground?: (strands: RenderStrand[], meta: RenderMeta) => unknown;
     renderPanFrame?: (meta: RenderMeta) => unknown;
     endPan?: () => void;
   }
@@ -48,17 +47,10 @@ export function callEndDrag(): void {
   if (typeof window.endDrag === 'function') window.endDrag();
 }
 
-// Pan fast-path bridges. Same graceful degradation as the drag ones: an older
-// renderer without them falls back to a full render, which is exactly the
-// behaviour this path replaces.
-export function callRenderPanBackground(strands: RenderStrand[], meta: RenderMeta): boolean {
-  if (typeof window.renderPanBackground !== 'function') return false;
-  window.renderPanBackground(strands, meta);
-  return true;
-}
-
-// True when the snapshot served this frame; false means the caller must
-// re-snapshot (delta past the margin, fractional delta, or size/zoom change).
+// Pan bridge. True when the renderer's retained scene served this frame; false
+// means the caller must do a full render (which retains a scene the next frame can
+// reuse). A renderer without renderPanFrame simply always returns false, so the
+// editor degrades to a full render per pan frame rather than breaking.
 export function callRenderPanFrame(meta: RenderMeta): boolean {
   if (typeof window.renderPanFrame !== 'function') return false;
   return window.renderPanFrame(meta) != null;

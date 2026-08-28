@@ -344,10 +344,12 @@ export interface RenderMeta {
   // bakes everything EXCEPT these once, and renderDragFrame draws only these over
   // the bake each frame. Absent => normal full render.
   drag?: { moving: string[] };
-  // LIVE EDITOR ONLY. Redirects renderFixture's output to this canvas instead of
-  // the visible #c. The pan fast path uses it to take its oversized snapshot
-  // offscreen without disturbing what is on screen. Absent everywhere else.
-  target?: HTMLCanvasElement;
+  // LIVE EDITOR ONLY (the offline oracle never sets this). Identifies the SCENE
+  // this render draws — every renderFixture input EXCEPT the pan offset. The
+  // renderer tags its retained scene with it, and renderPanFrame refuses to reuse a
+  // scene whose key differs, so a pan can only ever be served from geometry built
+  // for the current document and view. Absent => the scene is never reused.
+  scene_key?: string;
   // LIVE EDITOR ONLY (the offline oracle never sets this). When true, the ss×
   // supersampled offscreen is downscaled with the browser's native high-quality
   // filter (a fast GPU blit) instead of the exact-but-slow JS box-average loop the

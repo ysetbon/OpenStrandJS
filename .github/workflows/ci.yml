@@ -105,14 +105,14 @@ jobs:
       - name: Guards — drag/release fast path
         run: node tools/drag_perf_check.mjs
 
-      # Pan fast path: every pan frame is served by blitting one oversized snapshot
-      # instead of rebuilding the scene. This checks each frame is the same picture
-      # as the full render it replaces, and that the snapshot is REFUSED (so the
-      # scheduler re-snapshots) for a delta past the margin, a fractional delta, a
-      # resize or a zoom. It carries its own controls proving the rasterizer is
-      # deterministic but not canvas-size invariant, which is why it is a bounded
-      # deviation rather than a pixel-identity check.
-      - name: Guards — pan fast path fidelity
+      # Pan: a frame is the retained scene under a moved transform (OSS's
+      # painter.translate(pan_offset)) rather than a rebuild, so this checks the
+      # properties that makes true — a delta-0 frame reproduces its render exactly,
+      # the same frame twice is identical, a frame at delta d is the anchor image
+      # shifted by exactly d (residual bounded AND uniquely best at that delta), and
+      # a scene is REFUSED for a different scene_key, a missing key, a resize or a
+      # zoom change.
+      - name: Guards — pan correctness
         run: node tools/pan_fidelity.mjs
 
       - name: Editor smoke — built app boots cleanly

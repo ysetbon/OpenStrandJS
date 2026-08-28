@@ -257,15 +257,17 @@ for (const g of gestures) {
   const rb = await RUN(b.page, project, g);
   // The PAN gesture is deliberately no longer bit-identical to the baseline, and
   // this harness must say so rather than quietly passing or quietly failing.
-  // The pan fast path changes two things on purpose:
-  //   * the gesture delta is rounded to whole canvas pixels, so a frame can be
-  //     served by an exact blit instead of a full rebuild (OSS pans on integer
-  //     QPoint deltas for the same reason). The view therefore lands up to half a
-  //     pixel from where the baseline put it — asserted as a BOUND below.
-  //   * mid-pan frames come from a snapshot, so they are not the byte-identical
-  //     output of a per-frame renderFixture. What they ARE is measured, per fixture
-  //     and per delta, by tools/pan_fidelity.mjs; repeating a strict pixel compare
-  //     here would just restate that measurement as a failure.
+  // Panning changes two things on purpose:
+  //   * the gesture delta is rounded to whole canvas pixels, as OSS's integer
+  //     QPoint deltas do (strand_drawing_canvas.py:4430). The view therefore lands
+  //     up to half a pixel from where the baseline put it — asserted as a BOUND.
+  //   * a pan frame is now the retained scene under a moved transform rather than a
+  //     fresh per-frame renderFixture, and renderFixture is not offset-invariant
+  //     (paper.js boolean ops use absolute epsilons), so the two do not agree byte
+  //     for byte at a panned offset. What a pan frame IS — the anchor render
+  //     translated by exactly its delta — is asserted per fixture and per delta by
+  //     tools/pan_fidelity.mjs. Repeating a strict pixel compare here would just
+  //     restate the renderer's offset instability as a pan failure.
   // Everything else — the document, history, selection — must still match exactly,
   // and does: panning edits nothing.
   const viewOk = g.pan

@@ -6,7 +6,7 @@
 import { useEditorStore } from '../store/editorStore';
 import {
   callRender, callRenderDragBackground, callRenderDragFrame, callEndDrag,
-  callRenderPanBackground, callRenderPanFrame, callEndPan,
+  callRenderPanFrame, callEndPan,
 } from './rendererBridge';
 import { buildMeta, toRenderArray } from './toRenderArray';
 
@@ -34,42 +34,45 @@ let bakedKey: string | null = null;
 // untouched, and PNG export can request ss2 explicitly. Bump to 2 to trade
 // responsiveness for crisper on-screen anti-aliasing.
 const EDITOR_SUPERSAMPLE = 1;
-// ---- pan gesture state --------------------------------------------------------
-// True between pan pointer-down and pointer-up. Deliberately NOT in the zustand
-// store: it is read only here, and putting it in the store would spend a React
-// commit on each end of every pan for nothing.
-let panGesture = false;
-// What the live pan snapshot was taken for — every renderNow input EXCEPT the pan
-// offset, which is the one thing the snapshot is allowed to differ in. `doc` is
-// compared by identity AND revision because mutateDocLive edits the document in
-// place, leaving the reference unchanged.
-type PanSig = {
+// ---- scene reuse --------------------------------------------------------------
+// The SCENE signature: every renderNow input EXCEPT the pan offset, which is the
+// one thing a reused scene is allowed to differ in. `doc` is compared by identity
+// AND revision because mutateDocLive edits the document in place, leaving the
+// reference unchanged.
+type SceneSig = {
   doc: unknown; docRevision: number; settings: unknown; shadowPaths: unknown;
   highlight: string | null; zoom: number; w: number; h: number; ss: number;
 };
-let panSig: PanSig | null = null;
+let sceneSig: SceneSig | null = null;
+// Monotonic id for the CURRENT signature. The renderer only ever compares scene
+// keys for equality, so a serial is all it needs — and a number that only ever
+// moves forward means a stale scene can never collide with a live key.
+let sceneSerial = 0;
 
-function samePanSig(a: PanSig | null, b: PanSig): boolean {
+function sameSceneSig(a: SceneSig | null, b: SceneSig): boolean {
   return !!a && a.doc === b.doc && a.docRevision === b.docRevision
     && a.settings === b.settings && a.shadowPaths === b.shadowPaths
     && a.highlight === b.highlight && a.zoom === b.zoom
     && a.w === b.w && a.h === b.h && a.ss === b.ss;
 }
 
-// Unconditional: panSig can be null while the renderer still holds a snapshot (a
-// renderPanBackground that succeeded followed by a refused blit), and callEndPan is
-// idempotent, so gating this on panSig would be the one way to leak the bitmap.
-function dropPanSnapshot(): void {
-  panSig = null;
-  callEndPan();
+// The key this frame's scene is tagged with, bumped whenever anything but the pan
+// offset changed. renderFixture stamps it onto the scene it retains; renderPanFrame
+// refuses a scene whose key differs, so geometry can only be reused for the
+// document and view it was built for.
+function sceneKey(sig: SceneSig): string {
+  if (!sameSceneSig(sceneSig, sig)) {
+    sceneSig = sig;
+    sceneSerial += 1;
+  }
+  return `s${sceneSerial}`;
 }
 
-// Called by InteractionHost around a pan gesture. Ending one frees the snapshot
-// (several megabytes) rather than holding it against a possible next pan, which
-// could also mean serving that pan from a pre-edit scene.
-export function setPanGesture(on: boolean): void {
-  panGesture = on;
-  if (!on) dropPanSnapshot();
+// Hand the renderer's retained scene back (a paper project and an offscreen
+// canvas). Nothing requires this for correctness — the scene is keyed, so a stale
+// one can never be served — so it is for teardown, not for gesture bookkeeping.
+export function releaseScene(): void {
+  callEndPan();
 }
 
 let overlayCanvas: HTMLCanvasElement | null = null;
@@ -199,40 +202,6 @@ function renderNow(): void {
     // without clearing the selection, so it reappears on leaving view mode.
     const highlightLayer = mode === 'view' && settings.view_hide_highlight ? null : selection.layerName;
     const arr = toRenderArray(doc, highlightLayer, highlightSet);
-    if (panGesture && !dragging) {
-      // PAN FAST-PATH. A pan moves no document coordinate — only x_offset/y_offset,
-      // which renderFixture folds into every point — so before this path every pan
-      // frame rebuilt the whole scene (measured ~1.2 s/frame on three_strand_braid).
-      // renderPanBackground takes ONE oversized render and renderPanFrame blits the
-      // matching sub-rectangle each frame; tools/pan_identity.mjs proves that
-      // sub-rectangle is pixel-identical to the full render it replaces, so this is
-      // a pure speedup with no change to what is drawn.
-      const meta = {
-        ...buildMeta(doc, view, settings, visibleShadowPaths),
-        supersample: EDITOR_SUPERSAMPLE,
-      };
-      const sig: PanSig = {
-        doc, docRevision, settings, shadowPaths: visibleShadowPaths,
-        highlight: highlightLayer, zoom: meta.zoom ?? 1,
-        w: meta.image_width, h: meta.image_height, ss: EDITOR_SUPERSAMPLE,
-      };
-      if (dragBaked) { callEndDrag(); dragBaked = false; bakedKey = null; }
-      // Order matters: when the signature changed, the live snapshot is for a
-      // different scene, so it must NOT be blitted first — && short-circuits past
-      // callRenderPanFrame straight to the re-snapshot.
-      if (!samePanSig(panSig, sig) || !callRenderPanFrame(meta)) {
-        panSig = null;
-        if (callRenderPanBackground(arr, meta) && callRenderPanFrame(meta)) {
-          panSig = sig;
-        } else {
-          // Renderer without the pan entry points: the old full-render behaviour,
-          // which is exactly what this path optimizes rather than replaces.
-          callEndPan();
-          callRender(arr, meta);
-        }
-      }
-      return;
-    }
     if (dragging && dragMoving.length) {
       // DRAG FAST-PATH (mirrors the original's draw-only-affected-strand path).
       // Render at native resolution with shadows off: bake every STATIC strand
@@ -273,18 +242,39 @@ function renderNow(): void {
         bakedKey = key;
       }
       callRenderDragFrame(arr, meta);
-    } else {
-      // NOT DRAGGING (release, selection click, undo, …): one full render at the
-      // editor supersample (1×). At 1× shadows + correct z-order are restored in
-      // ~30ms instead of the ~260ms a full ss2 render costs, so pointer-up no
-      // longer hangs. Drop any drag background first so the next gesture re-bakes.
-      if (dragBaked) { callEndDrag(); dragBaked = false; bakedKey = null; }
-      dropPanSnapshot();   // e.g. an undo landing while a pan snapshot is still live
-      callRender(arr, {
-        ...buildMeta(doc, view, settings, visibleShadowPaths),
-        supersample: EDITOR_SUPERSAMPLE,
-      });
+      return;
     }
+
+    const sig: SceneSig = {
+      doc, docRevision, settings, shadowPaths: visibleShadowPaths,
+      highlight: highlightLayer, zoom: view.zoom,
+      w: Math.max(1, Math.round(view.width)), h: Math.max(1, Math.round(view.height)),
+      ss: EDITOR_SUPERSAMPLE,
+    };
+    // ONE non-drag paint path, the way OSS has one: set the offset and repaint.
+    //
+    // The renderer builds its content layer with the pan on that layer's MATRIX
+    // rather than folded into the geometry (see "CONTENT layer" in
+    // strand-renderer.js), which is what OSS gets from
+    // `painter.translate(pan_offset)`. So whenever the scene key matches — i.e.
+    // nothing but the pan offset changed since the last build — renderPanFrame
+    // serves this frame by moving that matrix, repainting the grid and
+    // re-rasterizing, and what it produces is the frame the full render on the last
+    // line would have produced from the same geometry under the same transform.
+    //
+    // That covers the whole of a pan INCLUDING its ends. There is no first-frame
+    // build (the resting render already left the scene behind) and no release
+    // render (the last frame of the gesture is already canonical, so repainting
+    // it would only buy a ~770ms stall). A miss — first render, resize, zoom, or
+    // any document or settings edit — falls through to the full render, which
+    // retains the scene the next frame reuses.
+    const meta = {
+      ...buildMeta(doc, view, settings, visibleShadowPaths),
+      supersample: EDITOR_SUPERSAMPLE,
+      scene_key: sceneKey(sig),
+    };
+    if (dragBaked) { callEndDrag(); dragBaked = false; bakedKey = null; }
+    if (!callRenderPanFrame(meta)) callRender(arr, meta);
   } catch (err) {
     // Surface renderer errors without killing the rAF loop.
     console.error('[OpenStrandJS] render failed:', err);

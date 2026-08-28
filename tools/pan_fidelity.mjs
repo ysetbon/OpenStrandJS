@@ -1,53 +1,52 @@
-// Fidelity gate for the PAN fast path.
+// Correctness gate for the PAN path.
 //
-// The pan fast path replaces a full renderFixture per frame with one OVERSIZED
-// snapshot plus a drawImage per frame (see "pan fast path" in
-// web/strand-renderer.js). This measures how far a frame served that way is from
-// the full render it stands in for, and fails if it drifts past a budget.
+// A pan rebuilds nothing. renderFixture leaves its content layer with the pan on
+// that layer's MATRIX instead of folded into the geometry — OSS's
+// `painter.translate(pan_offset)`, strand_drawing_canvas._paintEventInner — and
+// renderPanFrame serves later offsets by moving that matrix and re-rasterizing.
 //
-// WHY THIS IS A BUDGET AND NOT AN IDENTITY CHECK
-// ----------------------------------------------
-// It would be nicer to assert "not one pixel moved", the way tools/render_identity
-// .mjs does for the renderer. That is not achievable here, and the reason is
-// outside this codebase: Chromium's 2D rasterizer is not canvas-size invariant.
-// Draw the same geometry at the same absolute coordinates into a 1100x750 canvas
-// and into a 1740x1390 canvas, crop the second, and the two differ — with no
-// paper.js and no renderer involved at all. This script proves that itself, in two
-// controls that run before any of the real cases:
+// WHAT THIS ASSERTS, AND WHY IT IS THIS AND NOT "EQUALS A FULL RENDER"
+// -------------------------------------------------------------------
+// The tempting gate is "a pan frame must equal renderFixture at the same offset".
+// That is the wrong oracle, because renderFixture is not offset-invariant: paper.js
+// boolean ops use ABSOLUTE epsilons, so the same document built at a different
+// offset comes out a few ULPs different — and at some offsets it hits a known
+// degeneracy and draws a strand body as a solid black band. (Pre-existing and
+// documented; it reproduces with the pan path never called.) Measured against that
+// reference, the pan frame is the STABLE one and the reference is what moves.
 //
-//   determinism   the same drawing into the same-size canvas, twice  -> must be 0
-//   size-variance the same drawing into a larger canvas, cropped     -> is NOT 0
+// So the gate is the property that is exactly true and that actually constrains the
+// implementation: a pan frame is the anchor image TRANSLATED. That is non-circular
+// — it pins the matrix's sign, magnitude and axes, that the grid is rebuilt and
+// tracks, and that the layer order survives — and it is checkable to the pixel:
 //
-// The first is what makes the measurements below meaningful (nothing here is
-// flaky). The second is what makes an identity assertion impossible: a snapshot
-// big enough to pan around inside is, by construction, a different canvas size.
+//   anchor      a pan frame at the scene's own offset must equal, exactly, the
+//               renderFixture call that built the scene (the matrix is identity)
+//   registration a pan frame at an integer delta must be the anchor image shifted by
+//               exactly that delta. Asserted two ways: the residual over the shared
+//               region must be tiny, AND it must be MINIMAL AT THAT DELTA — every
+//               neighbouring alignment must be far worse. The second half is what
+//               makes this a real test: a wrong sign, a swapped axis, an off-by-one
+//               or a frozen grid all put the best alignment somewhere else, and no
+//               residual threshold alone would say so.
 //
-// So the gate is: the pan frame must be the SAME PICTURE, differing only in
-// anti-aliasing at edges. Two budgets enforce that — the share of pixels that
-// differ at all, and the share that differ by more than a hair. A real defect (a
-// blank margin, a resampled blit, a stale snapshot, an off-by-one blit origin)
-// blows through both by orders of magnitude, which is what this is here to catch.
+// The residual is not zero, and is not expected to be: a translated path reaches the
+// rasterizer through the canvas transform rather than as pre-added coordinates, so
+// curve edges land on marginally different anti-aliasing. It is ~1e-4 of channels
+// against a ~5e-2 threshold, and the alignment test above is what rules out anything
+// structural.
+//   determinism the same pan frame twice must be identical
+//   refuse      a different scene_key, no key, a resize and a zoom change must each
+//               be REFUSED. Reusing a scene across any of those would draw the wrong
+//               document or the wrong size, and no pixel test of served frames could
+//               see it.
 //
-// The RESTING image is not covered by any of this and does not need to be:
-// InteractionHost.endPanGesture requests a full render on pointer-up, so what is
-// left on screen after a pan is a direct render, not a crop.
-//
-// Cases per fixture, at zoom 1 and 1.35:
-//   frame     one blit off a fresh snapshot, over a spread of deltas including
-//             both signs and the exact margin boundary
-//   gesture   a SEQUENCE of deltas served by ONE snapshot, each frame measured
-//             against its own full render — the case that catches state wrongly
-//             carried between frames
-//   refuse    a delta past the margin, a fractional delta, and a resize must all
-//             be REFUSED (renderPanFrame returns null so the scheduler
-//             re-snapshots). A path that blitted anyway would show blank or
-//             resampled edges, and no pixel budget would catch it.
+// It also REPORTS, without failing, how far each pan frame is from a full render at
+// that offset, since that is the number people will ask about. Large entries there
+// are the renderer's offset instability described above, not the pan path.
 //
 // Usage:
-//   node tools/pan_fidelity.mjs [--fixtures a,b,c] [--report]
-//
-// --report prints the per-case numbers and skips the budget assertion; use it when
-// changing PAN_MARGIN, to see what the new margin costs before setting a budget.
+//   node tools/pan_fidelity.mjs [--fixtures a,b,c] [--verbose]
 //
 // OSS_CHROMIUM: absolute path to a Chromium binary if the pre-installed browser
 // revision does not match this Playwright version.
@@ -60,7 +59,7 @@ import path from 'node:path';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
 
-const REPORT = process.argv.includes('--report');
+const VERBOSE = process.argv.includes('--verbose');
 const fixArgIdx = process.argv.indexOf('--fixtures');
 const only = fixArgIdx >= 0 && process.argv[fixArgIdx + 1]
   ? process.argv[fixArgIdx + 1].split(',')
@@ -70,17 +69,16 @@ const fixtures = (only || readdirSync(path.join(root, 'fixtures'))
   .filter((f) => f.endsWith('.json'))
   .map((f) => f.replace(/\.json$/, ''))).sort();
 
-// Budgets, as a share of all pixels in the frame. Set from the measured worst case
-// across every fixture, zoom and delta below, with room to spare — see the header
-// for why a zero budget is not available. Re-derive with --report after changing
-// PAN_MARGIN or anything about how the snapshot is taken.
-// BUDGET_ANY is loose because at zoom != 1 the grid is a few thousand 1px lines at
-// fractional positions, and the rasterizer's size-variance touches nearly all of
-// them by +/-1. BUDGET_VISIBLE is the one that matters: it is what separates
-// "anti-aliasing moved" from "the picture changed".
-const BUDGET_ANY = 0.08;      // pixels differing at all
-const BUDGET_VISIBLE = 0.002; // pixels differing by more than VISIBLE_DELTA
-const VISIBLE_DELTA = 8;
+// Integer deltas, in CSS px: both signs on both axes, pure-axis moves, and moves far
+// past anything the superseded snapshot's margin could have served. Registration is
+// asserted on these. (Fractional deltas are covered by the reference report below —
+// they resample under a translate, so there is no shifted image to compare against.)
+const DELTAS = [
+  [0, 0], [1, 0], [0, -1], [37, 24], [-37, -24], [160, -160], [900, 640], [-900, -640],
+];
+// One gesture: consecutive offsets served by a single scene, to catch state wrongly
+// carried between frames.
+const GESTURE = [[6, 4], [19, 13], [55, 38], [140, 96], [-60, 210], [-400, -300]];
 
 function loadStrands(name) {
   const data = JSON.parse(readFileSync(path.join(root, 'fixtures', `${name}.json`), 'utf8'));
@@ -99,9 +97,8 @@ function collectPoints(value, out) {
   }
 }
 
-// A LIVE-EDITOR meta: supersample 1, shadows on, grid on, themed backdrop. The pan
-// path only ever runs in the editor, so measuring it against the oracle's ss2 meta
-// would be measuring something that never happens.
+// Editor-shaped meta: supersample 1 and the grid ON, because that is what a live pan
+// renders, and the grid is the one thing a pan frame does rebuild.
 function metaFor(strands, zoom) {
   const pts = [];
   collectPoints(strands, pts);
@@ -109,17 +106,15 @@ function metaFor(strands, zoom) {
   const minX = Math.min(...xs), minY = Math.min(...ys);
   const M = 130;
   return {
-    image_width: Math.min(1100, Math.ceil(Math.max(...xs) - minX) + 2 * M),
-    image_height: Math.min(750, Math.ceil(Math.max(...ys) - minY) + 2 * M),
+    image_width: Math.min(1400, Math.ceil(Math.max(...xs) - minX) + 2 * M),
+    image_height: Math.min(900, Math.ceil(Math.max(...ys) - minY) + 2 * M),
     x_offset: M - minX,
     y_offset: M - minY,
     supersample: 1,
     zoom,
     shadow_enabled: true,
     show_grid: true,
-    grid_size: 28,
-    grid_color: '#C8C8C8',
-    canvas_bg: '#2C2C2C',
+    grid_size: 30,
     curve_params: { base_fraction: 1, dist_multiplier: 2, exponent: 2 },
   };
 }
@@ -127,104 +122,65 @@ function metaFor(strands, zoom) {
 const rendererSrc = readFileSync(path.join(root, 'web', 'strand-renderer.js'), 'utf8');
 const paperSrc = readFileSync(path.join(root, 'node_modules', 'paper', 'dist', 'paper-full.min.js'), 'utf8');
 
-// Read the margin out of the renderer rather than duplicating it: a margin change
-// this harness did not follow would otherwise turn the boundary case into a no-op.
-const declared = /const PAN_MARGIN = (\d+);/.exec(rendererSrc);
-if (!declared) {
-  console.error('could not find PAN_MARGIN in web/strand-renderer.js');
-  process.exit(2);
-}
-const M = Number(declared[1]);
-
 const browser = await chromium.launch(
   process.env.OSS_CHROMIUM ? { executablePath: process.env.OSS_CHROMIUM } : {});
 
-const errs = [];
-let failures = 0, cases = 0, refbugs = 0;
+let failures = 0, cases = 0;
+let worstResidual = { share: 0, bad: 0, total: 0, at: '(none)' };
 const rows = [];
-let worstAny = 0, worstVisible = 0;
-
-// Everything from the launch on is inside the try, page SETUP included: a
-// setContent or addScriptTag that rejects would otherwise leave the Chromium
-// process running, and a leaked browser on the failure path is the last thing
-// anyone debugging a diff needs.
+const refReport = [];
 try {
   const page = await browser.newPage({ deviceScaleFactor: 1 });
+  const errs = [];
   page.on('pageerror', (e) => errs.push(String(e)));
   await page.setContent('<!doctype html><html><body><canvas id="c"></canvas></body></html>');
   await page.addScriptTag({ content: paperSrc });
   await page.addScriptTag({ content: rendererSrc });
-  await page.waitForFunction(() => typeof window.renderPanFrame === 'function');
+  await page.waitForFunction(() => typeof window.renderFixture === 'function'
+    && typeof window.renderPanFrame === 'function');
 
-  // Shared pixel-diff helper, installed in the page. All pixel work happens there:
-  // shipping two multi-megabyte buffers per case to node and diffing them here
-  // dominated the runtime and told us nothing extra.
-  await page.evaluate((visibleDelta) => {
-    window.__diff = (a, b) => {
-      let any = 0, visible = 0, max = 0, first = -1;
-      for (let i = 0; i < a.length; i += 4) {
-        let d = 0;
-        for (let k = 0; k < 4; k++) d = Math.max(d, Math.abs(a[i + k] - b[i + k]));
-        if (d) {
-          any++;
-          if (d > visibleDelta) visible++;
-          if (d > max) max = d;
-          if (first < 0) first = i / 4;
+  // All pixel work happens in the page: shipping multi-megabyte buffers per case to
+  // node dominated the runtime of the harness this replaces and told us nothing.
+  await page.evaluate(() => {
+    const c = () => document.getElementById('c');
+    window.__shoot = () => {
+      const el = c();
+      return { w: el.width, h: el.height,
+        d: el.getContext('2d').getImageData(0, 0, el.width, el.height).data.slice() };
+    };
+    window.__same = (a, b) => {
+      if (a.w !== b.w || a.h !== b.h) return { bad: -1, worst: 255 };
+      let bad = 0, worst = 0;
+      for (let i = 0; i < a.d.length; i++) {
+        const t = Math.abs(a.d[i] - b.d[i]);
+        if (t) { bad++; if (t > worst) worst = t; }
+      }
+      return { bad, worst, total: a.d.length };
+    };
+    // `b` must be `a` shifted by (dx, dy) px. Compared only over the region both
+    // images define, so content that panned in from outside `a` is not judged.
+    // `stride` samples every Nth row. The exact residual at the claimed delta is
+    // always measured with stride 1; the four neighbouring alignments only have to
+    // establish a 5x ratio, so they are sampled — a misalignment lights up every
+    // edge in the frame, not one row in eight.
+    window.__shifted = (a, b, dx, dy, stride = 1) => {
+      if (a.w !== b.w || a.h !== b.h) return { bad: -1, worst: 255, total: 1 };
+      let bad = 0, worst = 0, n = 0;
+      const x0 = Math.max(0, dx), x1 = Math.min(a.w, a.w + dx);
+      const y0 = Math.max(0, dy), y1 = Math.min(a.h, a.h + dy);
+      for (let y = y0; y < y1; y += stride) {
+        for (let x = x0; x < x1; x++) {
+          const bi = (y * a.w + x) * 4, ai = ((y - dy) * a.w + (x - dx)) * 4;
+          for (let k = 0; k < 4; k++) {
+            const t = Math.abs(a.d[ai + k] - b.d[bi + k]);
+            if (t) { bad++; if (t > worst) worst = t; }
+          }
+          n += 4;
         }
       }
-      return { any, visible, max, first, total: a.length / 4 };
+      return { bad, worst, total: n };
     };
-  }, VISIBLE_DELTA);
-
-  // ---- controls ------------------------------------------------------------
-  // Neither of these touches paper.js or the renderer. They establish that the
-  // measurements below are real (determinism) and that a zero budget is not on
-  // offer (size-variance). See the header.
-  const control = await page.evaluate(({ M }) => {
-    const W = 1100, H = 750;
-    const paint = (w, h, ox, oy) => {
-      const c = document.createElement('canvas');
-      c.width = w; c.height = h;
-      const x = c.getContext('2d');
-      x.fillStyle = '#2C2C2C'; x.fillRect(0, 0, w, h);
-      x.lineCap = 'round'; x.lineJoin = 'round';
-      for (let k = 0; k < 14; k++) {
-        x.beginPath();
-        x.moveTo(ox + 60 + k * 17.3, oy + 90 + k * 11.7);
-        x.bezierCurveTo(ox + 300 + k * 13, oy + 40 + k * 29,
-          ox + 640 + k * 7, oy + 560 - k * 19, ox + 980 + k * 3.5, oy + 300 + k * 23);
-        x.strokeStyle = `rgb(${200 - k * 7},${120 + k * 5},${230 - k * 9})`;
-        x.lineWidth = 46 - k * 1.5;
-        x.stroke();
-        x.strokeStyle = '#000'; x.lineWidth = 4; x.stroke();
-      }
-      return x;
-    };
-    const small = paint(W, H, 0, 0).getImageData(0, 0, W, H).data;
-    const again = paint(W, H, 0, 0).getImageData(0, 0, W, H).data;
-    const big = paint(W + 2 * M, H + 2 * M, M, M).getImageData(M, M, W, H).data;
-    return { determinism: window.__diff(small, again), sizeVariance: window.__diff(small, big) };
-  }, { M });
-
-  cases++;
-  if (control.determinism.any !== 0) {
-    failures++;
-    rows.push(`  FAIL  control / determinism  the same drawing twice differs in ${control.determinism.any} px`
-      + ' — every measurement below is noise, fix this first');
-  } else if (control.sizeVariance.any === 0) {
-    // Not a failure of the product — but the budgets below exist only because this
-    // is non-zero, so if it ever becomes zero they should be tightened to identity.
-    rows.push('  note  control                canvas-size invariance now HOLDS on this Chromium'
-      + ' — the budgets below could be tightened to an identity assertion');
-  } else {
-    rows.push(`  ok    control                same size twice: 0 px;`
-      + ` +${M}px canvas cropped: ${control.sizeVariance.any} px, maxChannel ${control.sizeVariance.max}`
-      + ' (no paper.js, no renderer — this is the rasterizer)');
-  }
-
-  // ---- the real cases ------------------------------------------------------
-  const FRAME_DELTAS = [[0, 0], [7, -5], [-133, 88], [M, -M], [-M, M]];
-  const GESTURE_DELTAS = [[9, -6], [31, -19], [88, -54], [150, -96], [96, -140], [-40, 60]];
+  });
 
   for (const name of fixtures) {
     const strands = loadStrands(name);
@@ -232,143 +188,208 @@ try {
 
     for (const zoom of [1, 1.35]) {
       const meta = metaFor(strands, zoom);
-      const suffix = zoom === 1 ? '' : '@zoom';
+      const res = await page.evaluate(({ strands, meta, deltas, gesture }) => {
+        const out = { anchor: null, frames: [], gesture: [], determinism: null, refuse: {}, ref: [] };
+        const pan = (dx, dy, key) => window.renderPanFrame({
+          ...meta, x_offset: meta.x_offset + dx, y_offset: meta.y_offset + dy, scene_key: key });
 
-      for (const [kind, deltas] of [[`frame${suffix}`, FRAME_DELTAS], [`gesture${suffix}`, GESTURE_DELTAS]]) {
-        const res = await page.evaluate(({ strands, meta, deltas }) => {
-          const c = document.getElementById('c');
-          const px = () => c.getContext('2d').getImageData(0, 0, c.width, c.height).data.slice();
-          const copy = (o) => JSON.parse(JSON.stringify(o));
-          // ONE snapshot at the gesture's starting offset, as the scheduler takes it.
-          window.renderPanBackground(copy(strands), meta);
-          const out = [];
-          for (const d of deltas) {
-            const m = { ...meta, x_offset: meta.x_offset + d[0], y_offset: meta.y_offset + d[1] };
-            if (window.renderPanFrame(m) == null) { out.push({ d, refused: true }); continue; }
-            const fast = px();
-            // renderFixture rebuilds paper from scratch, so the reference cannot be
-            // contaminated by the snapshot above.
-            window.renderFixture(copy(strands), m);
-            out.push({ d, refused: false, ...window.__diff(px(), fast) });
-          }
-          window.endPan();
-          return out;
-        }, { strands, meta, deltas });
+        // Build the scene; the image it leaves is the anchor every shift is judged against.
+        window.renderFixture(strands, { ...meta, scene_key: 'scene' });
+        const anchor = window.__shoot();
 
-        cases++;
-        const refused = res.filter((r) => r.refused);
-        const worst = res.filter((r) => !r.refused)
-          .sort((a, b) => (b.any / b.total) - (a.any / a.total))[0];
-        const anyPct = worst ? worst.any / worst.total : 0;
-        const visPct = worst ? worst.visible / worst.total : 0;
-        worstAny = Math.max(worstAny, anyPct);
-        worstVisible = Math.max(worstVisible, visPct);
+        // anchor: a pan frame at delta 0 must reproduce that render exactly.
+        out.anchor = pan(0, 0, 'scene') ? window.__same(anchor, window.__shoot()) : { refused: true };
 
-        let over = anyPct > BUDGET_ANY || visPct > BUDGET_VISIBLE;
+        // determinism: the same frame twice.
+        pan(37, 24, 'scene'); const d1 = window.__shoot();
+        pan(37, 24, 'scene'); const d2 = window.__shoot();
+        out.determinism = window.__same(d1, d2);
 
-        // Over budget does not yet mean the PAN PATH is wrong — renderFixture
-        // itself is not stable across pan offsets. At some offsets it draws a
-        // strand as a solid black band (a boolean-geometry degeneracy in the body
-        // outline; reproducible with the pan path never called, and it renders
-        // correctly at a different offset or on a larger canvas). When that
-        // happens the reference is the broken image, not the frame under test.
-        //
-        // Discriminate by asking renderFixture alone: render the SAME offset
-        // twice, once at viewport size and once on the oversized canvas, and crop.
-        // Both are direct renders, so if they disagree it is renderFixture that is
-        // offset-unstable and this case says nothing about the pan path.
-        let refUnstable = null;
-        if (over) {
-          refUnstable = await page.evaluate(({ strands, meta, d, M }) => {
-            const copy = (o) => JSON.parse(JSON.stringify(o));
-            const c = document.getElementById('c');
-            const m = { ...meta, x_offset: meta.x_offset + d[0], y_offset: meta.y_offset + d[1] };
-            window.renderFixture(copy(strands), m);
-            const small = c.getContext('2d').getImageData(0, 0, m.image_width, m.image_height).data.slice();
-            window.renderFixture(copy(strands), {
-              ...m,
-              image_width: m.image_width + 2 * M, image_height: m.image_height + 2 * M,
-              x_offset: m.x_offset + M, y_offset: m.y_offset + M,
-            });
-            const big = c.getContext('2d').getImageData(M, M, m.image_width, m.image_height).data;
-            return window.__diff(small, big);
-          }, { strands, meta, d: worst.d, M });
-          // Same threshold: if two DIRECT renders of the same offset disagree by
-          // more than the visible budget, the reference is the unstable one.
-          if (refUnstable.visible / refUnstable.total > BUDGET_VISIBLE) over = false;
+        // Residual at the claimed delta, plus the four neighbouring alignments. A
+        // correct pan frame is minimal at the claim by a wide margin; anything that
+        // moves the image wrongly is minimal somewhere else.
+        const NEAR_STRIDE = 8;
+        const align = (a, b, dx, dy) => {
+          const at = window.__shifted(a, b, dx, dy);
+          // Neighbours are sampled, so the claimed delta is scored at the SAME
+          // sampling before the two are compared — otherwise the ratio is a
+          // sampling artefact rather than a fact about the frame.
+          const mine = window.__shifted(a, b, dx, dy, NEAR_STRIDE);
+          const near = [[1, 0], [-1, 0], [0, 1], [0, -1]]
+            .map(([ex, ey]) => window.__shifted(a, b, dx + ex, dy + ey, NEAR_STRIDE))
+            .reduce((m, r) => (r.bad >= 0 && (m < 0 || r.bad < m) ? r.bad : m), -1);
+          return { ...at, near, atSampled: mine.bad };
+        };
+
+        // registration, one fresh scene per delta.
+        for (const [dx, dy] of deltas) {
+          window.renderFixture(strands, { ...meta, scene_key: 'scene' });
+          const a = window.__shoot();
+          if (!pan(dx, dy, 'scene')) { out.frames.push({ dx, dy, refused: true }); continue; }
+          out.frames.push({ dx, dy, ...align(a, window.__shoot(), dx, dy) });
         }
-        if (REPORT) over = false;
 
-        if (refused.length || over) {
+        // registration across a gesture: ONE scene, a run of offsets off it.
+        window.renderFixture(strands, { ...meta, scene_key: 'gest' });
+        const gAnchor = window.__shoot();
+        for (const [dx, dy] of gesture) {
+          if (!pan(dx, dy, 'gest')) { out.gesture.push({ dx, dy, refused: true }); continue; }
+          out.gesture.push({ dx, dy, ...align(gAnchor, window.__shoot(), dx, dy) });
+        }
+
+        // CONTROL. A test that cannot fail proves nothing, and the first cut of this
+        // one could not: it was calibrated on three fixtures and passed everything.
+        // So score the SAME pan frame against a deliberately wrong delta and record
+        // it — the judge below asserts that this is rejected. If an off-by-one stops
+        // being caught, this goes red while the real cases stay green.
+        window.renderFixture(strands, { ...meta, scene_key: 'ctl' });
+        const ctlAnchor = window.__shoot();
+        if (pan(37, 24, 'ctl')) {
+          const got = window.__shoot();
+          out.control = { claimed: align(ctlAnchor, got, 37, 24), wrong: align(ctlAnchor, got, 38, 24) };
+        }
+
+        // refusals.
+        window.renderFixture(strands, { ...meta, scene_key: 'refuse' });
+        out.refuse.wrongKey = window.renderPanFrame({ ...meta, scene_key: 'other' }) == null;
+        out.refuse.noKey = window.renderPanFrame({ ...meta, scene_key: undefined }) == null;
+        out.refuse.resized = window.renderPanFrame(
+          { ...meta, image_width: meta.image_width + 40, scene_key: 'refuse' }) == null;
+        out.refuse.rezoomed = window.renderPanFrame(
+          { ...meta, zoom: (meta.zoom || 1) * 1.5, scene_key: 'refuse' }) == null;
+
+        // REPORT ONLY: distance from a full render at the same offset. Two deltas,
+        // not the whole gesture — each costs two full renders and nothing gates on it.
+        for (const [dx, dy] of gesture.slice(0, 2)) {
+          window.renderFixture(strands, { ...meta, scene_key: 'rep' });
+          if (!pan(dx, dy, 'rep')) continue;
+          const got = window.__shoot();
+          window.renderFixture(strands, {
+            ...meta, x_offset: meta.x_offset + dx, y_offset: meta.y_offset + dy, scene_key: 'ref' });
+          out.ref.push({ dx, dy, ...window.__same(got, window.__shoot()) });
+        }
+        return out;
+      }, { strands, meta, deltas: DELTAS, gesture: GESTURE });
+
+      const tag = `${name} @z${zoom}`;
+      // The claimed delta must be the best alignment by this factor. Deliberately
+      // modest: what makes this test sharp is that it is an ARGMIN over the
+      // neighbours, not the size of the gap. An off-by-one puts the true delta one
+      // step away scoring ~0, so it loses the argmin outright.
+      const MARGIN = 2;
+      // …but only where a one-pixel shift changes anything to begin with. Whether an
+      // alignment is distinguishable is a matter of EDGE density, not of how much
+      // colour the region contains: a patch of flat strand body has plenty of both
+      // colour and area, and still reads identically shifted by a pixel.
+      //
+      // The test for that is that BOTH scores are tiny. Reading it off the
+      // neighbours alone is the mistake the control below caught: a frame that IS
+      // misaligned by one pixel has the true delta sitting among its neighbours,
+      // scoring ~0 — so a neighbours-only floor would call the one case this exists
+      // to catch "indistinguishable" and wave it through.
+      const NEAR_FLOOR = 50;
+      // The judge, as one predicate, so the control tests the same rule the cases
+      // are judged by rather than a restatement of it that can drift.
+      const verdict = (r) => {
+        if (Math.max(r.atSampled, r.near) < NEAR_FLOOR) return 'flat';
+        return r.atSampled * MARGIN <= r.near ? 'ok' : 'fail';
+      };
+      // anchor and determinism ARE bit-exact: at delta 0 the matrix is identity, and
+      // the same frame twice is the same frame. Nothing is allowed to move there.
+      const exact = (label, r) => {
+        cases++;
+        if (r.refused) { failures++; rows.push(`  REFUSED  ${tag} ${label} — the scene should have served this`); return; }
+        if (r.bad) { failures++; rows.push(`  DIFF     ${tag} ${label} — ${r.bad}/${r.total} channels, worst ${r.worst}`); }
+      };
+      // Registration: a small residual, and unambiguously best at the claimed delta.
+      //
+      // The residual is not zero and is not expected to be — it is edge
+      // anti-aliasing, verified by eye to be invisible (worst observed: 747 of
+      // 712k pixels on box_stitch @z1.35, scattered along strand outlines). A real
+      // registration bug — an off-by-one, a swapped axis, a frozen grid — moves
+      // several PERCENT of the frame, so this sits ~10x above the noise and ~20x
+      // below anything structural, with the margin test below as the sharp guard.
+      const RESIDUAL = 0.3 / 100;   // share of channels
+      const RESIDUAL_FLOOR = 500;   // …but never fail on a handful of channels: a
+                                    // large delta leaves a small overlap, where a
+                                    // dozen edge pixels is already a big ratio
+      const aligned = (label, r) => {
+        if (r.total > 0 && r.bad > 0) {
+          const sh = r.bad / r.total;
+          if (sh > worstResidual.share) worstResidual = { share: sh, bad: r.bad, total: r.total, at: `${tag} ${label}` };
+        }
+        cases++;
+        if (r.refused) { failures++; rows.push(`  REFUSED  ${tag} ${label} — the scene should have served this`); return; }
+        const share = r.bad / r.total;
+        if (r.bad < 0 || (share > RESIDUAL && r.bad > RESIDUAL_FLOOR)) {
           failures++;
-          const why = refused.length
-            ? `${refused.length} delta(s) REFUSED that should have been served: ${refused.map((r) => r.d).join(' ')}`
-            : `worst d=${worst.d} any=${(anyPct * 100).toFixed(3)}% (budget ${(BUDGET_ANY * 100)}%)`
-              + ` visible=${(visPct * 100).toFixed(3)}% (budget ${(BUDGET_VISIBLE * 100)}%) maxChannel=${worst.max}`;
-          rows.push(`  FAIL  ${name} / ${kind}  ${why}`);
-        } else if (refUnstable) {
-          refbugs++;
-          rows.push(`  refbug ${name} / ${kind}  d=${worst.d}: renderFixture itself differs by`
-            + ` ${(refUnstable.visible / refUnstable.total * 100).toFixed(3)}% between two DIRECT renders of this`
-            + ` offset — pre-existing renderer instability, not the pan path`);
-        } else {
-          rows.push(`  ok    ${name} / ${kind}  worst d=${worst.d}`
-            + ` any=${(anyPct * 100).toFixed(3)}% visible=${(visPct * 100).toFixed(3)}% maxChannel=${worst.max}`);
+          rows.push(`  DIFF     ${tag} ${label} — ${r.bad}/${r.total} channels`
+            + ` (${(100 * share).toFixed(4)}%, max ${(100 * RESIDUAL).toFixed(4)}%), worst delta ${r.worst}`);
+          return;
+        }
+        // A delta of 0 has no distinguishable neighbours to beat (the image is the
+        // anchor itself, and `exact` already pinned it), so only judge real moves.
+        if (!(r.dx || r.dy)) return;
+        const v = verdict(r);
+        if (v === 'flat') {
+          rows.push(`  flat     ${tag} ${label} — a one-pixel shift changes almost nothing`
+            + ` here (${r.atSampled} vs ${r.near}); residual checked, alignment not distinguishable`);
+          return;
+        }
+        if (v === 'fail') {
+          failures++;
+          rows.push(`  MISALIGNED ${tag} ${label} — sampled residual ${r.atSampled} but a`
+            + ` neighbouring alignment scores ${r.near}; the frame is not shifted by this delta`);
+        }
+      };
+      exact('anchor', res.anchor);
+      exact('determinism', res.determinism);
+      // The control: claiming d+1 for a frame panned by d must NOT pass the argmin.
+      if (res.control) {
+        cases++;
+        const c = res.control;
+        if (verdict(c.wrong) !== 'fail' || verdict(c.claimed) === 'fail') {
+          failures++;
+          rows.push(`  BLUNT    ${tag} control — the alignment test does not separate d from d+1`
+            + ` (claimed ${c.claimed.atSampled} vs near ${c.claimed.near};`
+            + ` wrong ${c.wrong.atSampled} vs near ${c.wrong.near})`);
         }
       }
+      for (const f of res.frames) aligned(`registration d=(${f.dx},${f.dy})`, f);
+      for (const f of res.gesture) aligned(`gesture d=(${f.dx},${f.dy})`, f);
+      for (const [k, ok] of Object.entries(res.refuse)) {
+        cases++;
+        if (!ok) { failures++; rows.push(`  SERVED   ${tag} refuse/${k} — must have been refused`); }
+      }
+      const worstRef = res.ref.reduce((m, r) => (r.bad > (m ? m.bad : -1) ? r : m), null);
+      if (worstRef) {
+        refReport.push(`  ${tag}: worst ${(100 * worstRef.bad / worstRef.total).toFixed(4)}%`
+          + ` of channels, max delta ${worstRef.worst}, at d=(${worstRef.dx},${worstRef.dy})`);
+      }
     }
-
-    // Refusals: the guards that a pixel budget cannot check.
-    const r = await page.evaluate(({ strands, meta, M }) => {
-      const copy = (o) => JSON.parse(JSON.stringify(o));
-      window.renderPanBackground(copy(strands), meta);
-      const probe = (dx, dy) => window.renderPanFrame({
-        ...meta, x_offset: meta.x_offset + dx, y_offset: meta.y_offset + dy,
-      }) != null;
-      const out = {
-        pastRight: probe(M + 1, 0),
-        pastLeft: probe(-M - 1, 0),
-        pastDown: probe(0, M + 1),
-        pastUp: probe(0, -M - 1),
-        fractional: probe(12.5, 0),
-        resized: window.renderPanFrame({ ...meta, image_width: meta.image_width + 40 }) != null,
-        zoomed: window.renderPanFrame({ ...meta, zoom: (meta.zoom || 1) + 0.2 }) != null,
-      };
-      window.endPan();
-      return out;
-    }, { strands, meta: metaFor(strands, 1), M });
-
-    cases++;
-    const served = Object.entries(r).filter(([, v]) => v).map(([k]) => k);
-    if (!served.length) rows.push(`  ok    ${name} / refuse  7 out-of-range probes all refused`);
-    else { failures++; rows.push(`  FAIL  ${name} / refuse  SERVED but must not: ${served.join(', ')}`); }
+    rows.push(`  ok       ${name}`);
   }
+  if (errs.length) { failures++; rows.push(`  PAGE ERRORS: ${errs.slice(0, 3).join(' | ')}`); }
 } finally {
-  await browser.close();
+  await browser.close().catch(() => {});
 }
 
-console.log(`\npan fast-path fidelity — ${cases} cases over ${fixtures.length} fixtures, margin ${M}px\n`);
-for (const r of rows) console.log(r);
-if (errs.length) console.log('\npage errors:', errs.slice(0, 5));
-console.log(`\nworst case across every fixture/zoom/delta:`
-  + ` ${(worstAny * 100).toFixed(3)}% of pixels differ at all,`
-  + ` ${(worstVisible * 100).toFixed(3)}% by more than ${VISIBLE_DELTA}`);
-if (REPORT) {
-  console.log('\n(--report: budgets not enforced)');
-  process.exit(errs.length ? 1 : 0);
-}
-console.log(`${cases - failures}/${cases} within budget`
-  + (refbugs ? `, of which ${refbugs} could not be judged (see 'refbug' rows)` : ''));
-if (refbugs) {
-  console.log('\nNOTE: the refbug rows are a PRE-EXISTING renderer defect that panning exposes:');
-  console.log('renderFixture draws some strand bodies as a solid black band at particular pan');
-  console.log('offsets. It is unrelated to the pan fast path — it reproduces with the pan path');
-  console.log('never called — and the fast path is affected LESS, since one snapshot serves many');
-  console.log('offsets instead of every frame rolling the dice at a new one.');
-}
-if (failures || errs.length) {
-  console.error(`\nFAIL: ${failures} case(s) out of budget${errs.length ? ` + ${errs.length} page error(s)` : ''}`);
+console.log(`\npan correctness — ${cases} cases over ${fixtures.length} fixtures\n`);
+console.log(rows.filter((r) => VERBOSE || !/^  (ok|flat) /.test(r)).join('\n') || '  (all ok)');
+
+console.log('\nreference distance (REPORTED, not gated) — a pan frame vs a full render at');
+console.log('the same offset. Nonzero because renderFixture is not offset-invariant: paper.js');
+console.log("boolean ops use absolute epsilons, and at some offsets they hit the renderer's");
+console.log('known body degeneracy (a solid black band). The pan frame is the stable side.');
+console.log(refReport.join('\n'));
+
+if (failures) {
+  console.log(`\nFAIL: ${failures} case(s).`);
   process.exit(1);
 }
-console.log('PASS: every pan frame is the same picture as the full render it replaces.');
-process.exit(0);
+console.log(`\nworst registration residual: ${worstResidual.bad}/${worstResidual.total} channels`
+  + ` (${(100 * worstResidual.share).toFixed(4)}%) at ${worstResidual.at}`);
+console.log('  (gated at 0.30% of channels, but never on fewer than 500 of them — a large');
+console.log('   delta leaves a small overlap, where a dozen edge pixels is already a big share)');
+console.log(`\n${cases}/${cases} ok`);
+console.log('PASS: every pan frame is the anchor render translated by exactly its delta.');

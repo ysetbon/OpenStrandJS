@@ -8,11 +8,12 @@
 // It drives a right-button pan across the canvas with real PointerEvents against
 // the real store, renderer and InteractionHost, and reports the same gesture twice:
 //
-//   fast   the pan fast path as shipped (one oversized snapshot + a blit per frame)
-//   off    the same gesture with window.renderPanBackground removed, which makes
-//          renderScheduler fall through to callRender — i.e. bit-for-bit the
-//          behaviour before this path existed. A true A/B in one binary, rather
-//          than a number quoted from a different build.
+//   fast   the pan path as shipped (the retained scene, panned by moving its
+//          content layer's matrix — one re-rasterize per frame, no rebuild)
+//   off    the same gesture with window.renderPanFrame removed, which makes
+//          renderScheduler fall through to callRender — i.e. a full scene rebuild
+//          per frame, which is what a pan cost before any of this existed. A true
+//          A/B in one binary, rather than a number quoted from a different build.
 //
 // Usage:
 //   node tools/bench_pan_e2e.mjs [--fixture three_strand_braid] [--moves 60]
@@ -135,7 +136,7 @@ try {
     });
 
     // Time every renderer entry point the pan can reach.
-    const rec = { full: [], snap: [], blit: [] };
+    const rec = { full: [], pan: [] };
     const saved = {};
     const wrap = (key, fnName) => {
       const orig = window[fnName];
@@ -147,14 +148,13 @@ try {
       };
     };
     wrap('full', 'renderFixture');
-    wrap('snap', 'renderPanBackground');
-    wrap('blit', 'renderPanFrame');
+    wrap('pan', 'renderPanFrame');
 
     // One pan gesture. A monotonic sweep, not a circle: a circle keeps coming back
     // near its own start and would hide the re-snapshot cost that a real pan across
     // the canvas pays every PAN_MARGIN pixels of travel.
     async function gesture() {
-      rec.full.length = 0; rec.snap.length = 0; rec.blit.length = 0;
+      rec.full.length = 0; rec.pan.length = 0;
       const x0 = rect.left + rect.width * 0.25, y0 = rect.top + rect.height * 0.7;
       el.dispatchEvent(ev('pointerdown', x0, y0));
       await nextFrame();
@@ -175,22 +175,22 @@ try {
       await nextFrame();
       return {
         moveSync, frameGaps,
-        full: [...rec.full], snap: [...rec.snap], blit: [...rec.blit],
+        full: [...rec.full], pan: [...rec.pan],
         panX: store.getState().view.panX,
       };
     }
 
     const fast = await gesture();
 
-    // Reset the view, then run the SAME gesture with the fast path unavailable.
-    // renderScheduler's pan branch falls through to callRender when
-    // renderPanBackground is missing, which is exactly the pre-existing behaviour.
+    // Reset the view, then run the SAME gesture with the pan path unavailable.
+    // renderScheduler falls through to callRender when renderPanFrame is missing,
+    // which is a full rebuild per frame — the pre-existing behaviour.
     store.getState().setView({ panX: 0, panY: 0 });
     await new Promise((r) => setTimeout(r, 600));
-    const realSnap = window.renderPanBackground;
-    window.renderPanBackground = undefined;
+    const realPan = window.renderPanFrame;
+    window.renderPanFrame = undefined;
     const off = await gesture();
-    window.renderPanBackground = realSnap;
+    window.renderPanFrame = realPan;
 
     return { fast, off, strandCount: store.getState().doc.order.length };
   }, { project, moves: MOVES });
@@ -210,10 +210,8 @@ function summarize(g) {
     gesture_total_ms: +sum(g.frameGaps).toFixed(1),
     full_renders: g.full.length,
     full_render_total_ms: +sum(g.full).toFixed(1),
-    snapshots: g.snap.length,
-    snapshot_median_ms: +median(g.snap).toFixed(1),
-    blits: g.blit.length,
-    blit_median_ms: +median(g.blit).toFixed(3),
+    pan_frames: g.pan.length,
+    pan_frame_median_ms: +median(g.pan).toFixed(2),
   };
 }
 
