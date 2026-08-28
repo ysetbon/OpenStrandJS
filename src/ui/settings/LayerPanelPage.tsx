@@ -52,15 +52,15 @@ export function LayerPanelPage({ lang }: PageProps) {
       <CheckRow label={t('use_default_arrow_color', lang)} checked={s.use_default_arrow_color}
         onChange={(v) => set({ use_default_arrow_color: v })} wrap />
       <Row label={t('button_color', lang)}>
-        <ColorSwatch value={s.default_arrow_fill_color} onChange={(c) => set({ default_arrow_fill_color: c })} />
+        <ColorSwatch value={s.default_arrow_fill_color} onChange={(c) => set({ default_arrow_fill_color: c })} title={t('button_color', lang)} />
       </Row>
 
       {/* Default strand / stroke colours (used for new strands) */}
       <Row label={t('default_strand_color', lang)}>
-        <ColorSwatch value={s.default_strand_color} onChange={(c) => set({ default_strand_color: c })} />
+        <ColorSwatch value={s.default_strand_color} onChange={(c) => set({ default_strand_color: c })} title={t('default_strand_color', lang)} />
       </Row>
       <Row label={t('default_stroke_color', lang)}>
-        <ColorSwatch value={s.default_stroke_color} onChange={(c) => set({ default_stroke_color: c })} />
+        <ColorSwatch value={s.default_stroke_color} onChange={(c) => set({ default_stroke_color: c })} title={t('default_stroke_color', lang)} />
       </Row>
 
       {/* Default strand width → sub-dialog (centered button) */}

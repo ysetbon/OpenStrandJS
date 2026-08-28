@@ -12,6 +12,7 @@ import { ContextMenu, type MenuItem, type MenuRowButton } from './ContextMenu';
 import { StrandShadowEditorDialog } from './dialogs/StrandShadowEditorDialog';
 import { WidthConfigDialog } from './dialogs/WidthConfigDialog';
 import { ArrowCustomizeDialog } from './dialogs/ArrowCustomizeDialog';
+import { ColorPickerDialog } from './dialogs/ColorPickerDialog';
 import {
   COPY_PROPERTIES, clipboardPropertyCount, pasteStrandData, snapshotStrandData,
   type CopyProperty,
@@ -35,20 +36,11 @@ function rgbaCss(c: RGBA | undefined | null): string {
   return `rgba(${c.r}, ${c.g}, ${c.b}, ${a})`;
 }
 
-// RGBA(0..255) -> "#rrggbb" for the <input type=color> value (alpha dropped,
-// matching Qt QColor.name()).
+// RGBA(0..255) -> "#rrggbb" (alpha dropped, matching Qt QColor.name()).
 function rgbaToHex(c: RGBA | undefined | null): string {
   if (!c) return '#c8aae6';
   const h = (n: number) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
   return `#${h(c.r)}${h(c.g)}${h(c.b)}`;
-}
-
-// "#rrggbb" -> RGBA(0..255), preserving the previous alpha.
-function hexToRgba(hex: string, prev: RGBA | undefined | null): RGBA {
-  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim());
-  const a = prev ? prev.a : 255;
-  if (!m) return prev ? { ...prev } : { r: 200, g: 170, b: 230, a };
-  return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16), a };
 }
 
 // Qt QColor.lighter(factor)/darker(factor): operate on the HSV Value channel.
@@ -160,7 +152,6 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
   // 1.110 added change_layer_color / change_layer_stroke_color for this layer
   // alone (numbered_layer_button.py:2833, 3289, 3339, 3376).
   const [colorPick, setColorPick] = useState<{ kind: 'fill' | 'stroke'; wholeSet: boolean } | null>(null);
-  const colorInputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   // Scroll the selected button into view when selection moves to this layer
@@ -171,20 +162,14 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
     if (selected) rootRef.current?.scrollIntoView({ block: 'nearest' });
   }, [selected]);
 
-  // The hex the hidden colour well should be showing right now. Doubles as part of
-  // its key (see below), so the element remounts when either the channel or the
-  // colour underneath it moves.
-  const pickHex = rgbaToHex(colorPick?.kind === 'stroke' ? strand?.stroke_color : strand?.color);
+  // The colour the dialog opens on: the channel being edited, as it stands now.
+  const pickColor = (colorPick?.kind === 'stroke' ? strand?.stroke_color : strand?.color)
+    ?? { r: 200, g: 170, b: 230, a: 255 };
 
   const isMasked = maskComponents(name) != null;
   const hidden = !!strand?.is_hidden;
   const shadowOnly = !!strand?.shadow_only;
   const hideShadow = !!strand?.hide_shadow;
-
-  // When the user picks fill/stroke via the menu, open the native color input.
-  useEffect(() => {
-    if (colorPick) colorInputRef.current?.click();
-  }, [colorPick]);
 
   // ---- store-wired menu actions ----
   const doToggleHidden = () => commitEdit((d) => toggleHidden(d, name));
@@ -198,9 +183,7 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
   };
   // Edit Mask -> enter the per-mask deletion-rectangle erase session for this mask.
   const doEditMask = () => enterMaskEdit(name);
-  const applyColor = (kind: 'fill' | 'stroke', wholeSet: boolean, hex: string) => {
-    const prev = kind === 'fill' ? strand?.color : strand?.stroke_color;
-    const rgba = hexToRgba(hex, prev);
+  const applyColor = (kind: 'fill' | 'stroke', wholeSet: boolean, rgba: RGBA) => {
     commitEdit((d) => setColor(d, name, kind, rgba, wholeSet));
   };
 
@@ -644,28 +627,26 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
         )}
       </div>
 
-      {/* Hidden native color input driven by the menu "Change (Stroke) Color" items.
-          KEYED on the active pick: `defaultValue` seeds an UNCONTROLLED input only
-          at mount, so without a key the element survives from one pick to the next
-          and opens on whatever colour was chosen last — picking a fill colour and
-          then opening Change Stroke Color showed the fill, not the stroke. The key
-          forces a remount so the swatch always opens on the channel being edited.
-          The key deliberately does NOT include the colour: the native picker sends
-          an input event per drag frame, each one recolouring the strand, so a
-          colour-bearing key unmounts the element — and with it the open OS picker —
-          on the first frame. Measured: the node is destroyed as soon as the first
-          pick applies, so the user gets one colour per menu invocation.
-          React attaches refs before effects, so the click below still lands on the
-          fresh element. */}
-      <input
-        key={colorPick?.kind ?? 'idle'}
-        ref={colorInputRef}
-        type="color"
-        className="nlb-color-input"
-        defaultValue={pickHex}
-        onChange={(e) => { if (colorPick) applyColor(colorPick.kind, colorPick.wholeSet, e.target.value); }}
-        onBlur={() => setColorPick(null)}
-      />
+      {/* Colour actions open the in-app dialog (OSS's modal QColorDialog), not a
+          hidden native <input type="color">. The old input was 0x0 / opacity 0 /
+          pointer-events:none, so it never took focus: its onBlur — the only thing
+          that cleared this state — never fired, the OS popup was anchored to a
+          zero-sized box (it opened in a page corner, often clipped off-screen), it
+          committed one undo step per drag frame, and it could not be cancelled. */}
+      {colorPick && (
+        <ColorPickerDialog
+          title={t(
+            colorPick.kind === 'stroke'
+              ? (colorPick.wholeSet ? 'change_stroke_color' : 'change_layer_stroke_color')
+              : (colorPick.wholeSet ? 'change_color' : 'change_layer_color'),
+            lang,
+          )}
+          value={pickColor}
+          lang={lang}
+          onAccept={(c) => applyColor(colorPick.kind, colorPick.wholeSet, c)}
+          onClose={() => setColorPick(null)}
+        />
+      )}
 
       {menu && (
         <ContextMenu

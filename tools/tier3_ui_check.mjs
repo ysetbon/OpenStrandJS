@@ -181,60 +181,74 @@ try {
   await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
 
-  // ---- the colour picker opens on the channel being edited --------------
-  // `defaultValue` seeds an UNCONTROLLED input only at mount, so an input that
-  // survives from one pick to the next opens on the colour chosen last. Picking a
-  // fill colour and then opening Change Stroke Color showed the FILL. The input is
-  // a SIBLING of each layer button, so both locators must be scoped to the same
-  // .lp-item or this reads a different layer's swatch and proves nothing.
+  // ---- the colour dialog: reopens, opens on the right channel, cancels ----
+  // Every colour action opens the in-app dialog (OSS's modal QColorDialog). The
+  // hidden <input type="color"> this replaced could not be reopened reliably: it
+  // was pointer-events:none, so it never took focus and its onBlur — the only
+  // reset for the "which colour action is open" state — never fired.
   {
     const item = page.locator('.lp-item').filter({ has: page.locator('.nlb') })
       .filter({ hasText: /^\d+_\d+$/ }).first();
     const btn = item.locator('.nlb').first();
-    const swatch = item.locator('.nlb-color-input').first();
+    const dialogHex = () => page.locator('.cpd-html input').inputValue();
     const openItem = async (label) => {
       await btn.click({ button: 'right' });
       await page.waitForTimeout(300);
       await page.getByText(label, { exact: true }).first().click();
       await page.waitForTimeout(300);
+      return page.locator('.cpd').count();
     };
-    await openItem('Change Color');
-    const fillSwatch = await swatch.inputValue();
-    await page.keyboard.press('Escape');
-    await page.waitForTimeout(250);
-    await openItem('Change Stroke Color');
-    const strokeSwatch = await swatch.inputValue();
-    ok('the stroke picker opens on the stroke colour, not the last fill',
-      strokeSwatch !== fillSwatch,
-      `both opened on ${strokeSwatch} — the input kept its previous mount`);
+    const cancel = async () => {
+      await page.locator('.modal-footer button').nth(1).click();
+      await page.waitForTimeout(250);
+    };
+    const accept = async () => {
+      await page.locator('.modal-footer button').first().click();
+      await page.waitForTimeout(300);
+    };
 
-    // The other half of the same trade-off. The key must NOT include the colour:
-    // a native picker emits an input event per drag frame, each one recolouring
-    // the strand, so a colour-bearing key destroys the element — and the open OS
-    // picker with it — on the first frame. A plain `el.value = ...` does not trip
-    // React's value tracker, so the setter is called through the prototype
-    // descriptor; without that this check passes vacuously. Reopen the FILL picker
-    // first — the button's background is the fill colour, so probing while the
-    // stroke pick is open would show no change and prove nothing.
-    await page.keyboard.press('Escape');
-    await page.waitForTimeout(250);
-    await openItem('Change Color');
-    await swatch.evaluate((el) => { el.dataset.probe = 'alive'; });
-    const bgBefore = await btn.evaluate((el) => getComputedStyle(el).backgroundColor);
-    await swatch.evaluate((el) => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, '#123456');
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-    });
+    ok('Change Color opens the colour dialog', await openItem('Change Color') > 0);
+    const fillHex = await dialogHex();
+    await cancel();
+    ok('...and Change Stroke Color opens the dialog too',
+      await openItem('Change Stroke Color') > 0);
+    const strokeHex = await dialogHex();
+    ok('the stroke action opens on the STROKE colour, not the last fill',
+      strokeHex !== fillHex, `both opened on ${strokeHex}`);
+    await cancel();
+
+    // The reported bug: after one colour change, the action could not be used a
+    // second time. Apply twice in a row and require the canvas to move each time.
+    const before = await snapshot();
+    ok('the colour dialog opens (1st time)', await openItem('Change Color') > 0);
+    await page.locator('.cpd-cell[title="#ff0000"]').first().click();
+    await accept();
+    const afterFirst = await snapshot();
+    ok('picking a standard colour recolours the strand', afterFirst !== before);
+
+    ok('the colour dialog opens AGAIN right after a colour was applied',
+      await openItem('Change Color') > 0,
+      'the second attempt did nothing — the open-state was never cleared');
+    await page.locator('.cpd-cell[title="#00ff00"]').first().click();
+    await accept();
+    const afterSecond = await snapshot();
+    ok('...and the second pick lands as well', afterSecond !== afterFirst);
+
+    // Cancel is a real cancel (QColorDialog is only applied on Accept).
+    ok('the colour dialog opens a third time', await openItem('Change Color') > 0);
+    await page.locator('.cpd-cell[title="#0000ff"]').first().click();
+    await cancel();
+    await page.waitForTimeout(300);
+    ok('Cancel applies nothing', (await snapshot()) === afterSecond,
+      'the cancelled colour was written anyway');
+
+    // One accept = one undo step (the old native picker committed per drag frame).
+    await page.keyboard.press('Control+z');
     await page.waitForTimeout(400);
-    const bgAfter = await btn.evaluate((el) => getComputedStyle(el).backgroundColor);
-    ok('the pick actually recolours the strand (guards the check below)', bgBefore !== bgAfter,
-      `button stayed ${bgAfter}`);
-    ok('...and the picker survives it, so a drag is not cut off after one colour',
-      await swatch.evaluate((el) => el.dataset.probe === 'alive'),
-      'the input remounted mid-pick — the key is keyed on the colour');
-
-    await page.keyboard.press('Escape');
-    await page.waitForTimeout(250);
+    ok('one undo steps back exactly one colour change', (await snapshot()) === afterFirst,
+      'undo did not land on the previous colour — the accept was not a single step');
+    await page.keyboard.press('Control+y');
+    await page.waitForTimeout(400);
   }
 
   // ---- an arrow-transparency drag is ONE undo step ------------------------

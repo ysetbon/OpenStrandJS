@@ -265,13 +265,3 @@
 .nlb.nlb-mask-editing { border: 2px solid red !important; background-color: rgba(255, 0, 0, 0.1) !important; }
 .nlb.nlb-edit-locked { opacity: 0.5; pointer-events: none; }
 
-/* offscreen native color input (driven programmatically by the menu) */
-.nlb-color-input {
-  position: absolute;
-  width: 0;
-  height: 0;
-  opacity: 0;
-  pointer-events: none;
-  border: 0;
-  padding: 0;
-}
