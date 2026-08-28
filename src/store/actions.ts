@@ -73,15 +73,21 @@ export function moveHandle(
     if (!t.control_point_center_locked) t.control_point_center = mid;
   };
 
+  // Store a COPY, never the caller's point. The endpoint branch below already
+  // does this; the control-point branches did not, so the document ended up
+  // holding the very object MoveMode keeps as `drag.lastSnap` for its
+  // unchanged-target early-out. That was harmless while every edit went through
+  // a cloning mutateDoc, but a drag now edits the document in place, so an alias
+  // between the store and a mode's gesture state has nothing left to break it.
   if (handle === 'control_point1') {
-    s.control_points[0] = pos;
+    s.control_points[0] = { x: pos.x, y: pos.y };
     s.triangle_has_moved = true;
     s.control_point2_shown = true;        // cp1's first move reveals cp2 (passive -> shown)
     recenter(s);
     return;
   }
   if (handle === 'control_point2') {
-    s.control_points[1] = pos;
+    s.control_points[1] = { x: pos.x, y: pos.y };
     // OSS move_mode.py:2821-2831: cp2 dragged back within 1px of the endpoint
     // DEACTIVATES (returns to passive, where it tracks the endpoint); moving it away
     // ACTIVATES it (independent). This FLAG — not cp2's position — gates end-follow below.
@@ -95,7 +101,7 @@ export function moveHandle(
     // 3-point profile and the center no longer tracks the cp midpoint. recenter()
     // then applies OSS update_shape's 0.5px auto-unlock: if the user drags the center
     // back onto the cp midpoint it un-pins and resumes tracking (strand.py:767-780).
-    s.control_point_center = pos;
+    s.control_point_center = { x: pos.x, y: pos.y };
     s.control_point_center_locked = true;
     recenter(s);
     return;

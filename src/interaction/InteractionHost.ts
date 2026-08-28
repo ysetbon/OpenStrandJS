@@ -5,7 +5,9 @@
 
 import { useEditorStore } from '../store/editorStore';
 import { screenToWorld, worldToScreen } from './viewTransform';
-import { requestOverlay, requestRender } from '../renderer/renderScheduler';
+import {
+  cancelFrameTask, flushFrameTask, requestFrameTask, requestOverlay, requestRender, setPanGesture,
+} from '../renderer/renderScheduler';
 import { modes } from '../modes';
 import { SelectMode } from '../modes/SelectMode';
 import { addDeletionRect } from '../store/actions';
@@ -45,6 +47,7 @@ export class InteractionHost {
     // onCancel, then drop stale hover so the new mode starts clean.
     this.unsubscribeMode = useEditorStore.subscribe((state, prev) => {
       if (state.mode === prev.mode) return;
+      this.cancelPendingMove();   // the queued move belongs to the outgoing mode
       modes[prev.mode]?.onCancel?.(this.ctx());
       const st = useEditorStore.getState();
       if (st.hover.layerName !== null || st.hover.handle !== null) {
@@ -59,8 +62,30 @@ export class InteractionHost {
     });
   }
 
+  // Close a pan gesture: clear the local flag, free the snapshot the fast path was
+  // blitting from, and repaint once at full quality.
+  //
+  // The release render is what keeps the RESTING image canonical. Chromium's 2D
+  // rasterizer is not canvas-size invariant (proven in tools/pan_identity.mjs: the
+  // same geometry drawn into a wider canvas and cropped differs by a small number
+  // of pixels), so a frame served by cropping the oversized snapshot is very
+  // slightly not the frame a direct render produces. That is fine while the image
+  // is moving and nothing to leave on screen afterwards. It costs one full render
+  // per gesture — which is exactly what ONE of the ~60 frames of a pan cost before
+  // this path existed, so it is cost-neutral against the old behaviour rather than
+  // a new stall.
+  private endPanGesture(): void {
+    this.panning = false;
+    setPanGesture(false);
+    requestRender();
+  }
+
   detach(): void {
     this.unsubscribeMode();
+    this.cancelPendingMove();
+    // Free the snapshot, but do NOT go through endPanGesture: its release render
+    // would be scheduled against a canvas that is being torn down.
+    if (this.panning) { this.panning = false; setPanGesture(false); }
     const el = this.el;
     el.removeEventListener('pointerdown', this.onPointerDown);
     el.removeEventListener('pointermove', this.onPointerMove);
@@ -110,6 +135,8 @@ export class InteractionHost {
 
   private onPointerDown = (e: PointerEvent) => {
     try { this.el.setPointerCapture(e.pointerId); } catch { /* synthetic/no-op */ }
+    // Preserve event order: a move recorded before this press is applied first.
+    flushFrameTask(this.applyMove);
     const panTool = useEditorStore.getState().panMode;   // hand tool active
     const isPan = e.button === 1 || e.button === 2 || (e.button === 0 && (this.spaceHeld || panTool));
     if (isPan) {
@@ -117,6 +144,8 @@ export class InteractionHost {
       this.panning = true;
       this.panStart = this.toScreen(e);
       this.panOrigin = { x: view.panX, y: view.panY };
+      // Arms the renderer's pan fast path for the duration of the gesture.
+      setPanGesture(true);
       return;
     }
     if (e.button !== 0) return;
@@ -134,13 +163,48 @@ export class InteractionHost {
     this.mode().onPointerDown(this.info(e), this.ctx());
   };
 
-  private onPointerMove = (e: PointerEvent) => {
+  // A pointer move is RECORDED here and APPLIED at the top of the next frame
+  // (applyMove, registered as a render-scheduler frame task).
+  //
+  // Pointer hardware outruns the display: a 1000 Hz mouse delivers ~16 moves per
+  // 60 Hz frame, and every one of them used to run the full pipeline — a
+  // getBoundingClientRect (a forced layout), a hit test or a document edit, a
+  // cursor write — only for the next move to overwrite the result before
+  // anything was painted. Coalescing to one apply per frame does the work once
+  // for the position that actually gets drawn. It costs no latency: the apply
+  // runs inside the frame that renders it, and pointer-up flushes any pending
+  // move first, so a gesture always ends on the exact last reported position.
+  //
+  // Positions are absolute, never deltas, so dropping intermediate moves cannot
+  // accumulate drift — the coalesced move is simply the newest one.
+  private pending: PointerEvent | null = null;
+
+  private cancelPendingMove(): void {
+    this.pending = null;
+    cancelFrameTask(this.applyMove);
+  }
+
+  private applyMove = () => {
+    const e = this.pending;
+    if (!e) return;
+    this.pending = null;
     if (this.panning) {
       const screen = this.toScreen(e);
+      // Round the gesture delta to whole canvas pixels. This is what lets the pan
+      // fast path serve a frame by blitting its snapshot: at a fractional delta
+      // drawImage would resample (blurry, and no longer the pixels a real render
+      // produces), so the renderer refuses the blit and falls back to a full
+      // rebuild. The cursor is tracked to within half a backing pixel, which is
+      // also how OSS pans — Qt's mousePressEvent/mouseMoveEvent deltas are integer
+      // QPoints (strand_drawing_canvas.py:4432).
       useEditorStore.getState().setView({
-        panX: this.panOrigin.x + (screen.x - this.panStart.x),
-        panY: this.panOrigin.y + (screen.y - this.panStart.y),
+        panX: this.panOrigin.x + Math.round(screen.x - this.panStart.x),
+        panY: this.panOrigin.y + Math.round(screen.y - this.panStart.y),
       });
+      // Ask for the repaint here rather than leaving it to CanvasStage's effect
+      // on `view`: React commits that effect after this frame, so the pan would
+      // land a frame late now that the move itself runs inside the frame.
+      requestRender();
       return;
     }
     // Edit Mask eraser drag: grow the white preview rectangle (OSS current_erase_rect).
@@ -154,12 +218,21 @@ export class InteractionHost {
     this.mode().onPointerMove(this.info(e), this.ctx());
     // Cursor feedback: crosshair during an Edit Mask session, grab over a handle.
     const st = useEditorStore.getState();
-    this.el.style.cursor = this.editTarget() ? 'crosshair' : (st.hover.handle ? 'grab' : this.mode().cursor);
+    const cursor = this.editTarget() ? 'crosshair' : (st.hover.handle ? 'grab' : this.mode().cursor);
+    if (this.el.style.cursor !== cursor) this.el.style.cursor = cursor;
+  };
+
+  private onPointerMove = (e: PointerEvent) => {
+    this.pending = e;
+    requestFrameTask(this.applyMove);
   };
 
   private onPointerUp = (e: PointerEvent) => {
     try { this.el.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
-    if (this.panning) { this.panning = false; return; }
+    // Land the last reported position before the gesture closes over it.
+    flushFrameTask(this.applyMove);
+    this.pending = null;
+    if (this.panning) { this.endPanGesture(); return; }
     // Finalize an Edit Mask erase: commit one deletion rectangle (one undo step),
     // OSS mouseReleaseEvent appends to deletion_rectangles + subtracts the path.
     if (this.maskErase) {
@@ -184,7 +257,10 @@ export class InteractionHost {
   // in-flight Edit-Mask erase is dropped without appending its rectangle.
   private onPointerCancel = (e: PointerEvent) => {
     try { this.el.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
-    if (this.panning) { this.panning = false; return; }
+    // An abort throws the gesture away, so a queued move must NOT be applied —
+    // drop it before the mode unwinds.
+    this.cancelPendingMove();
+    if (this.panning) { this.endPanGesture(); return; }
     if (this.maskErase) { this.maskErase = null; useEditorStore.getState().setEraser(null); requestOverlay(); return; }
     this.mode().onCancel?.(this.ctx());
   };
@@ -217,7 +293,7 @@ export class InteractionHost {
       // ESC to exit").
       if (editing) { st.exitMaskEdit(); this.maskErase = null; requestRender(); return; }
       // Mid-drag ESC ABORTS the move (revert, no undo entry) — OSS cancel_movement.
-      if (st.dragging) { this.mode().onCancel?.(this.ctx()); return; }
+      if (st.dragging) { this.cancelPendingMove(); this.mode().onCancel?.(this.ctx()); return; }
       // Otherwise ESC clears the selection.
       st.setSelection({ layerName: null, handle: null });
       requestOverlay();

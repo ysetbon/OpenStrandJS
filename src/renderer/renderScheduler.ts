@@ -4,7 +4,10 @@
 // pixel-aligned.
 
 import { useEditorStore } from '../store/editorStore';
-import { callRender, callRenderDragBackground, callRenderDragFrame, callEndDrag } from './rendererBridge';
+import {
+  callRender, callRenderDragBackground, callRenderDragFrame, callEndDrag,
+  callRenderPanBackground, callRenderPanFrame, callEndPan,
+} from './rendererBridge';
 import { buildMeta, toRenderArray } from './toRenderArray';
 
 // Pending work for the coalescing rAF: 0 = idle, 1 = overlay-only, 2 = full
@@ -31,6 +34,44 @@ let bakedKey: string | null = null;
 // untouched, and PNG export can request ss2 explicitly. Bump to 2 to trade
 // responsiveness for crisper on-screen anti-aliasing.
 const EDITOR_SUPERSAMPLE = 1;
+// ---- pan gesture state --------------------------------------------------------
+// True between pan pointer-down and pointer-up. Deliberately NOT in the zustand
+// store: it is read only here, and putting it in the store would spend a React
+// commit on each end of every pan for nothing.
+let panGesture = false;
+// What the live pan snapshot was taken for — every renderNow input EXCEPT the pan
+// offset, which is the one thing the snapshot is allowed to differ in. `doc` is
+// compared by identity AND revision because mutateDocLive edits the document in
+// place, leaving the reference unchanged.
+type PanSig = {
+  doc: unknown; docRevision: number; settings: unknown; shadowPaths: unknown;
+  highlight: string | null; zoom: number; w: number; h: number; ss: number;
+};
+let panSig: PanSig | null = null;
+
+function samePanSig(a: PanSig | null, b: PanSig): boolean {
+  return !!a && a.doc === b.doc && a.docRevision === b.docRevision
+    && a.settings === b.settings && a.shadowPaths === b.shadowPaths
+    && a.highlight === b.highlight && a.zoom === b.zoom
+    && a.w === b.w && a.h === b.h && a.ss === b.ss;
+}
+
+// Unconditional: panSig can be null while the renderer still holds a snapshot (a
+// renderPanBackground that succeeded followed by a refused blit), and callEndPan is
+// idempotent, so gating this on panSig would be the one way to leak the bitmap.
+function dropPanSnapshot(): void {
+  panSig = null;
+  callEndPan();
+}
+
+// Called by InteractionHost around a pan gesture. Ending one frees the snapshot
+// (several megabytes) rather than holding it against a possible next pan, which
+// could also mean serving that pan from a pre-edit scene.
+export function setPanGesture(on: boolean): void {
+  panGesture = on;
+  if (!on) dropPanSnapshot();
+}
+
 let overlayCanvas: HTMLCanvasElement | null = null;
 let overlayDraw: ((ctx: CanvasRenderingContext2D) => void) | null = null;
 
@@ -62,16 +103,74 @@ export function requestOverlay(): void {
   schedule(1);
 }
 
+// Work that must run at the TOP of the next frame, before it paints. The pointer
+// handlers use this to apply a coalesced move: a 1000 Hz mouse fires ~16 moves
+// per displayed frame, and running the document edit for every one of them threw
+// away all but the last. Doing it here instead means one edit per painted frame,
+// with no added latency — the edit lands in the same frame that renders it, not
+// the next one. Tasks are deduplicated by identity, so a handler can register the
+// same drain function on every event.
+const frameTasks = new Set<() => void>();
+
+// Registering a task does NOT by itself ask for a render or an overlay redraw —
+// it only guarantees a frame will run. The task decides: a coalesced move that
+// edits the document calls requestRender, one that only updates hover calls
+// requestOverlay, and one that finds nothing changed leaves the frame empty.
+// That is what keeps plain mouse-over-the-canvas from forcing a full repaint at
+// display rate.
+export function requestFrameTask(task: () => void): void {
+  frameTasks.add(task);
+  ensureFrame();
+}
+
+// Run a registered task NOW and drop it from the queue. Pointer-up calls this so
+// the gesture finishes at the exact last position the pointer reported, rather
+// than wherever the previous frame left it.
+export function flushFrameTask(task: () => void): void {
+  if (!frameTasks.delete(task)) return;
+  runTask(task);
+}
+
+// Drop a queued task without running it — an aborted gesture must not have its
+// last move applied on the way out.
+export function cancelFrameTask(task: () => void): void {
+  frameTasks.delete(task);
+}
+
+function runTask(task: () => void): void {
+  try {
+    task();
+  } catch (err) {
+    console.error('[OpenStrandJS] frame task failed:', err);
+  }
+}
+
+let frameQueued = false;
+
+function ensureFrame(): void {
+  if (frameQueued) return;
+  frameQueued = true;
+  requestAnimationFrame(runFrame);
+}
+
+function runFrame(): void {
+  frameQueued = false;   // re-entrant requests queue a fresh frame
+  // Frame tasks first: they mutate the document this frame is about to draw, and
+  // they may raise the work level, so pendingWork is read only after they run.
+  if (frameTasks.size) {
+    const tasks = [...frameTasks];
+    frameTasks.clear();
+    for (const t of tasks) runTask(t);
+  }
+  const work = pendingWork;
+  pendingWork = 0; // reset BEFORE the work so re-entrant requests queue a fresh frame
+  if (work === 2) renderNow();
+  if (work >= 1) syncOverlay();
+}
+
 function schedule(level: 1 | 2): void {
-  const wasIdle = pendingWork === 0;
   if (level > pendingWork) pendingWork = level;
-  if (!wasIdle) return; // a frame is queued; it will pick up the (upgraded) level
-  requestAnimationFrame(() => {
-    const work = pendingWork;
-    pendingWork = 0; // reset BEFORE the work so re-entrant requests queue a fresh frame
-    if (work === 2) renderNow();
-    syncOverlay();
-  });
+  ensureFrame();
 }
 
 if (import.meta.env?.DEV) {
@@ -87,7 +186,7 @@ export function requestRender(): void {
 // caller's job — schedule() always runs syncOverlay after this.
 function renderNow(): void {
   const {
-    doc, view, settings, dragging, dragMoving, selection, mode, visibleShadowPaths,
+    doc, docRevision, view, settings, dragging, dragMoving, selection, mode, visibleShadowPaths,
   } = useEditorStore.getState();
   try {
     // During an endpoint drag, highlight every strand that moves with the
@@ -100,6 +199,40 @@ function renderNow(): void {
     // without clearing the selection, so it reappears on leaving view mode.
     const highlightLayer = mode === 'view' && settings.view_hide_highlight ? null : selection.layerName;
     const arr = toRenderArray(doc, highlightLayer, highlightSet);
+    if (panGesture && !dragging) {
+      // PAN FAST-PATH. A pan moves no document coordinate — only x_offset/y_offset,
+      // which renderFixture folds into every point — so before this path every pan
+      // frame rebuilt the whole scene (measured ~1.2 s/frame on three_strand_braid).
+      // renderPanBackground takes ONE oversized render and renderPanFrame blits the
+      // matching sub-rectangle each frame; tools/pan_identity.mjs proves that
+      // sub-rectangle is pixel-identical to the full render it replaces, so this is
+      // a pure speedup with no change to what is drawn.
+      const meta = {
+        ...buildMeta(doc, view, settings, visibleShadowPaths),
+        supersample: EDITOR_SUPERSAMPLE,
+      };
+      const sig: PanSig = {
+        doc, docRevision, settings, shadowPaths: visibleShadowPaths,
+        highlight: highlightLayer, zoom: meta.zoom ?? 1,
+        w: meta.image_width, h: meta.image_height, ss: EDITOR_SUPERSAMPLE,
+      };
+      if (dragBaked) { callEndDrag(); dragBaked = false; bakedKey = null; }
+      // Order matters: when the signature changed, the live snapshot is for a
+      // different scene, so it must NOT be blitted first — && short-circuits past
+      // callRenderPanFrame straight to the re-snapshot.
+      if (!samePanSig(panSig, sig) || !callRenderPanFrame(meta)) {
+        panSig = null;
+        if (callRenderPanBackground(arr, meta) && callRenderPanFrame(meta)) {
+          panSig = sig;
+        } else {
+          // Renderer without the pan entry points: the old full-render behaviour,
+          // which is exactly what this path optimizes rather than replaces.
+          callEndPan();
+          callRender(arr, meta);
+        }
+      }
+      return;
+    }
     if (dragging && dragMoving.length) {
       // DRAG FAST-PATH (mirrors the original's draw-only-affected-strand path).
       // Render at native resolution with shadows off: bake every STATIC strand
@@ -121,7 +254,18 @@ function renderNow(): void {
       // stale bake is still cached for a DIFFERENT moving set (re-grab after a
       // release). Same moving set => the static set is identical and unmoved, so
       // the cache is safely reused.
-      const key = dragMoving.join('|');
+      //
+      // The key carries the VIEW as well as the moving set. renderDragFrame
+      // refuses a bake whose size/pan/zoom no longer match and silently falls
+      // back to a full renderFixture — correct, but it never tells us, and this
+      // key only tracked the moving set, so a resize or pan mid-gesture (a
+      // splitter drag firing the ResizeObserver, say) dropped the rest of that
+      // drag onto the slow path with no way back. Keying on the view means the
+      // mismatch re-bakes once and every later frame is fast again.
+      // draw_only_affected_strand rides along because it decides whether the
+      // static bands are baked at all.
+      const key = `${dragMoving.join('|')}|${settings.draw_only_affected_strand ? 1 : 0}`
+        + `#${meta.image_width}x${meta.image_height}@${meta.x_offset},${meta.y_offset},${meta.zoom ?? 1}`;
       if (!dragBaked || bakedKey !== key) {
         if (dragBaked) callEndDrag(); // drop the stale bake from the prior gesture
         callRenderDragBackground(arr, meta);
@@ -135,6 +279,7 @@ function renderNow(): void {
       // ~30ms instead of the ~260ms a full ss2 render costs, so pointer-up no
       // longer hangs. Drop any drag background first so the next gesture re-bakes.
       if (dragBaked) { callEndDrag(); dragBaked = false; bakedKey = null; }
+      dropPanSnapshot();   // e.g. an undo landing while a pan snapshot is still live
       callRender(arr, {
         ...buildMeta(doc, view, settings, visibleShadowPaths),
         supersample: EDITOR_SUPERSAMPLE,

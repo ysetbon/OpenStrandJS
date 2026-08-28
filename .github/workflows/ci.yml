@@ -96,6 +96,25 @@ jobs:
       - name: Guards — Tier 5 shadow-path preview overlay
         run: node tools/tier5_check.mjs
 
+      # Drag/release fast path. Behavioural, not timing-based: it asserts the
+      # invariants the optimisations rest on (the document is edited in place so
+      # the layer panel stays asleep, a coalesced flick still lands on the last
+      # reported position, undo/ESC are unaffected, the renderer's geometry memo
+      # never outlives a paint, a drag frame allocates no canvas or paper
+      # project). Each one fails if its optimisation is reverted.
+      - name: Guards — drag/release fast path
+        run: node tools/drag_perf_check.mjs
+
+      # Pan fast path: every pan frame is served by blitting one oversized snapshot
+      # instead of rebuilding the scene. This checks each frame is the same picture
+      # as the full render it replaces, and that the snapshot is REFUSED (so the
+      # scheduler re-snapshots) for a delta past the margin, a fractional delta, a
+      # resize or a zoom. It carries its own controls proving the rasterizer is
+      # deterministic but not canvas-size invariant, which is why it is a bounded
+      # deviation rather than a pixel-identity check.
+      - name: Guards — pan fast path fidelity
+        run: node tools/pan_fidelity.mjs
+
       - name: Editor smoke — built app boots cleanly
         run: node tools/ci_smoke.mjs editor dist-editor
 

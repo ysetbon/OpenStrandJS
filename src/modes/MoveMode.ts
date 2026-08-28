@@ -36,7 +36,7 @@ export const MoveMode: Mode = {
 
   onPointerDown(p: PointerInfo, ctx: ModeContext) {
     const st = useEditorStore.getState();
-    const hit = moveGrab(p.world, st.doc, st.settings);   // handle-only, square areas, OSS pass order
+    const hit = moveGrab(p.world, st.doc, st.settings, st.docRevision);   // handle-only, square areas, OSS pass order
     if (hit) {
       const s = st.doc.strands[hit.layerName];
       const hp = handlePos(s, hit.handle);
@@ -89,10 +89,13 @@ export const MoveMode: Mode = {
       if (drag.lastSnap && drag.lastSnap.x === pos.x && drag.lastSnap.y === pos.y) return;
       drag.lastSnap = pos;
       const d = drag;
-      st.mutateDoc((draft) => moveHandle(draft, d.layer, d.handle, pos, st.settings.curve_params));
-      // mutateDoc bumps docRevision -> CanvasStage re-renders #c + overlay.
+      // In-place edit (no per-frame document clone, no layer-panel re-render):
+      // the gesture's undo baseline was snapshotted at pointer-down, so the
+      // history entry this drag will commit is untouched by it.
+      st.mutateDocLive((doc) => moveHandle(doc, d.layer, d.handle, pos, st.settings.curve_params));
+      ctx.requestRender();   // paint this move in THIS frame, not the next one
     } else {
-      const hit = moveGrab(p.world, st.doc, st.settings);   // hover mirrors what a press would grab
+      const hit = moveGrab(p.world, st.doc, st.settings, st.docRevision);   // hover mirrors what a press would grab
       const next = hit
         ? { layerName: hit.layerName, handle: hit.handle }
         : { layerName: null, handle: null };

@@ -201,6 +201,7 @@ export interface EditorState {
   loadDocument: (doc: EditorDocument) => void;
   setDoc: (doc: EditorDocument) => void;
   mutateDoc: (fn: (draft: EditorDocument) => void) => void;
+  mutateDocLive: (fn: (doc: EditorDocument) => void) => void;
   beginGesture: () => void;
   commit: () => void;
   cancelGesture: () => void;
@@ -408,11 +409,40 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   setDoc: (doc) => set((s) => ({ doc, docRevision: s.docRevision + 1 })),
 
-  // Live edit: mutates present, NO history push (used during drags).
+  // Discrete edit: clone, mutate, publish. NO history push (commit does that).
   mutateDoc: (fn) => set((s) => {
     const draft = cloneDoc(s.doc);
     fn(draft);
     return { doc: draft, docRevision: s.docRevision + 1 };
+  }),
+
+  // PER-FRAME DRAG EDIT — mutate the current document IN PLACE.
+  //
+  // mutateDoc deep-clones the whole document (a JSON round-trip) on every call.
+  // On the drag path that is once per pointer move, so the cost of moving one
+  // endpoint scales with the size of the whole drawing, and — worse — the fresh
+  // doc/strands identities wake every React view that reads them, so the entire
+  // layer panel re-renders on every frame of every drag. OpenStrand Studio does
+  // the opposite: move_mode.update_strand_position assigns straight onto the
+  // strand objects and asks the canvas to repaint (move_mode.py:2711, :4113).
+  // This is that, and it makes a drag frame cost O(the edit) instead of O(the
+  // document).
+  //
+  // Undo stays correct because a gesture ALWAYS snapshots first: beginGesture
+  // deep-clones the document into gestureBase at pointer-down, so the baseline
+  // that commit() pushes to `past` (and that cancelGesture() restores) is an
+  // independent object no in-place edit can reach. Without that baseline this is
+  // a no-op, so a caller that forgets beginGesture cannot quietly corrupt
+  // history — it just gets a strand that does not move.
+  //
+  // docRevision still ticks: it is what CanvasStage re-renders on, and it is
+  // also what the one view that must track geometry AS IT MOVES (the strand
+  // properties angle/length read-out) watches, since the strand object it reads
+  // no longer changes identity.
+  mutateDocLive: (fn) => set((s) => {
+    if (!s.gestureBase) return {};   // no undo baseline -> refuse to edit in place
+    fn(s.doc);
+    return { docRevision: s.docRevision + 1 };
   }),
 
   // Snapshot present as the gesture baseline (first call of a gesture wins).

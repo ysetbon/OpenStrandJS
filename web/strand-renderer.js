@@ -49,6 +49,104 @@ let CURVE = { base_fraction: 1.0, dist_multiplier: 2.0, exponent: 2.0 };
 let SAMPLE_STEP = 1;
 const DRAG_SAMPLE_STEP = 3;
 
+// ---- per-render geometry memo -------------------------------------------------
+// The shadow pass is a nested walk: for every caster i it visits every receiver
+// j < i, and for each (i, j) pair it subtracts the geometry of every layer
+// between them and of every mask above the caster. The geometry each of those
+// steps needs — a receiver's rendered outline, a mask's crossing region, a mask's
+// blocker — depends ONLY on the strand plus the render-wide constants (P,
+// enableThird, S, SAMPLE_STEP). It does not depend on which pair is being
+// processed. Rebuilding it inside the loops therefore made the pass do O(N^2)
+// outline builds and O(N^3) subtraction builds, and every one of those builds
+// resamples a centerline at ~1px and runs resolveCrossings. On a 60-strand
+// document that is multiple seconds of Paper.js path construction on pointer-up
+// — the release hang.
+//
+// So memoize, scoped to ONE render. Opening the cache at the top of a render and
+// closing it before the frame is composited gives two guarantees: an entry can
+// never outlive the paper project it was built in, and geometry that changed
+// between renders can never be served stale.
+//
+// Masters are held DETACHED (removed from the drawing tree) so they paint
+// nothing and are skipped by every bounds/hit walk; each lookup hands back a
+// fresh clone re-inserted at the top of the active layer, which is exactly where
+// a freshly built path lands. Callers keep their existing ownership contract —
+// mutate it, feed it to boolean ops, remove it when done — and the pixels are
+// identical to rebuilding it from scratch.
+let GEOM_CACHE = null;
+// The paper project the masters in GEOM_CACHE belong to. A render that throws
+// between geomCacheBegin() and geomCacheEnd() leaves the cache open, and the
+// scheduler swallows renderer errors to keep the rAF loop alive — so the next
+// paint would otherwise find a populated cache whose masters belong to a project
+// that has since been removed, and serve clones of them. Pinning the project
+// makes that impossible by construction rather than by every entry point
+// remembering to clear first: a cache from another project simply reads as
+// closed, and the builders run fresh.
+let GEOM_PROJECT = null;
+
+function geomCacheBegin() {
+  geomCacheEnd();
+  GEOM_CACHE = new Map();
+  GEOM_PROJECT = paper.project;
+}
+
+// Is the memo open AND still owned by the project being drawn into?
+function geomCacheLive() {
+  return GEOM_CACHE !== null && GEOM_PROJECT === paper.project;
+}
+
+function geomCacheEnd() {
+  const cache = GEOM_CACHE;
+  GEOM_CACHE = null;                  // clear first: a render that threw must not
+  GEOM_PROJECT = null;                // leave a half-open cache behind
+  if (!cache) return;
+  for (const e of cache.values()) {
+    // The project these masters belong to may already be gone (a render that
+    // threw part-way). Detaching a stale item is not worth failing the next frame.
+    try { if (e && e.item) e.item.remove(); } catch { /* project already torn down */ }
+  }
+}
+
+// The cache entry for `key`, building it on first use. `null` geometry is cached
+// too, so a build that legitimately yields nothing is not retried once per pair.
+function geomEntry(key, build) {
+  let e = GEOM_CACHE.get(key);
+  if (e === undefined) {
+    const item = build();
+    if (item) item.remove();          // hold the master out of the drawing tree
+    e = { item, bounds: item ? item.bounds : null };
+    GEOM_CACHE.set(key, e);
+  }
+  return e;
+}
+
+// Memoized geometry, handed back as an owned clone inserted where a fresh build
+// would sit. Falls through to a plain build when no cache is open (the module's
+// other entry points, and the auto-shadow probe, call these builders directly).
+function cachedGeom(key, build) {
+  if (!geomCacheLive()) return build();
+  const e = geomEntry(key, build);
+  if (!e.item) return null;
+  const c = e.item.clone({ insert: false });
+  paper.project.activeLayer.addChild(c);
+  return c;
+}
+
+// Is a memo currently open? The keys carry no coordinates, so the cache is only
+// correct while it is scoped to a single paint; tools/drag_perf_check.mjs asserts
+// this is false after every render so a future edit cannot quietly widen the
+// scope and freeze the dragged strand at its pointer-down shape. Deliberately the
+// LITERAL open flag, not geomCacheLive(): the guard should catch a cache left
+// behind even though the project pin would stop it being used.
+window.__geomCacheOpen = function () { return GEOM_CACHE !== null; };
+
+// Bounds of the memoized geometry WITHOUT paying for a clone — lets a caller run
+// a cheap bounding-box reject before it commits to the real path.
+function cachedGeomBounds(key, build) {
+  if (!geomCacheLive()) return undefined;  // undefined = "unknown", caller must build
+  return geomEntry(key, build).bounds;
+}
+
 // Shadow parameters — faithful port of shader_utils.py::draw_strand_shadow. The
 // canvas loads NumSteps=2 / MaxBlurRadius=30.0 / ShadowColor=0,0,0,150 from
 // user_settings.txt, so the function-signature default of 3 is moot; the LOADED
@@ -197,6 +295,18 @@ function buildCenterline(s, P, enableThird) {
 // produced by stroking the centerline at the given width with flat caps.
 // Implemented by sampling the centerline and offsetting by +/- width/2 along
 // the normal, then joining left + reversed-right into a closed path.
+// This is the single hottest function in the renderer: every body, every shadow
+// caster/receiver and every mask component goes through it, at ~1px sampling.
+// Two things make it cheap without moving a pixel:
+//   * ONE getLocationAt(off) per sample instead of getPointAt(off) +
+//     getNormalAt(off). Both of those are literally `getLocationAt(off).point` /
+//     `.normal` in paper.js, so asking twice ran the arc-length -> curve-time
+//     solve (getTimeOf, the profiler's #2 cost) twice for the same offset.
+//   * plain [x, y] pairs instead of Point arithmetic. `pt.add(nrm.multiply(half))`
+//     allocated two paper.Points per side per sample — six per sample in total —
+//     purely to be re-read into a Segment straight afterwards. The arithmetic
+//     below is the same expression in the same order on the same doubles, so the
+//     coordinates are bit-identical.
 function strokedOutline(centerline, width) {
   const len = centerline.length;
   if (len === 0 || width <= 0) return null;
@@ -205,11 +315,12 @@ function strokedOutline(centerline, width) {
   const left = [], right = [];
   for (let i = 0; i <= N; i++) {
     const off = Math.min(len * i / N, len - 1e-4);
-    const pt = centerline.getPointAt(off);
-    const nrm = centerline.getNormalAt(off);
+    const loc = centerline.getLocationAt(off);
+    const pt = loc && loc.point;
+    const nrm = loc && loc.normal;
     if (!pt || !nrm) continue;
-    left.push(pt.add(nrm.multiply(half)));
-    right.push(pt.subtract(nrm.multiply(half)));
+    left.push([pt.x + nrm.x * half, pt.y + nrm.y * half]);
+    right.push([pt.x - nrm.x * half, pt.y - nrm.y * half]);
   }
   right.reverse();
   return new paper.Path({ segments: left.concat(right), closed: true });
@@ -218,14 +329,28 @@ function strokedOutline(centerline, width) {
 // Stroked body outline at an arbitrary width (pixel space), with
 // self-intersections (from offsetting a tightly curved centerline) resolved
 // into a clean boundary. Returns a paper path or null. The masking primitive.
-function strokedBodyAtWidth(s, P, enableThird, widthPx) {
-  const centerline = buildCenterline(s, P, enableThird);
-  let outline = strokedOutline(centerline, widthPx);
-  centerline.remove();
+function strokedBodyAtWidth(s, P, enableThird, widthPx, centerline) {
+  const cl = centerline || buildCenterline(s, P, enableThird);
+  let outline = strokedOutline(cl, widthPx);
+  if (!centerline) cl.remove();
   if (!outline) return null;
   const cleaned = outline.resolveCrossings();
   if (cleaned !== outline) { outline.remove(); outline = cleaned; }
   return outline;
+}
+
+// The one primitive every body, shadow footprint and mask component is built
+// from: this strand's centerline stroked at `widthPx` and cleaned. In a single
+// render the SAME (strand, width) outline is asked for repeatedly — drawStrand
+// wants the body at w+2sw, the shadow caster core wants the same width, the
+// shadow receiver geometry wants it again, and a mask component often wants it
+// once more. Each build resamples the centerline at ~1px and then runs
+// resolveCrossings over a few hundred segments, so the duplicates were the bulk
+// of the remaining cost. Memoized per render (see the geometry memo above), which
+// hands back an owned clone, so every caller keeps its existing contract.
+function bodyOutline(s, P, enableThird, widthPx, centerline) {
+  return cachedGeom(`body|${s.layer_name}|${widthPx}`,
+    () => strokedBodyAtWidth(s, P, enableThird, widthPx, centerline));
 }
 
 // Resolve self-intersections of a stroked outline into a clean boundary.
@@ -464,8 +589,8 @@ function collectSideLines(s, centerline, P, S) {
 function bodyLayers(s, P, enableThird, S, centerline) {
   const cl = centerline || buildCenterline(s, P, enableThird);
   const w = s.width || 0, sw = s.stroke_width || 0;
-  const stroke = cleanOutline(strokedOutline(cl, (w + 2 * sw) * S));
-  const fill = cleanOutline(strokedOutline(cl, w * S));
+  const stroke = bodyOutline(s, P, enableThird, (w + 2 * sw) * S, cl);
+  const fill = bodyOutline(s, P, enableThird, w * S, cl);
   if (!centerline) cl.remove();
   if (!stroke || !fill) {
     stroke && stroke.remove();
@@ -493,7 +618,7 @@ function buildShadowReceiverGeom(s, strands, P, enableThird, S) {
   const w = s.width || 0, sw = s.stroke_width || 0;
   const td = (w + 2 * sw) * S;          // full diameter (px) for the body + cap circles
   const cl = buildCenterline(s, P, enableThird);
-  let path = cleanOutline(strokedOutline(cl, td));
+  let path = bodyOutline(s, P, enableThird, td, cl);
   if (!path) { cl.remove(); return null; }
   const hc = s.has_circles || [false, false];
   const startA = circleStrokeAlpha(effStartStroke(s));
@@ -523,7 +648,7 @@ function buildShadowReceiverGeom(s, strands, P, enableThird, S) {
 // path (caller removes it) or null.
 function buildShadowCasterCore(s, P, enableThird, S) {
   const w = s.width || 0, sw = s.stroke_width || 0;
-  return strokedBodyAtWidth(s, P, enableThird, (w + 2 * sw) * S);
+  return bodyOutline(s, P, enableThird, (w + 2 * sw) * S);
 }
 
 // Cut the caster CORE at every UNFOLDED end. Faithful port of the transparent-
@@ -627,9 +752,23 @@ function shadowBlurSteps() {
 function buildPairShadowRegion(s, i, o, j, strands, byLayer, P, enableThird, S, casterFootprint, ov, allowFull, rejectBounds) {
   // A mask receiver uses its crossing FILL region (get_proper_masked_strand_path
   // = get_mask_path); a regular/attached receiver uses its rendered body+circles.
-  const recv = o.type === 'MaskedStrand'
+  // Memoized per render: the same receiver is visited once per caster above it,
+  // and its geometry is identical every time (see the geometry memo above).
+  const recvKey = 'recv|' + o.layer_name;
+  const recvBuild = () => (o.type === 'MaskedStrand'
     ? buildMaskPath(o, byLayer, P, enableThird, S)
-    : buildShadowReceiverGeom(o, strands, P, enableThird, S);
+    : buildShadowReceiverGeom(o, strands, P, enableThird, S));
+  // Bounding-box reject BEFORE the clone. The original built the full receiver
+  // path and then threw it away when the bounds missed; with the memo the bounds
+  // are already known, so a far-apart pair costs nothing at all.
+  const recvBounds = cachedGeomBounds(recvKey, recvBuild);
+  if (recvBounds !== undefined) {
+    if (!recvBounds) return { region: null, recv: null, clipBlocker: null };
+    if (rejectBounds && !rejectBounds.intersects(recvBounds)) {
+      return { region: null, recv: null, clipBlocker: null };
+    }
+  }
+  const recv = cachedGeom(recvKey, recvBuild);
   if (!recv) return { region: null, recv: null, clipBlocker: null };
   if (rejectBounds && !rejectBounds.intersects(recv.bounds)) {
     recv.remove();
@@ -654,7 +793,11 @@ function buildPairShadowRegion(s, i, o, j, strands, byLayer, P, enableThird, S, 
         const m = strands[k];
         if (m.type !== 'MaskedStrand' || m.is_hidden === true) continue;
         if (m.layer_name === o.layer_name) continue; // self-block guard
-        const blk = buildShadowBlockerPath(m, byLayer, P, enableThird, S);
+        // Memoized: the blocker for a given mask is the same for every pair it
+        // blocks, and it is one of the most expensive builds in the renderer
+        // (two mask regions plus a stroked boundary).
+        const blk = cachedGeom('blocker|' + m.layer_name,
+          () => buildShadowBlockerPath(m, byLayer, P, enableThird, S));
         if (blk) {
           const r = region.subtract(blk);
           blk.remove();
@@ -1399,9 +1542,7 @@ function deletionPath(rect, P, ss) {
 // (radius widthW/2). Mirrors masked_strand.py get_*_path_for_strand for the
 // circular case (elliptical caps are not exercised by the corpus).
 function maskComponentPath(s, P, enableThird, S, widthW) {
-  const cl = buildCenterline(s, P, enableThird);
-  let path = cleanOutline(strokedOutline(cl, widthW * S));
-  cl.remove();
+  let path = bodyOutline(s, P, enableThird, widthW * S);
   if (!path) return null;
   if (
     s.type === 'AttachedStrand' &&
@@ -1448,8 +1589,15 @@ function maskRegion(ms, byLayer, P, enableThird, S, mode) {
   const sw = second.width || 0, ssw = second.stroke_width || 0;
   const wA = mode === 'fill' ? fw : fw + 2 * fsw;
   const wB = mode === 'fill' ? sw + 2 * ssw + 4 : sw + 2 * ssw;
-  const a = maskComponentPath(first, P, enableThird, S, wA);
-  const b = maskComponentPath(second, P, enableThird, S, wB);
+  // Memoized per render and keyed by (component, width): a mask's fill and stroke
+  // regions ask for the same two component outlines at four widths, and a strand
+  // that is a component of several masks is stroked once per mask. The intersect
+  // and the deletion-rectangle subtraction below stay per call, so the region
+  // handed back is always a fresh, caller-owned path.
+  const a = cachedGeom(`mcomp|${first.layer_name}|${wA}`,
+    () => maskComponentPath(first, P, enableThird, S, wA));
+  const b = cachedGeom(`mcomp|${second.layer_name}|${wB}`,
+    () => maskComponentPath(second, P, enableThird, S, wB));
   if (!a || !b) { a && a.remove(); b && b.remove(); return null; }
   let region = a.intersect(b);
   a.remove();
@@ -1506,11 +1654,13 @@ function strokedRegionOutline(region, widthPx) {
     const left = [], right = [];
     for (let i = 0; i <= N; i++) {
       const off = Math.min(len * i / N, len - 1e-4);
-      const pt = sub.getPointAt(off);
-      const nrm = sub.getNormalAt(off);
+      // One location lookup + plain arithmetic, same as strokedOutline above.
+      const loc = sub.getLocationAt(off);
+      const pt = loc && loc.point;
+      const nrm = loc && loc.normal;
       if (!pt || !nrm) continue;
-      left.push(pt.add(nrm.multiply(half)));
-      right.push(pt.subtract(nrm.multiply(half)));
+      left.push([pt.x + nrm.x * half, pt.y + nrm.y * half]);
+      right.push([pt.x - nrm.x * half, pt.y - nrm.y * half]);
     }
     if (left.length < 2) continue;
     right.reverse();
@@ -1547,9 +1697,12 @@ function subtractLayers(region, names, byLayer, strands, P, enableThird, S, bloc
   for (const name of names) {
     const t = byLayer[name];
     if (!t || t.is_hidden === true) continue;
-    const geom = t.type === 'MaskedStrand'
+    // Same geometry the receiver pass builds, so it shares the same memo entry.
+    // This is the O(N^3) leg of the old cost: every (caster, receiver) pair
+    // subtracted every layer between them, rebuilding each one from scratch.
+    const geom = cachedGeom('recv|' + name, () => (t.type === 'MaskedStrand'
       ? buildMaskPath(t, byLayer, P, enableThird, S)
-      : buildShadowReceiverGeom(t, strands, P, enableThird, S);
+      : buildShadowReceiverGeom(t, strands, P, enableThird, S)));
     if (!geom) continue;
     // Accumulate the union of subtracted geometry for the caller's clip blocker
     // (Qt _subtract_named_layer_paths returns this alongside the trimmed region).
@@ -1598,8 +1751,8 @@ function defaultSubtracted(s, o, byLayer) {
 // faded loop. No separate unclipped solid-core pass for masks (unlike strands);
 // only the clipped faded strokes plus a clipped inner-core fill.
 function drawMaskShadow(ms, first, second, fw, fsw, sw, ssw, P, enableThird, S) {
-  const firstPath = strokedBodyAtWidth(first, P, enableThird, (fw + 2 * fsw) * S);
-  const secondPath = strokedBodyAtWidth(second, P, enableThird, (sw + 2 * ssw) * S);
+  const firstPath = bodyOutline(first, P, enableThird, (fw + 2 * fsw) * S);
+  const secondPath = bodyOutline(second, P, enableThird, (sw + 2 * ssw) * S);
   if (!firstPath || !secondPath) {
     firstPath && firstPath.remove();
     secondPath && secondPath.remove();
@@ -1623,7 +1776,7 @@ function drawMaskShadow(ms, first, second, fw, fsw, sw, ssw, P, enableThird, S) 
   }
   // inner-core = stroke(first centerline, fw+2fsw) ∩ second_path, filled SOLID at
   // full alpha 150. (Same stroke width as firstPath here, so == firstPath ∩ second.)
-  const innerStroke = strokedBodyAtWidth(first, P, enableThird, (fw + 2 * fsw) * S);
+  const innerStroke = bodyOutline(first, P, enableThird, (fw + 2 * fsw) * S);
   if (innerStroke) {
     let core = innerStroke.intersect(secondPath);
     core = subtractDeletions(core, ms, P, S);
@@ -1685,16 +1838,22 @@ function drawMasked(ms, byLayer, P, enableThird, S, shadowOnly) {
   if (shadowOnly) return;
 
   // stroke-color region: first@(w+2sw) ∩ second@(w+2sw)
-  const fStroke = maskComponentPath(first, P, enableThird, S, fw + 2 * fsw);
-  const sStroke = maskComponentPath(second, P, enableThird, S, sw + 2 * ssw);
+  // Component outlines come from the per-render memo: a strand that is a
+  // component of several masks is stroked once per width instead of once per
+  // mask, and the fill-region widths below are exactly the two the selection
+  // highlight's buildMaskPath asks for, so it reuses them for free.
+  const comp = (t, wpx) => cachedGeom(`mcomp|${t.layer_name}|${wpx}`,
+    () => maskComponentPath(t, P, enableThird, S, wpx));
+  const fStroke = comp(first, fw + 2 * fsw);
+  const sStroke = comp(second, sw + 2 * ssw);
   let strokeRegion = fStroke && sStroke ? fStroke.intersect(sStroke) : null;
   fStroke && fStroke.remove();
   sStroke && sStroke.remove();
   strokeRegion = subtractDeletions(strokeRegion, ms, P, S);
 
   // fill-color region: first@w ∩ second@(w+2sw+4)
-  const fFill = maskComponentPath(first, P, enableThird, S, fw);
-  const sExt = maskComponentPath(second, P, enableThird, S, sw + 2 * ssw + 4);
+  const fFill = comp(first, fw);
+  const sExt = comp(second, sw + 2 * ssw + 4);
   let fillRegion = fFill && sExt ? fFill.intersect(sExt) : null;
   fFill && fFill.remove();
   sExt && sExt.remove();
@@ -1771,6 +1930,10 @@ window.renderFixture = function (strands, meta) {
   const enableThird = resolveEnableThird(strands, meta);
   BIAS_ENABLED = !!(meta && meta.enable_curvature_bias_control);
   applyPaintSettings(meta);
+  // Memoize per-strand shadow geometry for the duration of THIS render (see the
+  // geometry memo near the top). Scoped to the paper project set up above and
+  // closed before the frame is composited.
+  geomCacheBegin();
 
   // Grid: painted AFTER the white background and BEFORE the strand loop so it
   // composites UNDER the bodies (OSS draws the grid behind the strands; the old
@@ -1876,9 +2039,17 @@ window.renderFixture = function (strands, meta) {
   // After every body, so the preview reads over the finished drawing.
   drawVisibleShadowPaths(strands, byLayer, P, enableThird, S);
 
+  // Drop the memo (and its detached masters) before the frame is composited, so
+  // no entry can outlive this render's paper project.
+  geomCacheEnd();
+
   paper.view.update();
 
-  const vis = document.getElementById('c');
+  // Normally the visible canvas. `meta.target` lets a caller receive the render
+  // into its own canvas instead — used by the pan fast path to take one OVERSIZED
+  // snapshot offscreen without disturbing what is currently on screen. Absent for
+  // every other caller (the fidelity oracle included), so this is inert there.
+  const vis = meta.target || document.getElementById('c');
   vis.width = W;
   vis.height = H;
   vis.style.width = W + 'px';
@@ -1959,7 +2130,16 @@ window.renderFixture = function (strands, meta) {
 // stroking reproduces the document's true z-order, so a static strand above the
 // moving one still occludes it (mirrors move_mode.py's original_strands_order
 // redraw, but with the static runs cached so per-frame cost stays O(moving)).
-let DRAG_BG = null; // { bands, W, H, ox, oy, zoom, topo }
+let DRAG_BG = null; // { bands, W, H, ox, oy, zoom, topo, under }
+// Scratch bitmap the moving strands are stroked into each frame, reused across
+// frames and across gestures (see renderDragFrame), together with the paper
+// Project bound to it. paper.setup() is not cheap: it measures the canvas via
+// getBoundingClientRect (a forced style+layout flush), installs the whole
+// pointer/touch listener set and writes several vendor-prefixed style
+// properties. Doing that once per gesture instead of once per pointer move
+// takes a guaranteed reflow out of every drag frame.
+let DRAG_MV = null;
+let DRAG_MV_PROJECT = null;
 
 // Gesture-invariant topology shared by every frame of a drag. has_circles is the
 // attachment structure (which endpoints carry caps / flat-end side lines); it is
@@ -1992,16 +2172,34 @@ function computeDragTopology(strands, meta) {
 // absent (defensive fallback) the per-frame topology is recomputed here so the
 // function stays self-contained. Leaves the Paper project active for the caller to
 // read / composite, then remove.
-function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg, topo) {
+function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg, topo, persistent) {
   if (meta.curve_params) CURVE = meta.curve_params;
   SAMPLE_STEP = DRAG_SAMPLE_STEP; // coarse sampling keeps per-frame stroking cheap
 
   const W = meta.image_width, H = meta.image_height;
   const S = meta.zoom || 1; // supersample fixed at 1 on the drag path
   targetCanvas.setAttribute('hidpi', 'off');
-  targetCanvas.width = W;
-  targetCanvas.height = H;
-  paper.setup(targetCanvas);
+  // Assigning canvas.width/height reallocates the backing store and clears it —
+  // several megabytes of churn per drag frame on a full-window canvas. Only pay
+  // it when the size actually changed; paper's view.update() clears the canvas
+  // before it draws, so a same-size reuse still starts from a blank surface.
+  const resized = targetCanvas.width !== W || targetCanvas.height !== H;
+  if (resized) {
+    targetCanvas.width = W;
+    targetCanvas.height = H;
+  }
+  if (persistent && DRAG_MV_PROJECT && !resized) {
+    // Reuse this gesture's project: activate it (every `new paper.Path` targets
+    // the globally active project, so this must precede all drawing) and empty
+    // last frame's contents. Removing the children marks the view dirty, so the
+    // view.update() at the end still repaints.
+    DRAG_MV_PROJECT.activate();
+    DRAG_MV_PROJECT.activeLayer.removeChildren();
+  } else {
+    if (persistent && DRAG_MV_PROJECT) { DRAG_MV_PROJECT.remove(); DRAG_MV_PROJECT = null; }
+    paper.setup(targetCanvas);
+    if (persistent) DRAG_MV_PROJECT = paper.project;
+  }
   if (whiteBg) {
     const bg = new paper.Path.Rectangle(new paper.Point(0, 0), new paper.Size(W, H));
     bg.fillColor = meta.canvas_bg || 'white'; // themed backdrop under drag bands (live editor); oracle unused
@@ -2022,6 +2220,20 @@ function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg, topo) {
   BIAS_ENABLED = !!(meta && meta.enable_curvature_bias_control);
   applyPaintSettings(meta);
   SHADOW_ENABLED = false; // no shadows while dragging (restored by renderFixture on release)
+  // Memoize component outlines for this paint — but only when something can
+  // actually ask for the same outline twice, which on the drag path means a mask
+  // (its fill and stroke regions share component outlines, and a selected mask's
+  // highlight asks for the fill region again). A band of plain strands is all
+  // cold misses, and on a miss the memo costs an extra detach + clone per
+  // outline for nothing: measured ~10% on the pointer-down bake of a mask-free
+  // document. With no mask in the drawn set the builders fall through to exactly
+  // the un-memoized path.
+  let memo = false;
+  for (let i = 0; i < strands.length; i++) {
+    const s = strands[i];
+    if (s.type === 'MaskedStrand' && s.is_hidden !== true && shouldDraw(s.layer_name)) { memo = true; break; }
+  }
+  if (memo) geomCacheBegin();
   for (let i = 0; i < strands.length; i++) {
     const s = strands[i];
     if (!shouldDraw(s.layer_name)) continue;
@@ -2033,6 +2245,7 @@ function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg, topo) {
     if (hc) s.has_circles = hc;
     drawStrand(s, strands, P, enableThird, S);
   }
+  geomCacheEnd();   // no-op when the memo was never opened; masters die with this paint's project
   paper.view.update();
 }
 
@@ -2091,6 +2304,7 @@ window.renderDragBackground = function (strands, meta) {
   }
   DRAG_BG = {
     bands, W, H, ox: meta.x_offset, oy: meta.y_offset, zoom: meta.zoom || 1, topo,
+    under: null,   // backdrop + grid bitmap, built lazily on the first frame
   };
   return { baked: true, staticCount: strands.length - moving.size, bands: bands.length };
 };
@@ -2100,6 +2314,35 @@ window.renderDragBackground = function (strands, meta) {
 // it. Falls back to a full renderFixture if no matching bake exists (e.g. the view
 // changed mid-gesture). Reuses DRAG_BG.topo (baked once at gesture start) so the
 // per-frame cost is O(moving) + k band blits, not O(all strands).
+// The backdrop and grid for the current gesture, painted once and cached on
+// DRAG_BG. Deliberately reproduces the old per-frame code EXACTLY, including one
+// stroke() per grid line: the grid colour can be translucent, so every crossing
+// is composited twice and comes out darker. Folding the lines into a single path
+// would composite each crossing once and visibly lighten them — the same picture
+// only if you never look at an intersection.
+function dragUnderlay(meta, W, H) {
+  if (DRAG_BG.under) return DRAG_BG.under;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = meta.canvas_bg || 'white'; // themed backdrop (live editor); oracle leaves it white
+  ctx.fillRect(0, 0, W, H);
+  // ss is fixed at 1 on the drag path, so scale == zoom and the offsets are the
+  // raw meta pan. LIVE EDITOR ONLY (computeGridLines null-guards on show_grid).
+  const grid = computeGridLines(meta, meta.zoom || 1, meta.x_offset, meta.y_offset, W, H);
+  if (grid) {
+    ctx.save();
+    ctx.strokeStyle = meta.grid_color || 'rgba(0,0,0,0.08)'; // OSS grid color; legacy faint fallback
+    ctx.lineWidth = 1;
+    for (const x of grid.xs) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+    for (const y of grid.ys) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+    ctx.restore();
+  }
+  DRAG_BG.under = c;
+  return c;
+}
+
 window.renderDragFrame = function (strands, meta) {
   const W = meta.image_width, H = meta.image_height;
   if (!DRAG_BG || DRAG_BG.W !== W || DRAG_BG.H !== H ||
@@ -2110,33 +2353,30 @@ window.renderDragFrame = function (strands, meta) {
   const moving = new Set((meta.drag && meta.drag.moving) || []);
   // Stroke the moving strands once into a transparent offscreen bitmap; it gets
   // blitted at every 'move' slot in the band order (normally exactly one slot).
-  const mv = document.createElement('canvas');
-  _dragPaint(mv, strands, meta, (name) => moving.has(name), false, DRAG_BG.topo);
-  paper.project.remove();
+  // The bitmap is reused across frames: a fresh <canvas> per pointermove meant a
+  // multi-megabyte allocation (and eventual GC) on every frame of every drag.
+  // _dragPaint resizes it only when the size changes and paper clears it before
+  // drawing, so each frame still starts from a fully transparent surface.
+  if (!DRAG_MV) DRAG_MV = document.createElement('canvas');
+  const mv = DRAG_MV;
+  _dragPaint(mv, strands, meta, (name) => moving.has(name), false, DRAG_BG.topo, true);
+  // The project stays alive for the rest of the gesture; endDrag() removes it.
   const vis = document.getElementById('c');
-  vis.width = W;
-  vis.height = H;
-  vis.style.width = W + 'px';
-  vis.style.height = H + 'px';
+  // Same story for the visible canvas: writing .width reallocates and clears it.
+  // Only touch it on a real size change; the underlay blit below repaints every pixel.
+  if (vis.width !== W) vis.width = W;
+  if (vis.height !== H) vis.height = H;
+  const wpx = W + 'px', hpx = H + 'px';
+  if (vis.style.width !== wpx) vis.style.width = wpx;
+  if (vis.style.height !== hpx) vis.style.height = hpx;
   const ctx = vis.getContext('2d');
-  ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = meta.canvas_bg || 'white'; // themed backdrop during drags (live editor); oracle leaves it white
-  ctx.fillRect(0, 0, W, H); // backdrop (baked into no band; see renderDragBackground)
-  // Grid: same as the full render path, painted on the visible canvas after the
-  // white backdrop and BEFORE the transparent static bands, so it sits under every
-  // body during a drag. ss is fixed at 1 here, so scale == zoom and the offsets are
-  // the raw meta pan. LIVE EDITOR ONLY (computeGridLines null-guards on show_grid).
-  {
-    const grid = computeGridLines(meta, meta.zoom || 1, meta.x_offset, meta.y_offset, W, H);
-    if (grid) {
-      ctx.save();
-      ctx.strokeStyle = meta.grid_color || 'rgba(0,0,0,0.08)'; // OSS grid color (live editor); legacy faint fallback
-      ctx.lineWidth = 1;
-      for (const x of grid.xs) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
-      for (const y of grid.ys) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
-      ctx.restore();
-    }
-  }
+  // Backdrop + grid are identical on every frame of a gesture (the bake key
+  // covers size, pan and zoom), so they are baked ONCE into DRAG_BG.under and
+  // blitted here. They used to be repainted per frame: a full-canvas clear, a
+  // full-canvas fill, and one beginPath/stroke per grid line — on a 1400x900
+  // canvas with a 28px grid that is ~80 separate rasterizer submissions every
+  // pointer move, all producing the same pixels.
+  ctx.drawImage(dragUnderlay(meta, W, H), 0, 0);
   // Composite bands bottom-to-top in document z-order, dropping in the moving
   // strokes at their z-slot. Per-frame work = k band blits + the one mv blit.
   for (const b of DRAG_BG.bands) {
@@ -2147,7 +2387,107 @@ window.renderDragFrame = function (strands, meta) {
 };
 
 // Drop the cached background at the end of a gesture (or before any full render).
-window.endDrag = function () { DRAG_BG = null; };
+window.endDrag = function () {
+  DRAG_BG = null;
+  if (DRAG_MV_PROJECT) { DRAG_MV_PROJECT.remove(); DRAG_MV_PROJECT = null; }
+};
+
+// ---- pan fast path ------------------------------------------------------------
+// A pan changes NO document coordinate. The only thing that moves is
+// meta.x_offset / meta.y_offset — which renderFixture folds into every point via
+// P(pt) = pt * S + o * ss. That is exactly why panning was the slowest gesture in
+// the editor: the offsets are baked into the geometry, so every pan frame rebuilt
+// every body outline, every stroked outline, every mask boolean union and every
+// shadow region from raw points, at O(all strands). Measured at ~1.2 s/frame on
+// three_strand_braid.
+//
+// But since the offsets enter as a PURE TRANSLATION, one render taken on an
+// OVERSIZED canvas — the viewport grown by PAN_MARGIN on all four sides, with the
+// offsets grown to match — contains, as an exact sub-rectangle, the render for
+// every offset within +/- PAN_MARGIN of it. So a whole pan gesture is served by
+// one render plus a drawImage per frame.
+//
+// Two conditions make that sub-rectangle EXACT rather than approximate, and both
+// are enforced below by refusing the blit rather than by hoping:
+//   * the delta must be a whole number of canvas pixels, or drawImage resamples
+//     (blurry, and no longer the pixels a real render would produce). The pan
+//     handler quantizes the gesture delta to whole pixels for this reason.
+//   * the delta must stay inside the margin, or the read runs off the snapshot
+//     and exposes blank canvas at the leading edge.
+// When either fails the caller re-snapshots at the current offset — one slow
+// frame, then the next PAN_MARGIN px of travel are free again.
+//
+// tools/pan_identity.mjs proves the crop is pixel-identical to a direct render,
+// per fixture and per delta. It is the whole basis for this path being a pure
+// speedup and not a rendering change.
+let PAN_SNAP = null; // { canvas, M, W, H, ox, oy, zoom }
+
+// Backing pixels of slack rendered beyond each edge of the viewport. Larger =
+// fewer re-snapshots over a long pan, at the cost of a bigger snapshot render
+// (cost grows with area, but only in rasterization — the geometry work, which
+// dominates, is identical because the same strands are built either way).
+const PAN_MARGIN = 320;
+
+// Take the oversized snapshot the rest of the gesture blits from. `strands` and
+// `meta` are exactly what a full render would have received this frame, so the
+// snapshot is the real thing, shadows and all — not a reduced-quality preview.
+window.renderPanBackground = function (strands, meta) {
+  const W = meta.image_width, H = meta.image_height;
+  const M = PAN_MARGIN;
+  // Reuse the canvas object across re-snapshots within a gesture; renderFixture
+  // assigns .width/.height itself, which reallocates and clears it.
+  const c = (PAN_SNAP && PAN_SNAP.canvas) || document.createElement('canvas');
+  PAN_SNAP = null; // don't leave a stale snapshot live if the render throws
+  window.renderFixture(strands, {
+    ...meta,
+    image_width: W + 2 * M,
+    image_height: H + 2 * M,
+    x_offset: meta.x_offset + M,
+    y_offset: meta.y_offset + M,
+    target: c,
+  });
+  PAN_SNAP = { canvas: c, M, W, H, ox: meta.x_offset, oy: meta.y_offset, zoom: meta.zoom || 1 };
+  return { snapped: true, w: c.width, h: c.height };
+};
+
+// One pan frame: blit the snapshot at the current offset. Returns null when the
+// live snapshot cannot serve this offset exactly — the caller must then re-snapshot
+// rather than draw something approximate.
+window.renderPanFrame = function (meta) {
+  const S = PAN_SNAP;
+  if (!S) return null;
+  const W = meta.image_width, H = meta.image_height;
+  if (S.W !== W || S.H !== H || S.zoom !== (meta.zoom || 1)) return null;
+  // Both guards below are correctness, not optimization — see the header above.
+  // The delta is compared against the nearest integer rather than tested with
+  // Number.isInteger: the pan handler adds a whole number of pixels to a base that
+  // is usually fractional (zoom-to-cursor leaves panX fractional), and
+  // (o + 1) - (o + 0) is not exactly 1 in floating point. Demanding exactness here
+  // would fail on nearly every frame and silently drop the whole gesture back onto
+  // the slow path. The residue is ~1e-16 px, far below anything rasterization can
+  // resolve, so blitting at the rounded delta draws the same pixels a render at the
+  // true delta would.
+  const rawX = meta.x_offset - S.ox, rawY = meta.y_offset - S.oy;
+  const dx = Math.round(rawX), dy = Math.round(rawY);
+  if (Math.abs(rawX - dx) > 1e-6 || Math.abs(rawY - dy) > 1e-6) return null;
+  if (Math.abs(dx) > S.M || Math.abs(dy) > S.M) return null;
+  const vis = document.getElementById('c');
+  // Writing .width reallocates and clears, so only touch it on a real size change;
+  // the blit below repaints every pixel of the canvas anyway.
+  if (vis.width !== W) vis.width = W;
+  if (vis.height !== H) vis.height = H;
+  const wpx = W + 'px', hpx = H + 'px';
+  if (vis.style.width !== wpx) vis.style.width = wpx;
+  if (vis.style.height !== hpx) vis.style.height = hpx;
+  // Source origin: a world point sits at (p*S + (ox+M)) in the snapshot and at
+  // (p*S + ox + dx) on screen, so screen x maps to snapshot x + M - dx.
+  vis.getContext('2d').drawImage(S.canvas, S.M - dx, S.M - dy, W, H, 0, 0, W, H);
+  return { mode: 'panframe', dx, dy };
+};
+
+// Drop the snapshot at the end of a pan gesture. The canvas is several megabytes,
+// and holding it would also risk serving a later pan from a pre-edit scene.
+window.endPan = function () { PAN_SNAP = null; };
 
 // ---- auto_shadow geometry probe (OSS auto_shadow.py, 1.109) ---------------
 // For each requested {casting, receiving} pair, compute the RAW caster∩receiver

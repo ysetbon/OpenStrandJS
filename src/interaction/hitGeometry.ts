@@ -205,16 +205,43 @@ export function maskCentroid(
 
   const N = 50;
   let sumX = 0, sumY = 0, count = 0;
+  const probe = { x: 0, y: 0 };
   for (let i = 0; i < N; i++) {
     const x = minX + (i + 0.5) * w / N;
     for (let j = 0; j < N; j++) {
       const y = minY + (j + 0.5) * h / N;
-      if (distToPolyline({ x, y }, a) <= reachA && distToPolyline({ x, y }, b) <= reachB && !inDeletion(x, y)) {
+      // This runs 2500 times per mask per DRAG FRAME (trackMaskDeletionRects
+      // calls it from moveHandle), so the inner test is written for the answer it
+      // actually needs. The old form asked distToPolyline for the exact minimum
+      // distance to both centrelines — every segment, every time — and then threw
+      // all but the comparison away. withinPolyline stops at the first segment
+      // inside the reach, and `probe` is reused instead of allocating a point per
+      // sample. The boolean is identical, so the centroid is identical.
+      probe.x = x; probe.y = y;
+      if (withinPolyline(probe, a, reachA) && withinPolyline(probe, b, reachB) && !inDeletion(x, y)) {
         sumX += x; sumY += y; count++;
       }
     }
   }
   return count > 0 ? { x: sumX / count, y: sumY / count } : null;
+}
+
+// Is `p` within `reach` of the polyline? Bit-for-bit `distToPolyline(p, poly) <= reach`
+// — same per-segment distance, same Math.hypot, so `min(dᵢ) <= reach` and
+// `∃i: dᵢ <= reach` agree even on the boundary — but it stops at the first segment
+// that satisfies it instead of scanning them all to find the true minimum, which
+// the caller then discards. Used by the mask-centroid grid scan, which only ever
+// asks the yes/no question.
+export function withinPolyline(p: Point, poly: Point[], reach: number): boolean {
+  for (let i = 0; i + 1 < poly.length; i++) {
+    const a = poly[i], b = poly[i + 1];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const l2 = dx * dx + dy * dy;
+    let t = l2 === 0 ? 0 : ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2;
+    t = Math.max(0, Math.min(1, t));
+    if (Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy)) <= reach) return true;
+  }
+  return false;
 }
 
 // Minimum distance from p to the polyline (world space).

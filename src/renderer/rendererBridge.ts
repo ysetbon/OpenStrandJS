@@ -19,6 +19,9 @@ declare global {
     renderDragBackground?: (strands: RenderStrand[], meta: RenderMeta) => unknown;
     renderDragFrame?: (strands: RenderStrand[], meta: RenderMeta) => unknown;
     endDrag?: () => void;
+    renderPanBackground?: (strands: RenderStrand[], meta: RenderMeta) => unknown;
+    renderPanFrame?: (meta: RenderMeta) => unknown;
+    endPan?: () => void;
   }
 }
 
@@ -43,6 +46,26 @@ export function callRenderDragFrame(strands: RenderStrand[], meta: RenderMeta): 
 
 export function callEndDrag(): void {
   if (typeof window.endDrag === 'function') window.endDrag();
+}
+
+// Pan fast-path bridges. Same graceful degradation as the drag ones: an older
+// renderer without them falls back to a full render, which is exactly the
+// behaviour this path replaces.
+export function callRenderPanBackground(strands: RenderStrand[], meta: RenderMeta): boolean {
+  if (typeof window.renderPanBackground !== 'function') return false;
+  window.renderPanBackground(strands, meta);
+  return true;
+}
+
+// True when the snapshot served this frame; false means the caller must
+// re-snapshot (delta past the margin, fractional delta, or size/zoom change).
+export function callRenderPanFrame(meta: RenderMeta): boolean {
+  if (typeof window.renderPanFrame !== 'function') return false;
+  return window.renderPanFrame(meta) != null;
+}
+
+export function callEndPan(): void {
+  if (typeof window.endPan === 'function') window.endPan();
 }
 
 export function extractStrands(data: unknown, step?: number): unknown[] {
