@@ -46,11 +46,13 @@ export function ArrowCustomizeDialog(props: { layerName: string; onClose: () => 
   const [transparency, setTransparencyLocal] = useState(
     typeof ex.arrow_transparency === 'number' ? ex.arrow_transparency : 100,
   );
+  // Above the early return: deleting the strand while this dialog is up would
+  // otherwise render fewer hooks than the previous pass and throw.
+  const [colorDialog, setColorDialog] = useState(false);
 
   if (!strand) return null;
 
   const arrowColor = (ex.arrow_color as RGBA | undefined) ?? strand.stroke_color;
-  const [colorDialog, setColorDialog] = useState(false);
   const texture = (ex.arrow_texture as ArrowTexture | undefined) ?? 'none';
   const shaft = (ex.arrow_shaft_style as ArrowShaftStyle | undefined) ?? 'solid';
   const headVisible = ex.arrow_head_visible !== false;

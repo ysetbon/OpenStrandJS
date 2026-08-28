@@ -270,7 +270,10 @@ export function ColorPickerDialog(props: {
           </div>
 
           <div className="cpd-preview-row">
-            <span className="cpd-preview" style={{ background: cssOf(color) }} />
+            {/* backgroundColor, not the `background` shorthand: the shorthand would
+                reset the checkerboard background-image the swatch is layered on, so a
+                transparent colour would blend into the modal instead of showing it. */}
+            <span className="cpd-preview" style={{ backgroundColor: cssOf(color) }} />
             <label className="cpd-html">
               <span>HTML</span>
               <input

@@ -275,6 +275,29 @@ try {
         const dlg = page.locator('[role=dialog]');
         const slider = dlg.locator('input[type=range]').first();
         ok('the arrow dialog opens with its transparency slider', await slider.count() > 0);
+
+        // The arrow colour well opens the colour dialog INSIDE this one. Both are
+        // <Modal>s listening for Escape on the document, so without the topmost-modal
+        // guard one Escape closed the parent along with the picker.
+        {
+          const well = page.locator('.gd-color-well').first();
+          if (await well.count() > 0) {
+            await well.click();
+            await page.waitForTimeout(400);
+            ok('the arrow colour well opens the colour dialog',
+              await page.locator('.cpd').count() > 0);
+            await page.keyboard.press('Escape');
+            await page.waitForTimeout(400);
+            ok('Escape closes the nested colour dialog...',
+              await page.locator('.cpd').count() === 0);
+            ok('...and leaves the arrow dialog it sits in open',
+              await page.locator('.gd-color-well').count() > 0,
+              'the parent dialog took the same Escape');
+          } else {
+            ok('the arrow dialog carries a colour well', false);
+          }
+        }
+
         if (await slider.count() > 0) {
           const beforeDrag = await snapshot();
           // A real pointer drag, so several input events fire — .fill() would emit
