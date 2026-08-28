@@ -114,8 +114,8 @@
 
 /* ---- shadow_only: dashed gray border (three states) ---- */
 .nlb.nlb-shadow-only {
-  --nlb-border: 2px dashed rgba(128, 128, 128, 0.8);
   background: var(--nlb-fill);
+  --nlb-border: 2px dashed rgba(128, 128, 128, 0.8);
 }
 .nlb.nlb-shadow-only:hover {
   background: var(--nlb-hover, var(--nlb-fill));
@@ -287,12 +287,12 @@
 
 /* ---- multi-selected: 3px gold (!important); if also checked, 3px blue ---- */
 .nlb.nlb-multi {
-  --nlb-border: 3px solid #FFD700 !important;
   box-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+  --nlb-border: 3px solid #FFD700 !important;
 }
 .nlb.nlb-multi.nlb-checked {
-  --nlb-border: 3px solid #0066FF !important;
   box-shadow: 0 0 10px rgba(0, 102, 255, 0.8);
+  --nlb-border: 3px solid #0066FF !important;
 }
 
 /* ---- masked-mode (transient mask-create): flat gray; darken the picked one ---- */
