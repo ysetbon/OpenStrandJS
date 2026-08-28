@@ -265,9 +265,11 @@ export class InteractionHost {
     this.mode().onCancel?.(this.ctx());
   };
 
+  /**
+   * Wheel zoom: about the cursor, over the same OSS [0.1, 5] range the zoom
+   * buttons use — the cursor is the anchor here, the viewport centre there.
+   */
   private onWheel = (e: WheelEvent) => {
-    // Wheel zooms about the cursor, over the same OSS [0.1, 5] range the zoom
-    // buttons use — the cursor is the anchor here, the viewport centre there.
     e.preventDefault();
     const st = useEditorStore.getState();
     const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;

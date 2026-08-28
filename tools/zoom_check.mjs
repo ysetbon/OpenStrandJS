@@ -64,13 +64,15 @@ try {
   const zoomOut = page.locator('.control-column .cc-btn[title^="Zoom Out"]');
   const view = () => page.evaluate(() => ({ ...window.__store.getState().view }));
   const setView = (patch) => page.evaluate((p) => window.__store.getState().setView(p), patch);
-  // World point under the middle of the canvas: the anchor a step must not move.
+  /** World point under the middle of the canvas: the anchor a step must not move. */
   const centreWorld = () => page.evaluate(() => {
     const v = window.__store.getState().view;
     return { x: (v.width / 2 - v.panX) / v.zoom, y: (v.height / 2 - v.panY) / v.zoom };
   });
-  // Inked bounding box on the visible canvas, as a fraction of its size — the
-  // drawing's on-screen extent, which is what a zoom step has to change.
+  /**
+   * Inked bounding box on the visible canvas, as a fraction of its size — the
+   * drawing's on-screen extent, which is what a zoom step has to change.
+   */
   const inkSpan = () => page.evaluate(() => {
     const cv = document.getElementById('c');
     const px = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
@@ -87,10 +89,14 @@ try {
     if (minX === Infinity) return 0;
     return Math.max(maxX - minX, maxY - minY) / cv.width;
   });
-  // Presses are spaced: each one schedules a full render, and at 5x on this
-  // fixture a burst of clicks can hold the main thread long enough for the next
-  // click to time out — the tool would then fail on its own pacing rather than
-  // on the behaviour it is checking.
+  /**
+   * Press a control-column button `n` times.
+   *
+   * Presses are spaced: each one schedules a full render, and at 5x on this
+   * fixture a burst of clicks can hold the main thread long enough for the next
+   * click to time out — the tool would then fail on its own pacing rather than
+   * on the behaviour it is checking.
+   */
   const press = async (btn, n = 1) => {
     for (let i = 0; i < n; i++) { await btn.click({ timeout: 15000 }); await page.waitForTimeout(120); }
     await page.waitForTimeout(700);   // let the render settle
