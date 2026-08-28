@@ -21,6 +21,36 @@
 
 .nlb:hover { background: var(--nlb-hover, var(--nlb-fill)); }
 
+/* ---- border overlay (OSS widget-coordinate borders) ----
+ * In OSS every layer-button border comes from the button's Qt STYLESHEET, which
+ * Qt paints INSIDE the fixed 146x40 widget. paintEvent then draws the green
+ * attachable strip, the padlock and the copy/paste indicators in WIDGET
+ * coordinates -- QRect(rect.width()-9, 0, 9, rect.height()), lock_button_rect(),
+ * indicator_column_x() all read self.rect()/self.width()/self.height() -- so a
+ * border never moves or shortens them.
+ *
+ * A real CSS `border` on .nlb does move them: it shrinks the padding box the
+ * absolutely-positioned overlays resolve against. Most visible on a MASKED
+ * layer, whose 5px border pushed the green strip 5px in from the right edge,
+ * cropped 10px off its height, and shifted the padlock and the copy/paste
+ * indicator column in by 5px -- none of which OSS does.
+ *
+ * So .nlb itself stays border-less and each state sets `--nlb-border` instead,
+ * which this overlay paints across the full box. The custom property cascades
+ * exactly like the `border` shorthand it replaces (same selectors, same
+ * !important), so state precedence is unchanged. z-index 1 keeps it above the
+ * fill and below the painted overlays, matching the OSS paint order:
+ * background+border (super().paintEvent) -> text -> strip -> padlock -> badges. */
+.nlb::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  border: var(--nlb-border, none);
+  pointer-events: none;
+  z-index: 1;
+}
+
 /* Checked (== selected) uses color.darker() (Qt factor 200). */
 .nlb.nlb-checked { background: var(--nlb-checked, var(--nlb-fill)); }
 
@@ -30,6 +60,7 @@
  * +1px paint nudge to match the OSS paintEvent y offset. */
 .nlb-label {
   position: relative;
+  z-index: 2;                    /* over the border overlay, under the strip */
   font-weight: 700;
   font-size: 16px;
   line-height: 1;
@@ -78,21 +109,21 @@
 /* Checked-while-hidden: checked fill replaces the hatch; only the border is #0066CC. */
 .nlb.nlb-hidden.nlb-checked {
   background: var(--nlb-checked, var(--nlb-fill));
-  border: 2px solid #0066CC;
+  --nlb-border: 2px solid #0066CC;
 }
 
 /* ---- shadow_only: dashed gray border (three states) ---- */
 .nlb.nlb-shadow-only {
-  border: 2px dashed rgba(128, 128, 128, 0.8);
+  --nlb-border: 2px dashed rgba(128, 128, 128, 0.8);
   background: var(--nlb-fill);
 }
 .nlb.nlb-shadow-only:hover {
   background: var(--nlb-hover, var(--nlb-fill));
-  border: 2px dashed rgba(160, 160, 160, 1);
+  --nlb-border: 2px dashed rgba(160, 160, 160, 1);
 }
 .nlb.nlb-shadow-only.nlb-checked {
   background: var(--nlb-checked, var(--nlb-fill));
-  border: 2px dashed rgba(96, 96, 96, 1);
+  --nlb-border: 2px dashed rgba(96, 96, 96, 1);
 }
 
 /* ---- padlock toggle (OSS 1.109 lock rework): 26px circle, vertically
@@ -117,7 +148,7 @@
   line-height: 1;
   padding: 0;
   cursor: pointer;
-  z-index: 3;
+  z-index: 4;
 }
 .nlb-padlock.is-locked { background: rgba(255, 220, 160, 0.92); }
 .nlb-padlock:hover::after {
@@ -215,7 +246,7 @@
   border: 2px solid #000000;
   box-sizing: border-box;
   pointer-events: none;
-  z-index: 2;
+  z-index: 3;                    /* strip paints over the text, as in OSS */
 }
 .nlb-attach {
   position: absolute;
@@ -225,7 +256,7 @@
   height: calc(100% - 2px);
   background: #3BA424;
   pointer-events: none;
-  z-index: 2;
+  z-index: 3;
 }
 /* RTL (Hebrew): green strip mirrors to the left edge, padlock to the right. */
 .nlb-rtl.nlb-attachable::before { right: auto; left: 0; }
@@ -233,35 +264,44 @@
 
 /* ---- selectable (lock mode), OSS 1.109: only the currently SELECTED layer
  * gets the blue border — clicking a layer selects it; the padlock toggles. ---- */
-.nlb.nlb-selectable.nlb-checked:not(.nlb-hidden):not(.nlb-shadow-only) { border: 2px solid blue; }
+.nlb.nlb-selectable.nlb-checked:not(.nlb-hidden):not(.nlb-shadow-only) { --nlb-border: 2px solid blue; }
 
 /* ---- masked: fill = first strand color (inline), 5px border = second color ----
- * (suppressed when hidden/shadow_only). */
-.nlb.nlb-masked { background: var(--nlb-fill, rgba(200, 170, 230, 1)); }
+ * (suppressed when hidden/shadow_only).
+ *
+ * The fill itself needs NO rule here: `--nlb-fill` is set inline to the first
+ * component's colour and the base .nlb rule paints it. A `.nlb.nlb-masked`
+ * background declaration was doing the same thing at (0,2,0) specificity, which
+ * outranked `.nlb:hover` (0,1,1) and, being later in the file, also beat
+ * `.nlb.nlb-checked` and `.nlb.nlb-hidden` — so a mask button never lightened on
+ * hover, never darkened when selected, and lost its gray hatch when hidden. OSS
+ * masked buttons are exactly the ones that always run update_style, which emits
+ * the full normal/lighter()/darker() triple and the is_hidden gray override
+ * (numbered_layer_button.py:1873-1940). */
 .nlb.nlb-masked:not(.nlb-hidden):not(.nlb-shadow-only) {
-  border: 5px solid var(--nlb-mask-border, #000);
+  --nlb-border: 5px solid var(--nlb-mask-border, #000);
 }
 /* selectable beats the mask border when both apply (last rule wins, like Qt) —
  * 1.109: only on the selected (checked) button. */
-.nlb.nlb-masked.nlb-selectable.nlb-checked:not(.nlb-hidden):not(.nlb-shadow-only) { border: 2px solid blue; }
+.nlb.nlb-masked.nlb-selectable.nlb-checked:not(.nlb-hidden):not(.nlb-shadow-only) { --nlb-border: 2px solid blue; }
 
 /* ---- multi-selected: 3px gold (!important); if also checked, 3px blue ---- */
 .nlb.nlb-multi {
-  border: 3px solid #FFD700 !important;
+  --nlb-border: 3px solid #FFD700 !important;
   box-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
 }
 .nlb.nlb-multi.nlb-checked {
-  border: 3px solid #0066FF !important;
+  --nlb-border: 3px solid #0066FF !important;
   box-shadow: 0 0 10px rgba(0, 102, 255, 0.8);
 }
 
 /* ---- masked-mode (transient mask-create): flat gray; darken the picked one ---- */
-.nlb.nlb-mask-mode { background: #808080 !important; border: none !important; }
+.nlb.nlb-mask-mode { background: #808080 !important; --nlb-border: none !important; }
 .nlb.nlb-mask-picked { background: var(--nlb-checked, #808080) !important; color: #fff; }
 
 /* ---- Edit Mask session (OSS request_edit_mask, layer_panel.py:2565-2574): the
  * edited mask button gets a 2px RED border + faint red wash; every OTHER layer
  * button is dimmed (opacity 0.5) and made non-interactive (setEnabled(False)). */
-.nlb.nlb-mask-editing { border: 2px solid red !important; background-color: rgba(255, 0, 0, 0.1) !important; }
+.nlb.nlb-mask-editing { --nlb-border: 2px solid red !important; background-color: rgba(255, 0, 0, 0.1) !important; }
 .nlb.nlb-edit-locked { opacity: 0.5; pointer-events: none; }
 
