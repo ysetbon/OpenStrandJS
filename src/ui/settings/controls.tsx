@@ -1,17 +1,14 @@
 import React, { useState } from 'react';
 import type { RGBA } from '../../model/types';
+import { useEditorStore } from '../../store/editorStore';
+import { ColorPickerDialog } from '../dialogs/ColorPickerDialog';
+import { t } from '../i18n';
 
 // Shared primitive controls for the settings pages. Faithful to settings_dialog.py:
-// the green custom checkbox, the 64x27 colour swatch button (with a simple
-// input+alpha popover per the chosen scope), themed number spins and selects.
+// the green custom checkbox, the 64x27 colour swatch button (which opens the modal
+// colour dialog, as OSS's swatch buttons do), themed number spins and selects.
 
 export const rgbaCss = (c: RGBA): string => `rgba(${c.r}, ${c.g}, ${c.b}, ${(c.a / 255).toFixed(3)})`;
-
-const hex2 = (v: number) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
-const toHex = (c: RGBA) => `#${hex2(c.r)}${hex2(c.g)}${hex2(c.b)}`;
-const fromHex = (h: string) => ({
-  r: parseInt(h.slice(1, 3), 16), g: parseInt(h.slice(3, 5), 16), b: parseInt(h.slice(5, 7), 16),
-});
 
 // A labelled control row (label leading, control trailing).
 export function Row(
@@ -119,13 +116,20 @@ export function Button(
   );
 }
 
-// Colour swatch button (64x27 with a 22x22 alpha-checkerboard chip). Clicking
-// toggles an inline popover with a native colour input + an alpha slider — the
-// chosen "simple input + alpha" fidelity. Applies live via onChange.
+// Colour swatch button (64x27 with a 22x22 alpha-checkerboard chip). Clicking opens
+// the same modal colour dialog the layer menu uses: OSS's settings colour buttons
+// (choose_shadow_color:6491, choose_default_arrow_color:6532,
+// choose_default_strand_color:6570, choose_default_stroke_color:6601,
+// choose_highlight_color:6631) all open a QColorDialog with ShowAlphaChannel and
+// apply the colour only when it is accepted. The inline popover this replaces held
+// a bare <input type="color"> whose OS picker anchored to a 36px well inside a
+// scrolling panel — it could open clipped at the viewport edge — and it had no way
+// to cancel: every drag frame was already applied.
 export function ColorSwatch(
   { value, onChange, title }: { value: RGBA; onChange: (c: RGBA) => void; title?: string },
 ) {
   const [open, setOpen] = useState(false);
+  const lang = useEditorStore((st) => st.settings.language);
   const chipStyle: React.CSSProperties = {
     background: `linear-gradient(${rgbaCss(value)}, ${rgbaCss(value)}), repeating-conic-gradient(#bbb 0% 25%, #fff 0% 50%) 0 0 / 10px 10px`,
   };
@@ -135,31 +139,18 @@ export function ColorSwatch(
         type="button"
         className="set-swatch"
         title={title}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => setOpen(true)}
       >
         <span className="set-swatch-chip" style={chipStyle} />
       </button>
       {open && (
-        <div
-          className="set-color-pop"
-          style={{ position: 'absolute', top: 'calc(100% + 4px)', insetInlineEnd: 0, zIndex: 5 }}
-        >
-          <input
-            type="color"
-            value={toHex(value)}
-            onChange={(e) => { const { r, g, b } = fromHex(e.target.value); onChange({ r, g, b, a: value.a }); }}
-          />
-          <input
-            type="range"
-            min={0}
-            max={255}
-            value={value.a}
-            title={`alpha ${value.a}`}
-            onChange={(e) => onChange({ ...value, a: Number(e.target.value) })}
-          />
-          <span className="set-color-a">{value.a}</span>
-          <button type="button" className="set-btn" style={{ minWidth: 0, minHeight: 0, padding: '2px 8px' }} onClick={() => setOpen(false)}>✕</button>
-        </div>
+        <ColorPickerDialog
+          title={title ?? t('change_color', lang)}
+          value={value}
+          lang={lang}
+          onAccept={onChange}
+          onClose={() => setOpen(false)}
+        />
       )}
     </span>
   );

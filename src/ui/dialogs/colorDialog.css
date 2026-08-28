@@ -1,0 +1,171 @@
+/* In-app colour dialog (the port of OSS's non-native QColorDialog). Laid out like
+ * Qt's: standard/custom colour wells on the left, the saturation-value square with
+ * hue and alpha strips plus the numeric fields on the right. */
+
+.cpd {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.cpd-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.cpd-caption {
+  font-size: 12px;
+  opacity: 0.85;
+  margin-top: 4px;
+}
+
+/* Qt draws the standard well 8 cells wide (6 rows) and the custom well 8x2. */
+.cpd-well {
+  display: grid;
+  grid-template-columns: repeat(8, 22px);
+  grid-auto-rows: 18px;
+  gap: 2px;
+}
+
+.cpd-cell {
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  border-radius: 0;
+  cursor: pointer;
+  min-width: 0;
+  min-height: 0;
+}
+
+.cpd-cell.is-current {
+  outline: 2px solid var(--accent, #2d6cdf);
+  outline-offset: -2px;
+}
+
+.cpd-wide {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.cpd-right {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cpd-canvas-row {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  height: 150px;
+}
+
+.cpd-sv {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 120px;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.cpd-sv-knob {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+}
+
+.cpd-hue,
+.cpd-alpha {
+  position: relative;
+  width: 20px;
+  flex: 0 0 20px;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  touch-action: none;
+}
+
+.cpd-hue {
+  background: linear-gradient(to top,
+    #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%);
+}
+
+/* Checkerboard under the alpha ramp so transparency reads as transparency. */
+.cpd-alpha {
+  background: repeating-conic-gradient(#bbb 0% 25%, #fff 0% 50%) 0 0 / 10px 10px;
+}
+
+.cpd-alpha-fill {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.cpd-strip-knob {
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  height: 3px;
+  margin-top: -1px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
+
+.cpd-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cpd-preview {
+  width: 60px;
+  height: 26px;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  /* the swatch is painted with an alpha colour, so back it with the checkerboard */
+  background-image: repeating-conic-gradient(#bbb 0% 25%, #fff 0% 50%);
+  background-size: 10px 10px;
+}
+
+.cpd-html {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.cpd-html input {
+  width: 90px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+
+.cpd-nums {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 10px;
+}
+
+.cpd-num {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.cpd-num input {
+  width: 64px;
+}
+
+/* The alpha row spans both columns (Qt gives it the full width under R/G/B). */
+.cpd-num:last-child {
+  grid-column: 1 / -1;
+}

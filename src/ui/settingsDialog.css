@@ -193,32 +193,6 @@
   /* checkerboard backing shows alpha; the colour layer is set inline */
 }
 
-/* The expandable colour editor popover (simple input + alpha, per scope). */
-.set-color-pop {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  background: var(--set-combo-bg);
-  border: 1px solid var(--set-combo-border);
-  border-radius: 4px;
-}
-.set-color-pop input[type='color'] {
-  width: 36px;
-  height: 26px;
-  padding: 0;
-  border: 1px solid var(--set-combo-border);
-  border-radius: 4px;
-  background: none;
-}
-.set-color-pop input[type='range'] { flex: 1 1 auto; min-width: 90px; }
-.set-color-pop .set-color-a {
-  width: 30px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  opacity: 0.8;
-}
-
 /* ---- Custom green checkbox (setup_custom_checkmark) ---- */
 .set-check {
   display: inline-flex;

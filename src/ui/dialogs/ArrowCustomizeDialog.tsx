@@ -9,6 +9,7 @@ import type { ArrowTexture, ArrowShaftStyle } from '../../store/actions';
 import type { RGBA } from '../../model/types';
 import { requestRender } from '../../renderer/renderScheduler';
 import { t } from '../i18n';
+import { ColorPickerDialog } from './ColorPickerDialog';
 
 // OSS "Arrow Customization" (numbered_layer_button.py:1092-1350). Six per-strand
 // controls plus the canvas-level size group:
@@ -45,6 +46,9 @@ export function ArrowCustomizeDialog(props: { layerName: string; onClose: () => 
   const [transparency, setTransparencyLocal] = useState(
     typeof ex.arrow_transparency === 'number' ? ex.arrow_transparency : 100,
   );
+  // Above the early return: deleting the strand while this dialog is up would
+  // otherwise render fewer hooks than the previous pass and throw.
+  const [colorDialog, setColorDialog] = useState(false);
 
   if (!strand) return null;
 
@@ -83,16 +87,36 @@ export function ArrowCustomizeDialog(props: { layerName: string; onClose: () => 
     <Modal title={t('arrow_customization', lang)} onClose={close} lang={lang} width={430}
       footer={<button onClick={close}>{t('ok', lang)}</button>}>
 
+      {/* OSS choose_arrow_color (:3815) opens a modal QColorDialog with an alpha
+          channel and writes the colour once, on Accept. The well below is the button
+          that opens it — not a native <input type="color">, whose OS popup applied a
+          colour per drag frame and could not be cancelled. */}
       <div className="gd-row">
         <span className="gd-label">{t('arrow_color', lang)}</span>
         <span className="gd-spacer" />
-        <input
-          type="color"
-          value={rgbaToHex(arrowColor)}
-          onChange={(e) => live((d) => setArrowColor(d, layerName, hexToRgba(e.target.value, arrowColor)))}
-          onBlur={seal}
+        <button
+          type="button"
+          className="gd-color-well"
+          style={{ backgroundColor: `rgb(${arrowColor.r}, ${arrowColor.g}, ${arrowColor.b})` }}
+          title={rgbaToHex(arrowColor)}
+          onClick={() => setColorDialog(true)}
         />
       </div>
+
+      {/* No alpha control here: the renderer REPLACES the arrow's alpha with
+          arrow_transparency (strand-renderer.js:1460-1476, Qt setAlphaF), so an
+          alpha picked here would never reach the canvas. Transparency is the
+          slider directly below. The stored alpha rides along untouched. */}
+      {colorDialog && (
+        <ColorPickerDialog
+          title={t('arrow_color', lang)}
+          value={arrowColor}
+          lang={lang}
+          showAlpha={false}
+          onAccept={(c) => edit((d) => setArrowColor(d, layerName, { ...c, a: arrowColor.a }))}
+          onClose={() => setColorDialog(false)}
+        />
+      )}
 
       <div className="gd-row">
         <span className="gd-label">{t('arrow_transparency', lang)}</span>
@@ -174,9 +198,4 @@ export function ArrowCustomizeDialog(props: { layerName: string; onClose: () => 
 const hex2 = (n: number): string => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
 const rgbaToHex = (c: RGBA | null | undefined): string =>
   (c ? `#${hex2(c.r)}${hex2(c.g)}${hex2(c.b)}` : '#000000');
-// Alpha is NOT taken from the picker: OSS keeps the arrow's alpha under the
-// separate transparency slider, so the colour well only moves r/g/b.
-const hexToRgba = (hex: string, prev: RGBA | null | undefined): RGBA => ({
-  r: parseInt(hex.slice(1, 3), 16), g: parseInt(hex.slice(3, 5), 16), b: parseInt(hex.slice(5, 7), 16),
-  a: prev?.a ?? 255,
-});
+

@@ -26,7 +26,7 @@ export function GeneralPage({ lang }: PageProps) {
 
       {/* Shadow colour */}
       <Row label={t('shadow_color', lang)}>
-        <ColorSwatch value={s.shadow_color} onChange={(c) => set({ shadow_color: c })} />
+        <ColorSwatch value={s.shadow_color} onChange={(c) => set({ shadow_color: c })} title={t('shadow_color', lang)} />
       </Row>
 
       {/* Performance / drawing toggles */}

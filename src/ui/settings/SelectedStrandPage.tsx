@@ -22,7 +22,7 @@ export function SelectedStrandPage({ lang }: PageProps) {
         onChange={(v) => set({ view_hide_highlight: v })} wrap />
 
       <Row label={t('highlight_color', lang)}>
-        <ColorSwatch value={s.highlight_color} onChange={(c) => set({ highlight_color: c })} />
+        <ColorSwatch value={s.highlight_color} onChange={(c) => set({ highlight_color: c })} title={t('highlight_color', lang)} />
       </Row>
     </div>
   );
