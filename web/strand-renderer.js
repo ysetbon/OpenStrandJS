@@ -44,7 +44,15 @@ function computeGridLines(meta, scale, ox, oy, targetW, targetH) {
 // Curve-shape parameters. These are canvas-level settings (NOT stored per
 // strand in the JSON); the reference renderer exports the canvas's values
 // into meta.curve_params. Defaults match the braid fixtures.
-let CURVE = { base_fraction: 1.0, dist_multiplier: 2.0, exponent: 2.0 };
+//
+// Like every other paint setting (see applyPaintSettings) this is re-derived
+// from `meta` at EVERY render entry point, falling back to the constant below
+// when the key is absent. It used to be assigned only when the key WAS present,
+// which made a render that omitted it inherit whatever curve the previous
+// render had been given — the same document drawn with two different curves
+// depending on what was rendered before it.
+const CURVE_DEFAULT = { base_fraction: 1.0, dist_multiplier: 2.0, exponent: 2.0 };
+let CURVE = CURVE_DEFAULT;
 
 // Centerline sampling step (px) used to build stroked outlines. renderFixture (the
 // pixel oracle) always uses 1 (~1px, full accuracy). The interactive drag path sets
@@ -345,14 +353,74 @@ function strokedBodyAtWidth(s, P, enableThird, widthPx, centerline) {
   return outline;
 }
 
-// The one primitive every body, shadow footprint and mask component is built
-// from: this strand's centerline stroked at `widthPx` and cleaned. In a single
-// render the SAME (strand, width) outline is asked for repeatedly — drawStrand
-// wants the body at w+2sw, the shadow caster core wants the same width, the
-// shadow receiver geometry wants it again, and a mask component often wants it
-// once more. Each build resamples the centerline at ~1px and then runs
-// resolveCrossings over a few hundred segments, so the duplicates were the bulk
-// of the remaining cost. Memoized per render (see the geometry memo above), which
+// The RAW stroked band: this strand's centerline offset by +/- half `widthPx`,
+// with its self-overlaps left in place. This is Qt's
+// QPainterPathStroker.createStroke() output, and it is what the PAINTED body is
+// built from — see windingFillLayer for why the cleaned bodyOutline below must
+// not be used there. Memoized per render like bodyOutline (same paint, same
+// band, asked for once per body layer).
+function bodyBand(s, P, enableThird, widthPx, centerline) {
+  return cachedGeom(`band|${s.layer_name}|${widthPx}`, () => {
+    const cl = centerline || buildCenterline(s, P, enableThird);
+    const outline = strokedOutline(cl, widthPx);
+    if (!centerline) cl.remove();
+    return outline;
+  });
+}
+
+// Paint one body layer the way Qt paints it: ONE QPainterPath with
+// Qt.WindingFill holding the stroked band plus every cap sub-path (strand.py
+// :2515/:2600 set the fill rule, :2604-2680 addPath() the caps), filled in a
+// single drawPath. A paper CompoundPath with fillRule 'nonzero' is that path —
+// paper's CompoundPath#_draw emits every child into one ctx.beginPath() and
+// issues one ctx.fill(fillRule).
+//
+// It is deliberately NOT built with resolveCrossings()/unite(). Both are
+// boolean operations, and OSS itself abandoned QPainterPath.united() here for
+// exactly this reason (strand.py:1704-1709: "Components are appended with
+// WindingFill instead of combined with QPainterPath.united(). Qt's Boolean
+// union can discard the body"). paper.js's resolveCrossings() has the same
+// failure on the self-overlapping band a tightly curved centerline produces: it
+// silently returns a fraction of the region (measured at ~23% of the band's
+// area on mxn_lh_1x1's 1_1 and ~35% on three_strand_braid's 3_3 during a
+// control-point drag). When it eats the FILL layer the strand paints as a solid
+// stroke-coloured silhouette — the black-band bug; when it eats the STROKE layer
+// the outline disappears under the fill.
+//
+// Every piece here is additive (band, cap circles, half-circles, side rects,
+// end quads — no holes), so each sub-path is forced clockwise first: under the
+// nonzero rule two overlapping sub-paths of OPPOSITE orientation would cancel to
+// a hole, where Qt's stroker and ellipse builders hand it consistently wound
+// sub-paths. Same orientation => the composite is exactly their union.
+function windingFillLayer(pieces, color) {
+  const children = [];
+  for (const item of pieces) {
+    if (!item) continue;
+    // A boolean result (the half-circle caps) can be a CompoundPath; paper's
+    // CompoundPath#insertChildren splices those apart for us, so hand it over
+    // whole and let it flatten.
+    if (item.children && !item.children.length) { item.remove(); continue; }
+    if (!item.children && !(item.segments && item.segments.length)) { item.remove(); continue; }
+    children.push(item);
+  }
+  if (!children.length) return null;
+  const cp = new paper.CompoundPath({ children, fillRule: 'nonzero' });
+  for (const ch of cp.children) ch.setClockwise(true);
+  cp.fillColor = color;
+  cp.strokeColor = null;
+  return cp;
+}
+
+// The one primitive every SHADOW footprint and MASK component is built from:
+// this strand's centerline stroked at `widthPx` and cleaned into a simple
+// boundary. Those consumers feed the result straight into intersect()/subtract()
+// and need a non-self-intersecting input; the painted body does not go through
+// here (see bodyBand / windingFillLayer above). In a single render the SAME
+// (strand, width) outline is asked for repeatedly — the shadow caster core wants
+// the body at w+2sw, the shadow receiver geometry wants it again, and a mask
+// component often wants it once more. Each build resamples the centerline at
+// ~1px and then runs resolveCrossings over a few hundred segments, so the
+// duplicates were the bulk of the remaining cost. Memoized per render (see the geometry memo above), which
 // hands back an owned clone, so every caller keeps its existing contract.
 function bodyOutline(s, P, enableThird, widthPx, centerline) {
   return cachedGeom(`body|${s.layer_name}|${widthPx}`,
@@ -587,23 +655,6 @@ function collectSideLines(s, centerline, P, S) {
     out.push(bar({ x: c.x + shift * Math.cos(a), y: c.y + shift * Math.sin(a) }, a));
   }
   return out;
-}
-
-// Build the two filled body layers for a strand at scale S (no caps): the outer
-// (stroke-color) layer at width+2*stroke and the inner (fill-color) layer at
-// width. Returns {stroke, fill} paper paths (uncolored) or null.
-function bodyLayers(s, P, enableThird, S, centerline) {
-  const cl = centerline || buildCenterline(s, P, enableThird);
-  const w = s.width || 0, sw = s.stroke_width || 0;
-  const stroke = bodyOutline(s, P, enableThird, (w + 2 * sw) * S, cl);
-  const fill = bodyOutline(s, P, enableThird, w * S, cl);
-  if (!centerline) cl.remove();
-  if (!stroke || !fill) {
-    stroke && stroke.remove();
-    fill && fill.remove();
-    return null;
-  }
-  return { stroke, fill };
 }
 
 // ---- shadow geometry (PIXEL space) -----------------------------------------
@@ -1488,34 +1539,28 @@ function drawArrows(s, P, enableThird, S) {
 function drawStrand(s, strands, P, enableThird, S) {
   drawHighlight(s, strands, P, enableThird, S);   // under the body
   const centerline = buildCenterline(s, P, enableThird);
-  const layers = bodyLayers(s, P, enableThird, S, centerline);
-  if (!layers) { centerline.remove(); return; }
-  let strokePath = layers.stroke, fillPath = layers.fill;
+  const w = s.width || 0, sw = s.stroke_width || 0;
+  // Qt strokes the body TWICE — once at width+2*stroke for the stroke layer and
+  // once at width for the fill layer — and adds each layer's caps to that layer's
+  // own WindingFill path (strand.py:2510-2600).
+  const band = bodyBand(s, P, enableThird, (w + 2 * sw) * S, centerline);
+  const inner = bodyBand(s, P, enableThird, w * S, centerline);
+  if (!band || !inner) {
+    band && band.remove();
+    inner && inner.remove();
+    centerline.remove();
+    return;
+  }
 
   const caps = collectCaps(s, strands, centerline, P, S);
   const sideLines = collectSideLines(s, centerline, P, S);
   centerline.remove();
 
-  for (const shp of caps.stroke) {
-    const u = strokePath.unite(shp);
-    strokePath.remove();
-    shp.remove();
-    strokePath = u;
-  }
-  for (const shp of caps.fill) {
-    const u = fillPath.unite(shp);
-    fillPath.remove();
-    shp.remove();
-    fillPath = u;
-  }
-
-  strokePath.fillColor = toColor(s.stroke_color);
-  strokePath.strokeColor = null;
-  fillPath.fillColor = toColor(s.color);
-  fillPath.strokeColor = null;
+  const strokePath = windingFillLayer([band, ...caps.stroke], toColor(s.stroke_color));
+  const fillPath = windingFillLayer([inner, ...caps.fill], toColor(s.color));
 
   // Paint stroke layer, then fill layer, then side bars (top), in order.
-  new paper.Group([strokePath, fillPath, ...sideLines]);
+  new paper.Group([strokePath, fillPath, ...sideLines].filter(Boolean));
 
   // Extension rays sit above the body and BELOW the arrows, matching OSS's
   // in-draw order (:2779 extensions, then :2818 arrow heads).
@@ -1978,7 +2023,7 @@ function compositeTo(vis, hi, W, H, ss, meta) {
 
 // Render `strands` (flat array) using `meta` into the canvas #c.
 window.renderFixture = function (strands, meta) {
-  if (meta.curve_params) CURVE = meta.curve_params;
+  CURVE = meta.curve_params || CURVE_DEFAULT;
   SAMPLE_STEP = 1; // full-accuracy sampling for the oracle / pointer-up render
   const W = meta.image_width, H = meta.image_height;
   // Match the reference, which renders at `supersample`x then downscales.
@@ -2215,7 +2260,7 @@ function computeDragTopology(strands, meta) {
 // function stays self-contained. Leaves the Paper project active for the caller to
 // read / composite, then remove.
 function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg, topo, persistent) {
-  if (meta.curve_params) CURVE = meta.curve_params;
+  CURVE = meta.curve_params || CURVE_DEFAULT;
   SAMPLE_STEP = DRAG_SAMPLE_STEP; // coarse sampling keeps per-frame stroking cheap
 
   const W = meta.image_width, H = meta.image_height;
@@ -2523,7 +2568,7 @@ window.endPan = function () { dropScene(); };
 // wipes auto entries first and skips user-authored pairs, matching
 // recompute_auto_shadow_overrides.
 window.computeShadowPairAreas = function (strands, meta, pairs) {
-  if (meta.curve_params) CURVE = meta.curve_params;
+  CURVE = meta.curve_params || CURVE_DEFAULT;
   SAMPLE_STEP = 1;
   const ss = meta.supersample || 1;
   const zoom = meta.zoom || 1;
@@ -2531,75 +2576,88 @@ window.computeShadowPairAreas = function (strands, meta, pairs) {
   const hi = document.createElement('canvas');
   hi.setAttribute('hidpi', 'off');
   hi.width = 8; hi.height = 8;
+  // The probe runs on its own throwaway project, which must be handed back on
+  // the way out and the caller's left active again. It is called from inside a
+  // store commit — once per mask-affecting edit — so leaving the project behind
+  // grew paper.projects without bound, and left a project that is NOT the
+  // retained scene active for whatever drew next.
+  const callerProject = paper.project;
   paper.setup(hi);
+  const probeProject = paper.project;
+  try {
+    const ox = meta.x_offset || 0, oy = meta.y_offset || 0;
+    const P = (pt) => new paper.Point(pt.x * S + ox * ss, pt.y * S + oy * ss);
+    const enableThird = resolveEnableThird(strands, meta);
+    BIAS_ENABLED = !!(meta && meta.enable_curvature_bias_control);
+    applyPaintSettings(meta);
 
-  const ox = meta.x_offset || 0, oy = meta.y_offset || 0;
-  const P = (pt) => new paper.Point(pt.x * S + ox * ss, pt.y * S + oy * ss);
-  const enableThird = resolveEnableThird(strands, meta);
-  BIAS_ENABLED = !!(meta && meta.enable_curvature_bias_control);
-  applyPaintSettings(meta);
-
-  const byLayer = {};
-  for (const s of strands) byLayer[s.layer_name] = s;
-  if (Array.isArray(meta.layer_order) && meta.layer_order.length) {
-    const rank = new Map(meta.layer_order.map((name, idx) => [name, idx]));
-    if (strands.every((s) => rank.has(s.layer_name))) {
-      strands = strands.slice().sort((a, b) => rank.get(a.layer_name) - rank.get(b.layer_name));
+    const byLayer = {};
+    for (const s of strands) byLayer[s.layer_name] = s;
+    if (Array.isArray(meta.layer_order) && meta.layer_order.length) {
+      const rank = new Map(meta.layer_order.map((name, idx) => [name, idx]));
+      if (strands.every((s) => rank.has(s.layer_name))) {
+        strands = strands.slice().sort((a, b) => rank.get(a.layer_name) - rank.get(b.layer_name));
+      }
     }
-  }
-  for (const s of strands) {
-    if (s.type === 'MaskedStrand') continue;
-    s.has_circles = computeHasCircles(s, strands);
-  }
-  SHADOW_OVERRIDES = meta.shadow_overrides || {};
-
-  const unit = S * S; // px² per world-unit²
-  const idxOf = (name) => strands.findIndex((s) => s.layer_name === name);
-  const out = [];
-  for (const pr of pairs) {
-    const i = idxOf(pr.casting), j = idxOf(pr.receiving);
-    const res = { casting: pr.casting, receiving: pr.receiving, rawArea: 0, ratio: 0 };
-    out.push(res);
-    if (i < 0 || j < 0 || j >= i) continue;
-    const s = strands[i], o = strands[j];
-    if (s.type === 'MaskedStrand') continue; // candidates are body strands
-
-    const core = buildShadowCasterCore(s, P, enableThird, S);
-    if (!core) continue;
-    // Probe uses the RAW (un-cut) caster footprint — no transparentEndCap cut —
-    // matching OSS auto_shadow.compute_auto_hidden_pairs (auto_shadow.py:190-197),
-    // which calls build_shadow_geometry directly (the cut lives only in
-    // draw_strand_shadow, i.e. the render path in castStrandShadow).
-    const circles = buildShadowCasterCircles(s, P, S);
-    let footprint = core.clone();
-    if (circles) { const u = footprint.unite(circles); footprint.remove(); footprint = u; }
-
-    // RAW overlap: caster footprint ∩ receiver rendered geometry, before any
-    // gating/subtraction (auto_shadow.py "raw" / shader_utils.py:1950-1969).
-    const recvRaw = o.type === 'MaskedStrand'
-      ? buildMaskPath(o, byLayer, P, enableThird, S)
-      : buildShadowReceiverGeom(o, strands, P, enableThird, S);
-    if (recvRaw) {
-      const raw = footprint.intersect(recvRaw);
-      res.rawArea = Math.abs(raw.area || 0) / unit;
-      raw.remove(); recvRaw.remove();
+    for (const s of strands) {
+      if (s.type === 'MaskedStrand') continue;
+      s.has_circles = computeHasCircles(s, strands);
     }
+    SHADOW_OVERRIDES = meta.shadow_overrides || {};
 
-    if (res.rawArea > 0) {
-      const ov = (SHADOW_OVERRIDES[s.layer_name] || {})[o.layer_name] || null;
-      const allowFull = !!(ov && ov.allow_full_shadow);
-      const r = buildPairShadowRegion(
-        s, i, o, j, strands, byLayer, P, enableThird, S, footprint, ov, allowFull, null);
-      const survArea = r.region ? Math.abs(r.region.area || 0) / unit : 0;
-      r.region && r.region.remove();
-      r.recv && r.recv.remove();
-      r.clipBlocker && r.clipBlocker.remove();
-      res.ratio = survArea / res.rawArea;
+    const unit = S * S; // px² per world-unit²
+    const idxOf = (name) => strands.findIndex((s) => s.layer_name === name);
+    const out = [];
+    for (const pr of pairs) {
+      const i = idxOf(pr.casting), j = idxOf(pr.receiving);
+      const res = { casting: pr.casting, receiving: pr.receiving, rawArea: 0, ratio: 0 };
+      out.push(res);
+      if (i < 0 || j < 0 || j >= i) continue;
+      const s = strands[i], o = strands[j];
+      if (s.type === 'MaskedStrand') continue; // candidates are body strands
+
+      const core = buildShadowCasterCore(s, P, enableThird, S);
+      if (!core) continue;
+      // Probe uses the RAW (un-cut) caster footprint — no transparentEndCap cut —
+      // matching OSS auto_shadow.compute_auto_hidden_pairs (auto_shadow.py:190-197),
+      // which calls build_shadow_geometry directly (the cut lives only in
+      // draw_strand_shadow, i.e. the render path in castStrandShadow).
+      const circles = buildShadowCasterCircles(s, P, S);
+      let footprint = core.clone();
+      if (circles) { const u = footprint.unite(circles); footprint.remove(); footprint = u; }
+
+      // RAW overlap: caster footprint ∩ receiver rendered geometry, before any
+      // gating/subtraction (auto_shadow.py "raw" / shader_utils.py:1950-1969).
+      const recvRaw = o.type === 'MaskedStrand'
+        ? buildMaskPath(o, byLayer, P, enableThird, S)
+        : buildShadowReceiverGeom(o, strands, P, enableThird, S);
+      if (recvRaw) {
+        const raw = footprint.intersect(recvRaw);
+        res.rawArea = Math.abs(raw.area || 0) / unit;
+        raw.remove(); recvRaw.remove();
     }
 
-    footprint.remove(); core.remove(); circles && circles.remove();
+      if (res.rawArea > 0) {
+        const ov = (SHADOW_OVERRIDES[s.layer_name] || {})[o.layer_name] || null;
+        const allowFull = !!(ov && ov.allow_full_shadow);
+        const r = buildPairShadowRegion(
+          s, i, o, j, strands, byLayer, P, enableThird, S, footprint, ov, allowFull, null);
+        const survArea = r.region ? Math.abs(r.region.area || 0) / unit : 0;
+        r.region && r.region.remove();
+        r.recv && r.recv.remove();
+        r.clipBlocker && r.clipBlocker.remove();
+        res.ratio = survArea / res.rawArea;
+      }
+
+      footprint.remove(); core.remove(); circles && circles.remove();
+    }
+    return out;
+  } finally {
+    probeProject.remove();
+    // activate() on a project torn down by a concurrent render would throw, and
+    // the probe's answer must not be lost to bookkeeping.
+    try { if (callerProject && callerProject !== probeProject) callerProject.activate(); } catch { /* gone */ }
   }
-  return out;
 };
 
 // Extract the flat strands array from a fixture file (handles the

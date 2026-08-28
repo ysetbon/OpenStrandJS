@@ -96,6 +96,16 @@ jobs:
       - name: Guards — Tier 5 shadow-path preview overlay
         run: node tools/tier5_check.mjs
 
+      # Body paint. Qt fills each body layer as ONE WindingFill path (band plus
+      # caps) rather than a boolean union — OSS moved off QPainterPath.united()
+      # because "Qt's Boolean union can discard the body". paper.js's
+      # resolveCrossings() fails the same way on a tightly curved strand, which
+      # painted the body as a bare stroke-coloured silhouette mid-drag. Also
+      # asserts every render entry point derives its paint state from its own
+      # meta, so the same document can't render two ways.
+      - name: Guards — winding-fill body paint, per-render paint state
+        run: node tools/body_paint_check.mjs
+
       # Control-column zoom buttons: OSS's 10%-of-current step, the [0.1, 5]
       # range the wheel shares, the viewport-centre anchor, and that a press
       # reaches the canvas. Fails outright if the buttons go inert again.
