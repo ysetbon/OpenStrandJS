@@ -256,6 +256,43 @@ try {
       out.geomCacheOpenAfterRender = window.__geomCacheOpen();
     }
 
+    // ---- 7: repeated pan gestures retain exactly ONE scene ----
+    // renderFixture used to remove its paper project on the way out; it now keeps it
+    // as the scene a pan reuses, and frees the previous one on the next render
+    // instead. That swap is only safe if the count stays flat — a retained project
+    // owns an offscreen canvas the size of the viewport, so leaking one per gesture
+    // would be megabytes a gesture. Six gestures, with a settings edit between them
+    // so each one is forced to build a fresh scene rather than reuse the last.
+    {
+      await reset();
+      const el = document.getElementById('c');
+      const rect = el.getBoundingClientRect();
+      // Right-button drag: InteractionHost treats button 2 as a pan in every mode.
+      const panEv = (type, x, y) => new PointerEvent(type, {
+        pointerId: 1, pointerType: 'mouse', isPrimary: true, bubbles: true, cancelable: true,
+        clientX: x, clientY: y,
+        button: type === 'pointermove' ? -1 : 2,
+        buttons: type === 'pointerup' ? 0 : 2,
+      });
+      const nProjects = () => (window.paper ? window.paper.projects.length : -1);
+      const nCanvases = () => document.getElementsByTagName('canvas').length;
+      const beforeP = nProjects(), beforeC = nCanvases();
+      for (let g = 0; g < 6; g++) {
+        const x0 = rect.left + rect.width * 0.4, y0 = rect.top + rect.height * 0.5;
+        el.dispatchEvent(panEv('pointerdown', x0, y0));
+        for (let i = 1; i <= 20; i++) {
+          el.dispatchEvent(panEv('pointermove', x0 + i * 7, y0 + i * 4));
+          await nextFrame();
+        }
+        el.dispatchEvent(panEv('pointerup', x0 + 140, y0 + 80));
+        await nextFrame();
+        store.getState().setSettings({ show_grid: g % 2 === 0 }); // forces a fresh scene
+        await settle(6);
+      }
+      out.panProjectGrowth = nProjects() - beforeP;
+      out.panCanvasGrowth = nCanvases() - beforeC;
+    }
+
     return out;
   }, { project });
 
@@ -289,6 +326,10 @@ check('6. a drag frame allocates no new canvas', result.canvasGrowthDuringDrag =
   `${result.canvasGrowthDuringDrag} canvases added across 50 moves`);
 check('6. a drag frame allocates no new paper project', result.projectGrowthDuringDrag <= 1,
   `${result.projectGrowthDuringDrag} projects added across 50 moves`);
+check('7. repeated pan gestures retain exactly one scene', result.panProjectGrowth === 0,
+  `${result.panProjectGrowth} paper projects added across 6 pan gestures`);
+check('7. repeated pan gestures allocate no new canvas', result.panCanvasGrowth === 0,
+  `${result.panCanvasGrowth} canvases added across 6 pan gestures`);
 
 console.log('\ndrag/release performance guards\n');
 for (const line of ok) console.log(`  ok    ${line.split(' — ')[0]}`);

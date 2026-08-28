@@ -6,7 +6,7 @@
 import { useEditorStore } from '../store/editorStore';
 import { screenToWorld, worldToScreen } from './viewTransform';
 import {
-  cancelFrameTask, flushFrameTask, requestFrameTask, requestOverlay, requestRender, setPanGesture,
+  cancelFrameTask, flushFrameTask, releaseScene, requestFrameTask, requestOverlay, requestRender,
 } from '../renderer/renderScheduler';
 import { modes } from '../modes';
 import { SelectMode } from '../modes/SelectMode';
@@ -62,30 +62,29 @@ export class InteractionHost {
     });
   }
 
-  // Close a pan gesture: clear the local flag, free the snapshot the fast path was
-  // blitting from, and repaint once at full quality.
+  // Close a pan gesture. Just clear the flag: nothing has to be told that a pan
+  // ended.
   //
-  // The release render is what keeps the RESTING image canonical. Chromium's 2D
-  // rasterizer is not canvas-size invariant (proven in tools/pan_identity.mjs: the
-  // same geometry drawn into a wider canvas and cropped differs by a small number
-  // of pixels), so a frame served by cropping the oversized snapshot is very
-  // slightly not the frame a direct render produces. That is fine while the image
-  // is moving and nothing to leave on screen afterwards. It costs one full render
-  // per gesture — which is exactly what ONE of the ~60 frames of a pan cost before
-  // this path existed, so it is cost-neutral against the old behaviour rather than
-  // a new stall.
+  // No release render. Every frame of the gesture, the last one included, is the
+  // resting render TRANSLATED — real geometry under a real transform, not a
+  // reduced-quality stand-in (tools/pan_fidelity.mjs asserts exactly that, and
+  // web/strand-renderer.js's pan header says what it does and does not claim). So
+  // there is nothing to restore, and repainting would only buy a stall — measured
+  // ~770ms on three_strand_braid. Nor is there a snapshot to free: the renderer
+  // keeps its scene keyed, so the next pan starts from it instead of rebuilding,
+  // and any edit invalidates it by key.
   private endPanGesture(): void {
     this.panning = false;
-    setPanGesture(false);
-    requestRender();
   }
 
   detach(): void {
     this.unsubscribeMode();
     this.cancelPendingMove();
-    // Free the snapshot, but do NOT go through endPanGesture: its release render
-    // would be scheduled against a canvas that is being torn down.
-    if (this.panning) { this.panning = false; setPanGesture(false); }
+    this.panning = false;
+    // Hand back the renderer's retained scene (a paper project + an offscreen
+    // canvas). Not needed for correctness — the scene is keyed — but this canvas is
+    // going away, so there is nothing left to reuse it.
+    releaseScene();
     const el = this.el;
     el.removeEventListener('pointerdown', this.onPointerDown);
     el.removeEventListener('pointermove', this.onPointerMove);
@@ -144,8 +143,6 @@ export class InteractionHost {
       this.panning = true;
       this.panStart = this.toScreen(e);
       this.panOrigin = { x: view.panX, y: view.panY };
-      // Arms the renderer's pan fast path for the duration of the gesture.
-      setPanGesture(true);
       return;
     }
     if (e.button !== 0) return;
