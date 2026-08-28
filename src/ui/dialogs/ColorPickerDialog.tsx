@@ -139,13 +139,20 @@ export function ColorPickerDialog(props: {
     };
     move(e.clientX, e.clientY);
     const onMove = (ev: PointerEvent) => move(ev.clientX, ev.clientY);
-    const onUp = (ev: PointerEvent) => {
-      el.releasePointerCapture(ev.pointerId);
+    // pointercancel ends a drag without a pointerup (the browser takes the
+    // pointer over — a touch turning into a scroll, say). Ending on pointerup
+    // alone left this move listener attached to the strip for the life of the
+    // dialog, and it closes over the hsv of the render that started the drag —
+    // so a later drag on the same strip would also replay that stale state.
+    const onEnd = (ev: PointerEvent) => {
+      if (el.hasPointerCapture(ev.pointerId)) el.releasePointerCapture(ev.pointerId);
       el.removeEventListener('pointermove', onMove);
-      el.removeEventListener('pointerup', onUp);
+      el.removeEventListener('pointerup', onEnd);
+      el.removeEventListener('pointercancel', onEnd);
     };
     el.addEventListener('pointermove', onMove);
-    el.addEventListener('pointerup', onUp);
+    el.addEventListener('pointerup', onEnd);
+    el.addEventListener('pointercancel', onEnd);
   };
 
   const onSvDrag = dragOn(svRef, (fx, fy) =>
