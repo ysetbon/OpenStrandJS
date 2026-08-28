@@ -65,6 +65,8 @@ function hsvToRgb(hsv: HSV, a: number): RGBA {
 }
 
 const cssOf = (c: RGBA) => `rgba(${c.r}, ${c.g}, ${c.b}, ${clamp(c.a, 0, 255) / 255})`;
+// Alpha backing for the preview swatch; the chosen colour is layered on top of it.
+const CHECKER = 'repeating-conic-gradient(#bbb 0% 25%, #fff 0% 50%)';
 
 /* ---- Qt's 48 standard colours (QColorDialog::standardColor, 6 rows x 8 cols) ----
  * Qt builds them as qRgb(r*255/3, g*255/3, b*255/2) over g -> r -> b, and lays them
@@ -283,10 +285,14 @@ export function ColorPickerDialog(props: {
           </div>
 
           <div className="cpd-preview-row">
-            {/* backgroundColor, not the `background` shorthand: the shorthand would
-                reset the checkerboard background-image the swatch is layered on, so a
-                transparent colour would blend into the modal instead of showing it. */}
-            <span className="cpd-preview" style={{ backgroundColor: cssOf(color) }} />
+            {/* Two background LAYERS, the colour above the checkerboard — the same
+                idiom the settings swatch uses. background-color cannot do this: it
+                paints UNDER background-image, so the checkerboard hid the colour
+                entirely. */}
+            <span
+              className="cpd-preview"
+              style={{ backgroundImage: `linear-gradient(${cssOf(color)}, ${cssOf(color)}), ${CHECKER}` }}
+            />
             <label className="cpd-html">
               <span>HTML</span>
               <input
