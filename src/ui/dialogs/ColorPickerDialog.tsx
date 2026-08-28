@@ -65,6 +65,8 @@ function hsvToRgb(hsv: HSV, a: number): RGBA {
 }
 
 const cssOf = (c: RGBA) => `rgba(${c.r}, ${c.g}, ${c.b}, ${clamp(c.a, 0, 255) / 255})`;
+// Alpha backing for the preview swatch; the chosen colour is layered on top of it.
+const CHECKER = 'repeating-conic-gradient(#bbb 0% 25%, #fff 0% 50%)';
 
 /* ---- Qt's 48 standard colours (QColorDialog::standardColor, 6 rows x 8 cols) ----
  * Qt builds them as qRgb(r*255/3, g*255/3, b*255/2) over g -> r -> b, and lays them
@@ -139,13 +141,20 @@ export function ColorPickerDialog(props: {
     };
     move(e.clientX, e.clientY);
     const onMove = (ev: PointerEvent) => move(ev.clientX, ev.clientY);
-    const onUp = (ev: PointerEvent) => {
-      el.releasePointerCapture(ev.pointerId);
+    // pointercancel ends a drag without a pointerup (the browser takes the
+    // pointer over — a touch turning into a scroll, say). Ending on pointerup
+    // alone left this move listener attached to the strip for the life of the
+    // dialog, and it closes over the hsv of the render that started the drag —
+    // so a later drag on the same strip would also replay that stale state.
+    const onEnd = (ev: PointerEvent) => {
+      if (el.hasPointerCapture(ev.pointerId)) el.releasePointerCapture(ev.pointerId);
       el.removeEventListener('pointermove', onMove);
-      el.removeEventListener('pointerup', onUp);
+      el.removeEventListener('pointerup', onEnd);
+      el.removeEventListener('pointercancel', onEnd);
     };
     el.addEventListener('pointermove', onMove);
-    el.addEventListener('pointerup', onUp);
+    el.addEventListener('pointerup', onEnd);
+    el.addEventListener('pointercancel', onEnd);
   };
 
   const onSvDrag = dragOn(svRef, (fx, fy) =>
@@ -276,10 +285,14 @@ export function ColorPickerDialog(props: {
           </div>
 
           <div className="cpd-preview-row">
-            {/* backgroundColor, not the `background` shorthand: the shorthand would
-                reset the checkerboard background-image the swatch is layered on, so a
-                transparent colour would blend into the modal instead of showing it. */}
-            <span className="cpd-preview" style={{ backgroundColor: cssOf(color) }} />
+            {/* Two background LAYERS, the colour above the checkerboard — the same
+                idiom the settings swatch uses. background-color cannot do this: it
+                paints UNDER background-image, so the checkerboard hid the colour
+                entirely. */}
+            <span
+              className="cpd-preview"
+              style={{ backgroundImage: `linear-gradient(${cssOf(color)}, ${cssOf(color)}), ${CHECKER}` }}
+            />
             <label className="cpd-html">
               <span>HTML</span>
               <input

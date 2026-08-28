@@ -130,7 +130,9 @@
   width: 60px;
   height: 26px;
   border: 1px solid rgba(0, 0, 0, 0.35);
-  /* the swatch is painted with an alpha colour, so back it with the checkerboard */
+  /* Checkerboard backing. The component overrides background-image with the chosen
+   * colour LAYERED over this one — a background-color would be painted underneath
+   * the checkerboard and never seen. */
   background-image: repeating-conic-gradient(#bbb 0% 25%, #fff 0% 50%);
   background-size: 10px 10px;
 }

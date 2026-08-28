@@ -451,14 +451,14 @@
 }
 
 /* Colour well that opens the modal colour dialog (arrow colour). Sized like the
- * native well it replaces, with a checkerboard so alpha reads as alpha. */
+ * native well it replaces. Opaque, as OSS paints that button with QColor.name():
+ * the arrow's transparency lives on its own slider, so there is no alpha to show
+ * and no checkerboard to hide the colour behind. */
 .gd-row > button.gd-color-well {
   width: 54px;
   height: 24px;
   padding: 0;
   border: 1px solid rgba(0, 0, 0, 0.35);
   border-radius: 3px;
-  background-image: repeating-conic-gradient(#bbb 0% 25%, #fff 0% 50%);
-  background-size: 10px 10px;
   cursor: pointer;
 }
