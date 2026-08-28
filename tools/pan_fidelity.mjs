@@ -164,26 +164,21 @@ try {
     // establish a 5x ratio, so they are sampled — a misalignment lights up every
     // edge in the frame, not one row in eight.
     window.__shifted = (a, b, dx, dy, stride = 1) => {
-      if (a.w !== b.w || a.h !== b.h) return { bad: -1, worst: 255, total: 1, signal: 0 };
-      let bad = 0, worst = 0, n = 0, signal = 0;
+      if (a.w !== b.w || a.h !== b.h) return { bad: -1, worst: 255, total: 1 };
+      let bad = 0, worst = 0, n = 0;
       const x0 = Math.max(0, dx), x1 = Math.min(a.w, a.w + dx);
       const y0 = Math.max(0, dy), y1 = Math.min(a.h, a.h + dy);
-      // `signal` counts channels in the SOURCE region that differ from its first
-      // pixel. A region of flat background has none, and then no alignment can be
-      // told from any other — see the featureless note where this is used.
-      const s0 = ((y0 - dy) * a.w + (x0 - dx)) * 4;
       for (let y = y0; y < y1; y += stride) {
         for (let x = x0; x < x1; x++) {
           const bi = (y * a.w + x) * 4, ai = ((y - dy) * a.w + (x - dx)) * 4;
           for (let k = 0; k < 4; k++) {
             const t = Math.abs(a.d[ai + k] - b.d[bi + k]);
             if (t) { bad++; if (t > worst) worst = t; }
-            if (a.d[ai + k] !== a.d[s0 + k]) signal++;
           }
           n += 4;
         }
       }
-      return { bad, worst, total: n, signal };
+      return { bad, worst, total: n };
     };
   });
 
@@ -217,14 +212,13 @@ try {
         const align = (a, b, dx, dy) => {
           const at = window.__shifted(a, b, dx, dy);
           // Neighbours are sampled, so the claimed delta is scored at the SAME
-          // sampling before the ratio is taken — and the featureless test reads the
-          // sampled signal too, since it is the sampled rows that have to contain
-          // something for a neighbouring alignment to be distinguishable at all.
+          // sampling before the two are compared — otherwise the ratio is a
+          // sampling artefact rather than a fact about the frame.
           const mine = window.__shifted(a, b, dx, dy, NEAR_STRIDE);
           const near = [[1, 0], [-1, 0], [0, 1], [0, -1]]
             .map(([ex, ey]) => window.__shifted(a, b, dx + ex, dy + ey, NEAR_STRIDE))
             .reduce((m, r) => (r.bad >= 0 && (m < 0 || r.bad < m) ? r.bad : m), -1);
-          return { ...at, near, atSampled: mine.bad, signalSampled: mine.signal };
+          return { ...at, near, atSampled: mine.bad };
         };
 
         // registration, one fresh scene per delta.
@@ -241,6 +235,18 @@ try {
         for (const [dx, dy] of gesture) {
           if (!pan(dx, dy, 'gest')) { out.gesture.push({ dx, dy, refused: true }); continue; }
           out.gesture.push({ dx, dy, ...align(gAnchor, window.__shoot(), dx, dy) });
+        }
+
+        // CONTROL. A test that cannot fail proves nothing, and the first cut of this
+        // one could not: it was calibrated on three fixtures and passed everything.
+        // So score the SAME pan frame against a deliberately wrong delta and record
+        // it — the judge below asserts that this is rejected. If an off-by-one stops
+        // being caught, this goes red while the real cases stay green.
+        window.renderFixture(strands, { ...meta, scene_key: 'ctl' });
+        const ctlAnchor = window.__shoot();
+        if (pan(37, 24, 'ctl')) {
+          const got = window.__shoot();
+          out.control = { claimed: align(ctlAnchor, got, 37, 24), wrong: align(ctlAnchor, got, 38, 24) };
         }
 
         // refusals.
@@ -266,6 +272,28 @@ try {
       }, { strands, meta, deltas: DELTAS, gesture: GESTURE });
 
       const tag = `${name} @z${zoom}`;
+      // The claimed delta must be the best alignment by this factor. Deliberately
+      // modest: what makes this test sharp is that it is an ARGMIN over the
+      // neighbours, not the size of the gap. An off-by-one puts the true delta one
+      // step away scoring ~0, so it loses the argmin outright.
+      const MARGIN = 2;
+      // …but only where a one-pixel shift changes anything to begin with. Whether an
+      // alignment is distinguishable is a matter of EDGE density, not of how much
+      // colour the region contains: a patch of flat strand body has plenty of both
+      // colour and area, and still reads identically shifted by a pixel.
+      //
+      // The test for that is that BOTH scores are tiny. Reading it off the
+      // neighbours alone is the mistake the control below caught: a frame that IS
+      // misaligned by one pixel has the true delta sitting among its neighbours,
+      // scoring ~0 — so a neighbours-only floor would call the one case this exists
+      // to catch "indistinguishable" and wave it through.
+      const NEAR_FLOOR = 50;
+      // The judge, as one predicate, so the control tests the same rule the cases
+      // are judged by rather than a restatement of it that can drift.
+      const verdict = (r) => {
+        if (Math.max(r.atSampled, r.near) < NEAR_FLOOR) return 'flat';
+        return r.atSampled * MARGIN <= r.near ? 'ok' : 'fail';
+      };
       // anchor and determinism ARE bit-exact: at delta 0 the matrix is identity, and
       // the same frame twice is the same frame. Nothing is allowed to move there.
       const exact = (label, r) => {
@@ -285,12 +313,6 @@ try {
       const RESIDUAL_FLOOR = 500;   // …but never fail on a handful of channels: a
                                     // large delta leaves a small overlap, where a
                                     // dozen edge pixels is already a big ratio
-      const MARGIN = 5;             // neighbours must be at least this much worse
-      // Below this many non-background channels in the SAMPLED rows, those rows are
-      // flat: every alignment matches them equally well, so the margin test has
-      // nothing to measure. The residual check still applies over the full region (a
-      // frame that drew the WRONG thing there would fail it).
-      const MIN_SIGNAL = 2000;
       const aligned = (label, r) => {
         if (r.total > 0 && r.bad > 0) {
           const sh = r.bad / r.total;
@@ -305,14 +327,16 @@ try {
             + ` (${(100 * share).toFixed(4)}%, max ${(100 * RESIDUAL).toFixed(4)}%), worst delta ${r.worst}`);
           return;
         }
-        if (r.signalSampled < MIN_SIGNAL) {
-          rows.push(`  flat     ${tag} ${label} — sampled rows are featureless`
-            + ` (signal ${r.signalSampled}); residual checked, alignment not distinguishable`);
-          return;
-        }
         // A delta of 0 has no distinguishable neighbours to beat (the image is the
         // anchor itself, and `exact` already pinned it), so only judge real moves.
-        if ((r.dx || r.dy) && !(r.near > Math.max(r.atSampled, 1) * MARGIN)) {
+        if (!(r.dx || r.dy)) return;
+        const v = verdict(r);
+        if (v === 'flat') {
+          rows.push(`  flat     ${tag} ${label} — a one-pixel shift changes almost nothing`
+            + ` here (${r.atSampled} vs ${r.near}); residual checked, alignment not distinguishable`);
+          return;
+        }
+        if (v === 'fail') {
           failures++;
           rows.push(`  MISALIGNED ${tag} ${label} — sampled residual ${r.atSampled} but a`
             + ` neighbouring alignment scores ${r.near}; the frame is not shifted by this delta`);
@@ -320,6 +344,17 @@ try {
       };
       exact('anchor', res.anchor);
       exact('determinism', res.determinism);
+      // The control: claiming d+1 for a frame panned by d must NOT pass the argmin.
+      if (res.control) {
+        cases++;
+        const c = res.control;
+        if (verdict(c.wrong) !== 'fail' || verdict(c.claimed) === 'fail') {
+          failures++;
+          rows.push(`  BLUNT    ${tag} control — the alignment test does not separate d from d+1`
+            + ` (claimed ${c.claimed.atSampled} vs near ${c.claimed.near};`
+            + ` wrong ${c.wrong.atSampled} vs near ${c.wrong.near})`);
+        }
+      }
       for (const f of res.frames) aligned(`registration d=(${f.dx},${f.dy})`, f);
       for (const f of res.gesture) aligned(`gesture d=(${f.dx},${f.dy})`, f);
       for (const [k, ok] of Object.entries(res.refuse)) {
@@ -353,6 +388,8 @@ if (failures) {
   process.exit(1);
 }
 console.log(`\nworst registration residual: ${worstResidual.bad}/${worstResidual.total} channels`
-  + ` (${(100 * worstResidual.share).toFixed(4)}%, budget ${(100 * 0.3 / 100).toFixed(2)}%) at ${worstResidual.at}`);
+  + ` (${(100 * worstResidual.share).toFixed(4)}%) at ${worstResidual.at}`);
+console.log('  (gated at 0.30% of channels, but never on fewer than 500 of them — a large');
+console.log('   delta leaves a small overlap, where a dozen edge pixels is already a big share)');
 console.log(`\n${cases}/${cases} ok`);
 console.log('PASS: every pan frame is the anchor render translated by exactly its delta.');
