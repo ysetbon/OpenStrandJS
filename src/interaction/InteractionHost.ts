@@ -4,7 +4,7 @@
 // triggers a React re-render directly.
 
 import { useEditorStore } from '../store/editorStore';
-import { screenToWorld, worldToScreen } from './viewTransform';
+import { screenToWorld, worldToScreen, zoomAbout } from './viewTransform';
 import {
   cancelFrameTask, flushFrameTask, releaseScene, requestFrameTask, requestOverlay, requestRender,
 } from '../renderer/renderScheduler';
@@ -262,17 +262,15 @@ export class InteractionHost {
     this.mode().onCancel?.(this.ctx());
   };
 
+  /**
+   * Wheel zoom: about the cursor, over the same OSS [0.1, 5] range the zoom
+   * buttons use — the cursor is the anchor here, the viewport centre there.
+   */
   private onWheel = (e: WheelEvent) => {
-    // Wheel zooms about the cursor, clamped to [0.1, 5]. The world point under the
-    // pointer stays fixed: screen = world*zoom + pan  =>  pan = screen - world*zoom.
     e.preventDefault();
     const st = useEditorStore.getState();
-    const view = st.view;
-    const screen = this.toScreen(e);
-    const world = screenToWorld(screen, view);
     const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-    const zoom = Math.max(0.1, Math.min(5, view.zoom * factor));
-    st.setView({ zoom, panX: screen.x - world.x * zoom, panY: screen.y - world.y * zoom });
+    st.setView(zoomAbout(st.view, st.view.zoom * factor, this.toScreen(e)));
   };
 
   private onContextMenu = (e: MouseEvent) => { e.preventDefault(); };
