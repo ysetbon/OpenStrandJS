@@ -17,7 +17,9 @@
 }
 
 /* Create Group button: fixed 140x50, 14px bold like every other OSS button,
- * in a row with 2px vertical margins (group_button_layout). */
+ * in a row with 2px vertical margins (group_button_layout). Only the dark theme
+ * gives it a border (2px solid #000000); default and light say `border: none`,
+ * so the fill has to reach all four edges of the 140x50 box there. */
 .gp-create-btn {
   box-sizing: border-box;
   width: 140px;
@@ -29,7 +31,7 @@
   cursor: pointer;
   background: var(--create-group-bg);
   color: var(--create-group-text);
-  border: 2px solid var(--create-group-border);
+  border: var(--create-group-border-width) solid var(--create-group-border);
   border-radius: var(--create-group-radius);
 }
 

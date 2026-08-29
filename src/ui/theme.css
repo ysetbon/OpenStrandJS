@@ -36,6 +36,7 @@
   --menu-selected-bg: #96938F;
   --menu-selected-text: #FFFFFF;
   --create-group-bg: #96938F;
+  --create-group-border-width: 0px;
   --create-group-hover: #A8A5A1;
   --create-group-pressed: #7E7B77;
   --create-group-text: #FFFFFF;
@@ -97,6 +98,7 @@
   --menu-selected-bg: #333333;
   --menu-selected-text: #FFFFFF;
   --create-group-bg: #A6A19A;
+  --create-group-border-width: 0px;
   --create-group-hover: #B6B1AA;
   --create-group-pressed: #86817A;
   --create-group-text: #000000;
@@ -157,6 +159,7 @@
   --menu-selected-bg: #F0F0F0;
   --menu-selected-text: #000000;
   --create-group-bg: #2A2A2A;
+  --create-group-border-width: 2px;
   --create-group-hover: #505050;
   --create-group-pressed: #606060;
   --create-group-text: #FFFFFF;
