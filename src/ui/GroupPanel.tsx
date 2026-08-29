@@ -5,7 +5,9 @@
 //      MainStrandSelectDialog to pick members, then createGroup().
 //   2. A QTreeWidget-style tree: each group is a bold "▼ name"/"▶ name" row
 //      (click toggles expand); children are one row per unique member main-strand
-//      id (indentation 16, row bg var(--group-bg), hover var(--group-hover-bg)).
+//      id (indentation 16). Rows sit on the panel background and only tint on
+//      hover — var(--group-hover-bg) for a group, var(--group-child-hover-bg)
+//      for a child — matching group_layers.py.
 //   3. A right-click ContextMenu on a group row with the EXACT OSS order:
 //        Move Strands, Rotate Strands, Edit Strand Angles, Edit Shadows,
 //        Create Mask Grid, Duplicate Group, Rename Group, [sep], Delete Group.

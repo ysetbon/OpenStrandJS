@@ -1,28 +1,44 @@
 /* GroupPanel — OSS Groups UI (UI_PORT_PLAN §2.5).
- * Create Group button is theme-driven via the --create-group-* tokens.
- * Tree rows use --group-bg / --group-hover-bg. QTreeWidget: indentation 16,
- * no native triangles, item padding 2px 4px 2px 14px (LTR). */
+ * Create Group button is theme-driven via the --create-group-* tokens; it is
+ * 140x50, 14px bold, and has the hover/pressed fills main_window.py gives it.
+ * Tree rows are NOT filled: group_layers.py paints them with the panel/tree
+ * background and only tints them on hover (--group-hover-bg for a group row,
+ * --group-child-hover-bg for a child). QTreeWidget: indentation 16, no native
+ * triangles, item padding 2px 4px 2px 14px (LTR). */
 
 .gp-panel {
   display: flex;
   flex-direction: column;
   min-width: 220px;
-  margin: 0 5px;
+  /* QVBoxLayout contentsMargins(0, 5, 0, 5) — vertical, not horizontal. */
+  margin: 5px 0;
   gap: 4px;
+  background: var(--panel-bg);
 }
 
-/* Create Group button: fixed 140x50. */
+/* Create Group button: fixed 140x50, 14px bold like every other OSS button,
+ * in a row with 2px vertical margins (group_button_layout). */
 .gp-create-btn {
+  box-sizing: border-box;
   width: 140px;
   height: 50px;
   align-self: flex-start;
-  margin: 4px 0;
-  font-size: 20px;
+  margin: 2px 0;
+  font-size: 14px;
+  font-weight: bold;
   cursor: pointer;
   background: var(--create-group-bg);
   color: var(--create-group-text);
   border: 2px solid var(--create-group-border);
   border-radius: var(--create-group-radius);
+}
+
+.gp-create-btn:hover {
+  background: var(--create-group-hover);
+}
+
+.gp-create-btn:active {
+  background: var(--create-group-pressed);
 }
 
 .gp-tree {
@@ -49,7 +65,6 @@
   font-weight: bold;
   cursor: pointer;
   user-select: none;
-  background: var(--group-bg);
   color: var(--text);
 }
 
@@ -75,7 +90,6 @@
 /* Child = one member main-strand id; indentation 16. */
 .gp-child-row {
   padding: 2px 4px 2px 30px; /* 14 base + 16 indentation */
-  background: var(--group-bg);
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
@@ -84,7 +98,7 @@
 }
 
 .gp-child-row:hover {
-  background: var(--group-hover-bg);
+  background: var(--group-child-hover-bg);
 }
 
 /* RTL: mirror the QTreeWidget indentation. */
