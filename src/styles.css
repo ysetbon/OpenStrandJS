@@ -79,8 +79,11 @@ body {
   display: flex; flex-direction: column; overflow: hidden;
 }
 /* Right sub-column: fixed 270px group panel. */
+/* right_panel.setFixedWidth(GROUP_PANEL_FULL_WIDTH = 270): the 270 is the
+ * column itself, with the splitter handle beside it — so the 1px hairline
+ * standing in for that handle goes on top of the 270, not inside it. */
 .lp-right {
-  flex: 0 0 270px; min-width: 270px;
+  flex: 0 0 271px; min-width: 271px;
   display: flex; flex-direction: column; overflow: hidden;
   border-inline-start: 1px solid var(--panel-border);
 }
