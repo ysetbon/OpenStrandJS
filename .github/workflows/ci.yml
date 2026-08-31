@@ -51,6 +51,12 @@ jobs:
       - name: Guards — colour scopes, arrow + extension data, i18n completeness
         run: node tools/tier4_check.mjs
 
+      # Undo/redo provenance: every history state records what produced it, the
+      # record survives undo/redo in both directions, and the stack still
+      # restores the same documents it always did.
+      - name: Guards — undo/redo state provenance
+        run: node tools/history_meta_check.mjs
+
   build-and-smoke:
     name: Build editor + headless smoke
     runs-on: ubuntu-latest

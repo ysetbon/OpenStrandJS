@@ -182,7 +182,10 @@ export const AttachMode: Mode = {
         : attachChild(draft, d.parent!, d.side!, d.start, end,
           st.settings.default_transparent_start_circle);
     });
-    st.commit();                 // one create = one undo step
+    // one create = one undo step, recorded as the attach-mode action it is
+    st.commit(d.kind === 'new'
+      ? { action: 'attach.new', source: 'mode', targets: newName ? [newName] : [] }
+      : { action: 'attach.child', source: 'mode', targets: newName ? [newName] : [], detail: `on ${d.parent}` });
     if (newName) st.setSelection({ layerName: newName, handle: null });
     ctx.requestRender();
   },

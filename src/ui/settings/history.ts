@@ -6,6 +6,7 @@
 // the most recent KEEP_SESSIONS, prune sessions older than MAX_AGE_MS on startup.
 import type { EditorDocument } from '../../model/types';
 import { useEditorStore } from '../../store/editorStore';
+import { historyLabel, type HistoryMeta } from '../../store/historyMeta';
 
 const DB_NAME = 'openstrandjs-history';
 const STORE = 'snapshots';
@@ -16,8 +17,16 @@ const PER_SESSION_CAP = 60;
 // A fresh id per page load (this run == one "session").
 export const SESSION_ID = `s${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
-interface Snapshot { id?: number; sessionId: string; step: number; ts: number; doc: EditorDocument; }
+// `meta` is the provenance of the snapshotted state — which mode or which
+// panel/dialog action produced it. Snapshots written before this field existed
+// simply have none, and read back as an unlabelled step.
+interface Snapshot {
+  id?: number; sessionId: string; step: number; ts: number;
+  doc: EditorDocument; meta?: HistoryMeta | null;
+}
 export interface SessionInfo { sessionId: string; ts: number; steps: number }
+// One line of a session's recorded activity, for the History page.
+export interface SessionAction { step: number; ts: number; label: string }
 
 function openDb(): Promise<IDBDatabase | null> {
   return new Promise((resolve) => {
@@ -51,7 +60,7 @@ let lastSerialized = '';
 // Append a snapshot of `doc` for the current session (deduped, capped, debounced
 // by the caller). Empty documents are skipped so a session only appears once it
 // has content.
-export async function recordSnapshot(doc: EditorDocument): Promise<void> {
+export async function recordSnapshot(doc: EditorDocument, meta?: HistoryMeta | null): Promise<void> {
   if (!doc || doc.order.length === 0) return;
   const serialized = JSON.stringify(doc);
   if (serialized === lastSerialized) return;
@@ -62,7 +71,10 @@ export async function recordSnapshot(doc: EditorDocument): Promise<void> {
     const t = db.transaction(STORE, 'readwrite');
     const store = t.objectStore(STORE);
     stepCounter += 1;
-    store.add({ sessionId: SESSION_ID, step: stepCounter, ts: Date.now(), doc: JSON.parse(serialized) } as Snapshot);
+    store.add({
+      sessionId: SESSION_ID, step: stepCounter, ts: Date.now(),
+      doc: JSON.parse(serialized), meta: meta ?? null,
+    } as Snapshot);
     // Enforce per-session cap: drop the oldest steps beyond PER_SESSION_CAP.
     const mine = ((await reqProm(store.index('session').getAll(SESSION_ID))) as Snapshot[])
       .sort((a, b) => a.step - b.step);
@@ -98,6 +110,20 @@ export async function getSessionLatestDoc(sessionId: string): Promise<EditorDocu
     rows.sort((a, b) => b.step - a.step);
     return rows[0].doc;
   } catch { return null; } finally { db.close(); }
+}
+
+// The recorded actions of a session, oldest first: what produced each snapshot.
+export async function getSessionActions(sessionId: string): Promise<SessionAction[]> {
+  const db = await openDb();
+  if (!db) return [];
+  try {
+    const rows = ((await reqProm(
+      db.transaction(STORE, 'readonly').objectStore(STORE).index('session').getAll(sessionId),
+    )) as Snapshot[]);
+    return rows
+      .sort((a, b) => a.step - b.step)
+      .map((r) => ({ step: r.step, ts: r.ts, label: historyLabel(r.meta ?? null) }));
+  } catch { return []; } finally { db.close(); }
 }
 
 // Delete every snapshot that is not part of the current session.
@@ -157,7 +183,12 @@ export function startHistoryRecorder(): () => void {
     if (st.docRevision === lastRev) return;
     lastRev = st.docRevision;
     if (timer) clearTimeout(timer);
-    timer = setTimeout(() => { void recordSnapshot(useEditorStore.getState().doc); }, 2000);
+    timer = setTimeout(() => {
+      const st2 = useEditorStore.getState();
+      // Snapshot the state AND what made it, so a recovered session still says
+      // what was done to reach each step.
+      void recordSnapshot(st2.doc, st2.presentMeta);
+    }, 2000);
   };
   const unsub = useEditorStore.subscribe(schedule);
   return () => { if (timer) clearTimeout(timer); unsub(); started = false; };

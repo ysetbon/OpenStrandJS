@@ -70,6 +70,9 @@ export function WidthConfigDialog(props: {
       setWidth(d, layerName, 'width', Math.trunc(colorWidth), wholeSet);
       setWidth(d, layerName, 'stroke_width', Math.trunc(effStroke), wholeSet);
       setWidthGridUnits(d, layerName, squares, wholeSet);
+    }, {
+      action: 'strand.width', source: 'dialog', targets: [layerName],
+      detail: `${squares} squares${wholeSet ? ' (whole set)' : ''}`,
     });
     requestRender();
     onClose();

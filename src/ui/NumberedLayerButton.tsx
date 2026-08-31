@@ -172,19 +172,25 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
   const hideShadow = !!strand?.hide_shadow;
 
   // ---- store-wired menu actions ----
-  const doToggleHidden = () => commitEdit((d) => toggleHidden(d, name));
-  const doToggleShadowOnly = () => commitEdit((d) => setShadowOnly(d, name, !shadowOnly));
-  const doToggleHideShadow = () => commitEdit((d) => setHideShadow(d, name, !hideShadow));
+  const doToggleHidden = () => commitEdit((d) => toggleHidden(d, name),
+    { action: 'strand.hidden', source: 'menu', targets: [name], detail: hidden ? 'show' : 'hide' });
+  const doToggleShadowOnly = () => commitEdit((d) => setShadowOnly(d, name, !shadowOnly),
+    { action: 'strand.shadow_only', source: 'menu', targets: [name], detail: shadowOnly ? 'off' : 'on' });
+  const doToggleHideShadow = () => commitEdit((d) => setHideShadow(d, name, !hideShadow),
+    { action: 'strand.hide_shadow', source: 'menu', targets: [name], detail: hideShadow ? 'off' : 'on' });
   // Reset Mask drops all deletion rectangles. OSS canvas.reset_mask first exits an
   // active edit session targeting this same mask (strand_drawing_canvas.py:7253-7255).
   const doResetMask = () => {
     if (maskEditTarget === name) exitMaskEdit();
-    commitEdit((d) => resetMask(d, name));
+    commitEdit((d) => resetMask(d, name), { action: 'strand.reset_mask', source: 'menu', targets: [name] });
   };
   // Edit Mask -> enter the per-mask deletion-rectangle erase session for this mask.
   const doEditMask = () => enterMaskEdit(name);
   const applyColor = (kind: 'fill' | 'stroke', wholeSet: boolean, rgba: RGBA) => {
-    commitEdit((d) => setColor(d, name, kind, rgba, wholeSet));
+    commitEdit((d) => setColor(d, name, kind, rgba, wholeSet), {
+      action: 'strand.color', source: 'dialog', targets: [name],
+      detail: `${kind}${wholeSet ? ' (whole set)' : ''} rgba(${rgba.r},${rgba.g},${rgba.b},${rgba.a})`,
+    });
   };
 
   // OSS WidthConfigDialog (numbered_layer_button.py:3892-4400). wholeSet -> the
@@ -204,7 +210,8 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
     if (!snap) return;
     const targets = targetsOverride ?? useEditorStore.getState().multiSelectedLayers;
     if (!targets.length) return;
-    commitEdit((d) => { pasteStrandData(d, snap, targets, anchor); });
+    commitEdit((d) => { pasteStrandData(d, snap, targets, anchor); },
+      { action: 'strand.paste', source: 'menu', targets, detail: `from ${anchor}` });
   };
   const doChipPaste = (anchor: 'start' | 'end') => {
     const ticked = useEditorStore.getState().multiSelectedLayers;
@@ -249,7 +256,7 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
           onClick: () => commitEdit((d) => {
             const next = !anyHidden;
             for (const n of S) { const sd = d.strands[n]; if (sd) sd.is_hidden = next; }
-          }),
+          }, { action: 'strand.hidden', source: 'menu', targets: S, detail: anyHidden ? 'show' : 'hide' }),
         },
         { label: '', separator: true },
         {
@@ -257,7 +264,7 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
           onClick: () => commitEdit((d) => {
             const next = !anyShadow;
             for (const n of S) { const sd = d.strands[n]; if (sd) sd.shadow_only = next; }
-          }),
+          }, { action: 'strand.shadow_only', source: 'menu', targets: S, detail: anyShadow ? 'off' : 'on' }),
         },
         { label: '', separator: true },
       );
@@ -337,12 +344,14 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
       if (strokeAlpha === 0) {
         items.push({
           label: t('restore_default_stroke', lang),
-          onClick: () => commitEdit((d) => setCircleStrokeColor(d, name, { r: 0, g: 0, b: 0, a: 255 })),
+          onClick: () => commitEdit((d) => setCircleStrokeColor(d, name, { r: 0, g: 0, b: 0, a: 255 }),
+            { action: 'strand.circle_stroke', source: 'menu', targets: [name], detail: 'default' }),
         });
       } else {
         items.push({
           label: t('transparent_stroke', lang),
-          onClick: () => commitEdit((d) => setCircleStrokeColor(d, name, { r: 0, g: 0, b: 0, a: 0 })),
+          onClick: () => commitEdit((d) => setCircleStrokeColor(d, name, { r: 0, g: 0, b: 0, a: 0 }),
+            { action: 'strand.circle_stroke', source: 'menu', targets: [name], detail: 'transparent' }),
         });
       }
     }
@@ -362,11 +371,13 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
         items.push(transparent
           ? {
             label: t('restore_default_closing_knot_stroke', lang),
-            onClick: () => commitEdit((d) => setEndCircleStrokeColor(d, name, { r: 0, g: 0, b: 0, a: 255 })),
+            onClick: () => commitEdit((d) => setEndCircleStrokeColor(d, name, { r: 0, g: 0, b: 0, a: 255 }),
+              { action: 'strand.end_circle_stroke', source: 'menu', targets: [name], detail: 'default' }),
           }
           : {
             label: t('transparent_closing_knot_side', lang),
-            onClick: () => commitEdit((d) => setEndCircleStrokeColor(d, name, { r: 0, g: 0, b: 0, a: 0 })),
+            onClick: () => commitEdit((d) => setEndCircleStrokeColor(d, name, { r: 0, g: 0, b: 0, a: 0 }),
+              { action: 'strand.end_circle_stroke', source: 'menu', targets: [name], detail: 'transparent' }),
           });
       }
     }
@@ -385,11 +396,13 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
       const buttons: MenuRowButton[] = [];
       if (hasStartLine) buttons.push({
         label: startLine === false ? t('show_start_line', lang) : t('hide_start_line', lang),
-        onClick: () => commitEdit((d) => toggleLineVisible(d, name, 'start')),
+        onClick: () => commitEdit((d) => toggleLineVisible(d, name, 'start'),
+          { action: 'strand.line_visible', source: 'menu', targets: [name], detail: 'start' }),
       });
       if (hasEndLine) buttons.push({
         label: endLine === false ? t('show_end_line', lang) : t('hide_end_line', lang),
-        onClick: () => commitEdit((d) => toggleLineVisible(d, name, 'end')),
+        onClick: () => commitEdit((d) => toggleLineVisible(d, name, 'end'),
+          { action: 'strand.line_visible', source: 'menu', targets: [name], detail: 'end' }),
       });
       items.push({ label: '', separator: true });
       items.push({ label: '', rowLabel: t('line', lang), buttons });
@@ -410,11 +423,13 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
         buttons: [
           {
             label: startExt ? t('hide_start_extension', lang) : t('show_start_extension', lang),
-            onClick: () => commitEdit((d) => toggleExtensionVisible(d, name, 'start')),
+            onClick: () => commitEdit((d) => toggleExtensionVisible(d, name, 'start'),
+              { action: 'strand.extension', source: 'menu', targets: [name], detail: 'start' }),
           },
           {
             label: endExt ? t('hide_end_extension', lang) : t('show_end_extension', lang),
-            onClick: () => commitEdit((d) => toggleExtensionVisible(d, name, 'end')),
+            onClick: () => commitEdit((d) => toggleExtensionVisible(d, name, 'end'),
+              { action: 'strand.extension', source: 'menu', targets: [name], detail: 'end' }),
           },
         ],
       });
@@ -433,11 +448,13 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
       const buttons: MenuRowButton[] = [];
       if (showStart) buttons.push({
         label: hc[0] ? t('hide_start_circle', lang) : t('show_start_circle', lang),
-        onClick: () => commitEdit((d) => toggleCircleVisible(d, name, 0)),
+        onClick: () => commitEdit((d) => toggleCircleVisible(d, name, 0),
+          { action: 'strand.circle_visible', source: 'menu', targets: [name], detail: 'start' }),
       });
       if (showEnd) buttons.push({
         label: hc[1] ? t('hide_end_circle', lang) : t('show_end_circle', lang),
-        onClick: () => commitEdit((d) => toggleCircleVisible(d, name, 1)),
+        onClick: () => commitEdit((d) => toggleCircleVisible(d, name, 1),
+          { action: 'strand.circle_visible', source: 'menu', targets: [name], detail: 'end' }),
       });
       items.push({ label: '', separator: true });
       items.push({ label: '', rowLabel: t('circle', lang), buttons, noPad: true });
@@ -458,17 +475,20 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
         buttons: [
           {
             label: startArrow ? t('hide_start_arrow', lang) : t('show_start_arrow', lang),
-            onClick: () => commitEdit((d) => toggleArrowVisible(d, name, 'start')),
+            onClick: () => commitEdit((d) => toggleArrowVisible(d, name, 'start'),
+              { action: 'strand.arrow', source: 'menu', targets: [name], detail: 'start' }),
           },
           {
             label: endArrow ? t('hide_end_arrow', lang) : t('show_end_arrow', lang),
-            onClick: () => commitEdit((d) => toggleArrowVisible(d, name, 'end')),
+            onClick: () => commitEdit((d) => toggleArrowVisible(d, name, 'end'),
+              { action: 'strand.arrow', source: 'menu', targets: [name], detail: 'end' }),
           },
         ],
       });
       items.push({
         label: fullArrow ? t('hide_full_arrow', lang) : t('show_full_arrow', lang),
-        onClick: () => commitEdit((d) => toggleArrowVisible(d, name, 'full')),
+        onClick: () => commitEdit((d) => toggleArrowVisible(d, name, 'full'),
+          { action: 'strand.arrow', source: 'menu', targets: [name], detail: 'full' }),
       });
       // OSS shows the customization panel ONLY while the full arrow is visible
       // (numbered_layer_button.py:1093), because these settings drive that arrow
@@ -495,7 +515,8 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
         { label: '', separator: true },
         {
           label: t('close_the_knot', lang),
-          onClick: () => commitEdit((d) => closeKnot(d, name, freeEndType)),
+          onClick: () => commitEdit((d) => closeKnot(d, name, freeEndType),
+            { action: 'strand.close_knot', source: 'menu', targets: [name], detail: freeEndType }),
         },
       );
     }
@@ -579,7 +600,8 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
             onClick={(e) => {
               e.stopPropagation();
               if (!selectable || editActive) return;
-              commitEdit((d) => toggleLock(d, name));
+              commitEdit((d) => toggleLock(d, name),
+                { action: 'layer.lock', source: 'panel', targets: [name], detail: locked ? 'unlock' : 'lock' });
             }}
           >
             <img

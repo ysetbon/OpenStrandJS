@@ -73,7 +73,7 @@ export function GroupAngleEditorDialog(props: {
   // Open the gesture + engage the drag fast-path for every member's branch.
   useEffect(() => {
     const s = useEditorStore.getState();
-    s.beginGesture();
+    s.beginGesture({ action: 'group.angle', source: 'dialog', targets: [groupName] });
     s.setDragging(true);
     const moving = new Set<string>();
     for (const r of rows) for (const m of movingStrandSet(s.doc, r.name, 'end')) moving.add(m);

@@ -84,13 +84,14 @@ export function LayerControlStack() {
     if (multiSelectMode && multiSelectedLayers.length) {
       commitEdit((d) => {
         for (const n of multiSelectedLayers) deleteStrand(d, n);
-      });
+      }, { action: 'layer.delete', source: 'panel', targets: [...multiSelectedLayers] });
       clearMultiSelectedLayers();
       setSelection({ layerName: null, handle: null });
       return;
     }
     if (!selected) return;
-    commitEdit((d) => deleteStrand(d, selected));
+    commitEdit((d) => deleteStrand(d, selected),
+      { action: 'layer.delete', source: 'panel', targets: [selected] });
     setSelection({ layerName: null, handle: null });
   }
 
@@ -101,7 +102,7 @@ export function LayerControlStack() {
   }
 
   function confirmRemoveAll() {
-    commitEdit(deleteAllStrands);
+    commitEdit(deleteAllStrands, { action: 'layer.delete_all', source: 'panel' });
     clearMultiSelectedLayers();
     setSelection({ layerName: null, handle: null });
     setConfirmAll(false);
@@ -122,7 +123,9 @@ export function LayerControlStack() {
       <LCBtn
         v={DESELECT}
         label={lockMode ? t('clear_all_locks', lang) : t('deselect_all', lang)}
-        onClick={() => (lockMode ? commitEdit(clearAllLocks) : deselectAll())}
+        onClick={() => (lockMode
+          ? commitEdit(clearAllLocks, { action: 'layer.clear_locks', source: 'panel' })
+          : deselectAll())}
       />
       <LCBtn v={DELALL} label={t('delete_all', lang)} onClick={removeAll} />
       {confirmAll && (

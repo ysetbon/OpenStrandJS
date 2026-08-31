@@ -30,7 +30,7 @@ export function GroupMoveDialog(props: { groupName: string; onClose: () => void 
   // Open the gesture + engage the drag fast-path for the group's members.
   useEffect(() => {
     const s = useEditorStore.getState();
-    s.beginGesture();
+    s.beginGesture({ action: 'group.move', source: 'dialog', targets: [groupName] });
     s.setDragging(true);
     s.setDragMoving([...snapRef.current.members.regular, ...snapRef.current.members.masks]);
     return () => {

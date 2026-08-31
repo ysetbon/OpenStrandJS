@@ -47,7 +47,10 @@ export const MaskMode: Mode = {
     // two strands don't actually cross, so we just reset the pick.
     const first = pending[0];
     let newName: string | null = null;
-    st.commitEdit((draft) => { newName = createMask(draft, first, layer, st.settings.curve_params); });
+    st.commitEdit(
+      (draft) => { newName = createMask(draft, first, layer, st.settings.curve_params); },
+      { action: 'mask.create', source: 'mode', targets: [first, layer] },
+    );
     st.setMaskPending([]);
     st.setHover({ layerName: null, handle: null });
     if (newName) {

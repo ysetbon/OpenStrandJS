@@ -41,7 +41,7 @@ export function AngleAdjustDialog(props: { layerName: string; onClose: () => voi
   useEffect(() => {
     if (!snap) return;
     const s = useEditorStore.getState();
-    s.beginGesture();
+    s.beginGesture({ action: 'angle.adjust', source: 'dialog', targets: [layerName] });
     s.setAngleAdjust({ layerName, spanDeg: 0 });
     requestRender();
     return () => {
