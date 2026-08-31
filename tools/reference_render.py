@@ -39,6 +39,7 @@ sys.path.insert(0, os.path.join(OSS_ROOT, "json_to_png_exporter"))
 
 
 def main():
+    """Render a fixture through the Qt oracle and save PNG with metadata."""
     if len(sys.argv) != 4:
         print("usage: reference_render.py <input.json> <out.png> <out_meta.json>")
         return 2
