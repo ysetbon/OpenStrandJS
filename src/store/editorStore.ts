@@ -226,6 +226,11 @@ export interface EditorState {
   commitEdit: (fn: (draft: EditorDocument) => void, meta?: HistoryMetaInput) => void;
   undo: () => void;
   redo: () => void;
+  // Home / "Reset states" button (OSS layer_panel.reset_to_current_state ->
+  // undo_redo_manager.clear_history(save_current=True)): drop the whole undo/redo
+  // stack and keep the CURRENT drawing as the one and only state. The document,
+  // the view and the selection are untouched — this resets history, not the canvas.
+  resetHistory: () => void;
   setView: (patch: Partial<ViewState>) => void;
   setSettings: (patch: Partial<Settings>) => void;
   setMode: (mode: ModeName) => void;
@@ -574,6 +579,29 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       gestureBase: null,
       docRevision: s.docRevision + 1,
       selection: selLives ? s.selection : { layerName: null, handle: null },
+    };
+  }),
+
+  // OSS clear_history(save_current=True): delete every saved step, then re-save the
+  // current state as step 1. Here `doc` IS the present state, so "re-saving" it only
+  // means giving it fresh provenance — OSS records the new step 1 as 'system.new'.
+  // OSS's save_state bails out on an empty canvas (no strands, no groups), leaving
+  // the history at zero steps with no metadata; an empty document does the same here.
+  // The session journal is deliberately NOT cleared: it records what was done, not
+  // what can still be undone.
+  resetHistory: () => set((s) => {
+    const empty = s.doc.order.length === 0 && Object.keys(s.doc.groups ?? {}).length === 0;
+    const meta = empty ? null : buildMeta({ action: 'system.new', source: 'system' }, null);
+    // Drop this session's crash-recovery snapshots too (OSS removes the step files
+    // from temp_states/), then re-record the current document as the new step 1.
+    // Imported lazily: ui/settings/history.ts reads this store, so a static import
+    // would close a module cycle.
+    const doc = empty ? null : s.doc;
+    void import('../ui/settings/history').then((h) => h.resetSessionSnapshots(doc, meta));
+    return {
+      past: [], future: [], gestureBase: null, pendingMeta: null,
+      presentMeta: meta,
+      historyLog: appendLog(s.historyLog, 'reset', meta),
     };
   }),
 

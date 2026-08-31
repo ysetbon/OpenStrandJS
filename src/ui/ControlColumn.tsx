@@ -95,14 +95,14 @@ export function ControlColumn() {
     const st = useEditorStore.getState();
     st.setView(fitPan(st.doc, st.view));
   };
+  // Home button. OSS wires it to layer_panel.reset_to_current_state, which is a
+  // one-liner onto undo_redo_manager.clear_history(save_current=True): throw away
+  // every saved step and keep the current drawing as the first state — hence the
+  // tooltip "Keep only current state as first state". It does NOT touch the zoom,
+  // the pan or the selection (Center and the zoom buttons own the view), so nothing
+  // on the canvas moves; only Undo/Redo go grey.
   const resetStates = () => {
-    const st = useEditorStore.getState();
-    // Reset/home restores view.zoom to 1.0 (OSS zoom_factor default). The app's
-    // 65% "default view" look comes from the CSS page zoom, not view.zoom, so home
-    // returns to the same framing the app opens with.
-    st.setView({ zoom: 1, ...fitPan(st.doc, { ...st.view, zoom: 1 }) });
-    st.setSelection({ layerName: null, handle: null });
-    requestRender();
+    useEditorStore.getState().resetHistory();
   };
 
   return (
