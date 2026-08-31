@@ -42,7 +42,8 @@ function MainStrandSelectDialogAdapter(props: MainStrandSelectDialogProps): JSX.
   return (
     <MainStrandSelectDialog
       onClose={props.onClose}
-      onSubmit={(name, members) => commitEdit((d) => createGroup(d, name, members))}
+      onSubmit={(name, members) => commitEdit((d) => createGroup(d, name, members),
+        { action: 'group.create', source: 'dialog', targets: [name], detail: `${members.length} layers` })}
     />
   );
 }
@@ -140,7 +141,8 @@ export function LayerPanel() {
     if (!first) { st.setFirstMaskedLayer(name); requestRender(); return; }
     if (first === name) { st.setFirstMaskedLayer(null); requestRender(); return; }
     let newName: string | null = null;
-    commitEdit((d) => { newName = createMask(d, first, name, st.settings.curve_params); });
+    commitEdit((d) => { newName = createMask(d, first, name, st.settings.curve_params); },
+      { action: 'mask.create', source: 'panel', targets: [first, name] });
     st.setFirstMaskedLayer(null);
     if (newName) setSelection({ layerName: newName, handle: null });
     requestRender();
@@ -228,7 +230,8 @@ export function LayerPanel() {
     newVisual.splice(finalInsert, 0, moved);
     const newOrder = [...newVisual].reverse(); // bottom -> top == doc.order
     const to = newOrder.indexOf(moved);
-    commitEdit((d) => reorderLayer(d, from, to));
+    commitEdit((d) => reorderLayer(d, from, to),
+      { action: 'layer.reorder', source: 'panel', targets: [moved], detail: `${from} -> ${to}` });
   }
 
   function onDragEnd() {

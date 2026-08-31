@@ -39,7 +39,7 @@ export function StrandShadowEditorDialog(props: {
   const live = useEditorStore((s) => s.doc);
 
   useEffect(() => {
-    useEditorStore.getState().beginGesture();
+    useEditorStore.getState().beginGesture({ action: 'strand.shadow', source: 'dialog', targets: [layerName] });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

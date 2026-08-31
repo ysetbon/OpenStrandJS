@@ -300,3 +300,10 @@ input.set-toggle:disabled { opacity: 0.45; cursor: default; }
 
 /* Guide icon inline. */
 .set-guide-icon { width: 34px; height: 34px; vertical-align: middle; }
+
+/* History page: the activity log (what produced each state) sits under the
+   session list. Rows are read-only, so they lose the list's click affordance. */
+.set-history-actions { max-height: 30vh; }
+.set-history-row.is-static { cursor: default; }
+.set-history-row.is-static:hover { background: none; }
+.set-history-time { opacity: 0.6; margin-inline-end: 8px; font-variant-numeric: tabular-nums; }

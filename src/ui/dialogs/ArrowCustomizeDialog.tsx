@@ -59,7 +59,10 @@ export function ArrowCustomizeDialog(props: { layerName: string; onClose: () => 
   const castsShadow = ex.arrow_casts_shadow === true;
 
   // Discrete control (checkbox, select) -> one undo step per change.
-  const edit = (fn: Parameters<typeof commitEdit>[0]) => { commitEdit(fn); requestRender(); };
+  const edit = (fn: Parameters<typeof commitEdit>[0]) => {
+    commitEdit(fn, { action: 'strand.arrow_style', source: 'dialog', targets: [layerName] });
+    requestRender();
+  };
 
   // Continuous control (slider, colour well). These fire an onChange per pixel of
   // drag; routing each one through commitEdit would open and close a gesture per
@@ -67,7 +70,11 @@ export function ArrowCustomizeDialog(props: { layerName: string; onClose: () => 
   // idempotent while a gesture is open, so the whole drag shares one baseline and
   // seal() closes it exactly once -- and commit() is a no-op when the document
   // did not actually change, so a stray seal costs nothing.
-  const live = (fn: Parameters<typeof commitEdit>[0]) => { beginGesture(); mutateDoc(fn); requestRender(); };
+  const live = (fn: Parameters<typeof commitEdit>[0]) => {
+    beginGesture({ action: 'strand.arrow_style', source: 'dialog', targets: [layerName] });
+    mutateDoc(fn);
+    requestRender();
+  };
   const seal = () => commit();
   const close = () => { seal(); onClose(); };
 

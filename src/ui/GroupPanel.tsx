@@ -247,13 +247,15 @@ export function GroupPanel(props: GroupPanelProps): JSX.Element {
     },
     {
       label: t('duplicate_group', lang),
-      onClick: () => commitEdit((d) => duplicateGroup(d, group)),
+      onClick: () => commitEdit((d) => duplicateGroup(d, group),
+        { action: 'group.create', source: 'menu', targets: [group], detail: 'duplicate' }),
     },
     { label: t('rename_group', lang), onClick: () => setDialog({ kind: 'rename', group }) },
     { label: '', separator: true },
     {
       label: t('delete_group', lang),
-      onClick: () => commitEdit((d) => deleteGroup(d, group)),
+      onClick: () => commitEdit((d) => deleteGroup(d, group),
+        { action: 'group.delete', source: 'menu', targets: [group] }),
     },
   ];
 
@@ -274,7 +276,8 @@ export function GroupPanel(props: GroupPanelProps): JSX.Element {
               let nm = base;
               let i = 2;
               while (groups[nm]) nm = `${base} ${i++}`;
-              commitEdit((d) => createGroup(d, nm, members));
+              commitEdit((d) => createGroup(d, nm, members),
+                { action: 'group.create', source: 'dialog', targets: [nm], detail: `${members.length} layers` });
             }}
           />
         );
@@ -321,7 +324,8 @@ export function GroupPanel(props: GroupPanelProps): JSX.Element {
           <PlaceholderDialog
             title={t('create_mask_grid', lang)}
             onClose={() => {
-              commitEdit((d) => createMaskGrid(d, group));
+              commitEdit((d) => createMaskGrid(d, group),
+                { action: 'mask.create', source: 'dialog', targets: [group], detail: 'mask grid' });
               closeDialog();
             }}
           />
@@ -336,7 +340,8 @@ export function GroupPanel(props: GroupPanelProps): JSX.Element {
             title={t('rename_group', lang)}
             siblings={groupNames.filter((n) => n !== group)}
             onClose={closeDialog}
-            onAccept={(next) => commitEdit((d) => renameGroup(d, group, next))}
+            onAccept={(next) => commitEdit((d) => renameGroup(d, group, next),
+              { action: 'group.rename', source: 'dialog', targets: [group], detail: `-> ${next}` })}
           />
         );
       }

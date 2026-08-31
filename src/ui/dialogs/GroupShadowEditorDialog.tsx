@@ -40,7 +40,7 @@ export function GroupShadowEditorDialog(props: {
 
   // One undo step for the whole session; changes apply immediately (OSS).
   useEffect(() => {
-    useEditorStore.getState().beginGesture();
+    useEditorStore.getState().beginGesture({ action: 'group.shadow', source: 'dialog', targets: [groupName] });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

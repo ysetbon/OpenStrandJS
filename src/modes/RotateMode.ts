@@ -42,7 +42,10 @@ export const RotateMode: Mode = {
     // meaningless and every frame would land the endpoint back on the pivot.
     if (!snap || snap.chordLen <= 1e-9) { gesture = null; return; }
     gesture = { snap, rotated: false };
-    st.beginGesture();
+    st.beginGesture({
+      action: 'rotate.strand', source: 'mode', targets: [snap.name],
+      detail: hit.side === 0 ? 'start' : 'end',
+    });
     // Ground each dependent mask's centroid from the CURRENT geometry so its erase
     // windows drift from the very first frame rather than from the second.
     const moving = new Set<string>([snap.name, ...snap.children.map((c) => c.name)]);

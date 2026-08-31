@@ -597,6 +597,8 @@ Aviso: Carregar histórico limpará suas etapas atuais de desfazer/refazer.`, he
   blue: { en: 'Blue', fr: 'Bleu', de: 'Blau', it: 'Blu', es: 'Azul', pt: 'Azul', he: 'כחול' },
   custom_colors: { en: 'Custom colors', fr: 'Couleurs personnalisées', de: 'Benutzerdefinierte Farben', it: 'Colori personalizzati', es: 'Colores personalizados', pt: 'Cores personalizadas', he: 'צבעים מותאמים אישית' },
   green: { en: 'Green', fr: 'Vert', de: 'Grün', it: 'Verde', es: 'Verde', pt: 'Verde', he: 'ירוק' },
+  history_actions: { en: 'Recorded actions', fr: 'Actions enregistrées', de: 'Aufgezeichnete Aktionen', it: 'Azioni registrate', es: 'Acciones registradas', pt: 'Ações registadas', he: 'פעולות שנרשמו' },
+  no_actions_recorded: { en: 'No actions recorded yet.', fr: `Aucune action enregistrée pour l'instant.`, de: 'Noch keine Aktionen aufgezeichnet.', it: 'Nessuna azione registrata finora.', es: 'Aún no se han registrado acciones.', pt: 'Ainda não foram registadas ações.', he: 'עדיין לא נרשמו פעולות.' },
   history_state_label: { en: 'State', fr: 'État', de: 'Zustand', it: 'Stato', es: 'Estado', pt: 'Estado', he: 'מצב' },
   hue: { en: 'Hue', fr: 'Teinte', de: 'Farbton', it: 'Tinta', es: 'Tono', pt: 'Matiz', he: 'גוון' },
   pick_screen_color: { en: 'Pick Screen Color', fr: `Choisir une couleur à l'écran`, de: 'Bildschirmfarbe auswählen', it: 'Seleziona colore dallo schermo', es: 'Seleccionar color de pantalla', pt: 'Escolher cor da tela', he: 'בחר צבע מהמסך' },

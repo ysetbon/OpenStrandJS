@@ -22,6 +22,14 @@ import {
   DEFAULT_STRAND_WIDTH, DEFAULT_STROKE_WIDTH,
 } from '../model/factory';
 import { areVisuallyEqual } from './visualEqual';
+import {
+  buildMeta, type HistoryEvent, type HistoryMeta, type HistoryMetaInput,
+} from './historyMeta';
+
+// One entry on the undo/redo stacks: the document, plus the record of what
+// produced it. `meta` is null only for states nobody annotated (a fresh
+// document, or a commit from a call site that named no action).
+export interface HistoryEntry { doc: EditorDocument; meta: HistoryMeta | null }
 
 export function emptyDocument(): EditorDocument {
   return {
@@ -172,9 +180,19 @@ export interface EditorState {
   docRevision: number;
 
   // snapshot history (Phase 5). present == doc. One snapshot per gesture.
-  past: EditorDocument[];
-  future: EditorDocument[];
+  // Each snapshot carries the provenance of the state it holds (historyMeta.ts):
+  // which mode or which panel/dialog/menu action created it.
+  past: HistoryEntry[];
+  future: HistoryEntry[];
   gestureBase: EditorDocument | null;
+  // Provenance of the CURRENT document (`doc`), i.e. what the next undo reverses.
+  presentMeta: HistoryMeta | null;
+  // Metadata staged by beginGesture, used by the commit that closes the gesture
+  // when that commit names no action of its own.
+  pendingMeta: HistoryMetaInput | null;
+  // Append-only journal of everything done this session — edits AND the undos /
+  // redos themselves. Capped; oldest first. Read by the History settings page.
+  historyLog: HistoryEvent[];
 
   // multi-tab (Phase 6e). The active tab's doc IS the live `doc`; inactive tabs
   // hold their saved doc/view. Phase 5 adds session metadata: dirty (unsaved
@@ -202,10 +220,10 @@ export interface EditorState {
   setDoc: (doc: EditorDocument) => void;
   mutateDoc: (fn: (draft: EditorDocument) => void) => void;
   mutateDocLive: (fn: (doc: EditorDocument) => void) => void;
-  beginGesture: () => void;
-  commit: () => void;
+  beginGesture: (meta?: HistoryMetaInput) => void;
+  commit: (meta?: HistoryMetaInput) => void;
   cancelGesture: () => void;
-  commitEdit: (fn: (draft: EditorDocument) => void) => void;
+  commitEdit: (fn: (draft: EditorDocument) => void, meta?: HistoryMetaInput) => void;
   undo: () => void;
   redo: () => void;
   setView: (patch: Partial<ViewState>) => void;
@@ -273,6 +291,18 @@ export interface EditorState {
 }
 
 const HISTORY_CAP = 100;
+const HISTORY_LOG_CAP = 300;
+
+// Append one event to the session journal (oldest dropped past the cap). The
+// journal is session-wide: it survives tab switches and document loads, because
+// it records what you DID, not what the current stack can still undo.
+function appendLog(
+  log: HistoryEvent[], kind: HistoryEvent['kind'], meta: HistoryMeta | null,
+): HistoryEvent[] {
+  const next = [...log, { kind, meta, at: Date.now() }];
+  while (next.length > HISTORY_LOG_CAP) next.shift();
+  return next;
+}
 
 // Shallow structural clone of a document (snapshots stay JSON-serializable
 // because StrandRecord holds no object cross-references).
@@ -301,6 +331,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   past: [],
   future: [],
   gestureBase: null,
+  presentMeta: null,
+  pendingMeta: null,
+  historyLog: [],
   tabs: [{ id: 1, name: 'Untitled 1', untitledIndex: 1 }],
   activeTabId: 1,
   nextTabId: 2,
@@ -313,7 +346,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     return {
       tabs, activeTabId: id, nextTabId: id + 1,
       doc: emptyDocument(), view: { ...DEFAULT_VIEW, width: s.view.width, height: s.view.height },
-      past: [], future: [], gestureBase: null, selection: { layerName: null, handle: null },
+      past: [], future: [], gestureBase: null, presentMeta: null, pendingMeta: null, selection: { layerName: null, handle: null },
+      historyLog: appendLog(s.historyLog, 'reset', buildMeta({ action: 'system.new', source: 'system' }, null)),
       docRevision: s.docRevision + 1,
     };
   }),
@@ -327,7 +361,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     return {
       tabs, activeTabId: id,
       doc, view: target.view ?? { ...DEFAULT_VIEW, width: s.view.width, height: s.view.height },
-      past: [], future: [], gestureBase: null,
+      past: [], future: [], gestureBase: null, presentMeta: null, pendingMeta: null,
       selection: { layerName: doc.selected_strand_name ?? null, handle: null },
       docRevision: s.docRevision + 1,
     };
@@ -339,7 +373,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const nid = s.nextTabId;
       return {
         tabs: [{ id: nid, name: `Untitled ${nid}` }], activeTabId: nid, nextTabId: nid + 1,
-        doc: emptyDocument(), view: { ...s.view }, past: [], future: [], gestureBase: null,
+        doc: emptyDocument(), view: { ...s.view }, past: [], future: [], gestureBase: null, presentMeta: null, pendingMeta: null,
         selection: { layerName: null, handle: null }, docRevision: s.docRevision + 1,
       };
     }
@@ -348,7 +382,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const doc = target.doc ?? emptyDocument();
     return {
       tabs: remaining, activeTabId: target.id,
-      doc, view: target.view ?? { ...s.view }, past: [], future: [], gestureBase: null,
+      doc, view: target.view ?? { ...s.view }, past: [], future: [], gestureBase: null, presentMeta: null, pendingMeta: null,
       selection: { layerName: doc.selected_strand_name ?? null, handle: null },
       docRevision: s.docRevision + 1,
     };
@@ -368,7 +402,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     return {
       tabs, activeTabId: nid, nextTabId: nid + 1,
       doc: copyDoc, view: src.view ? { ...src.view } : { ...DEFAULT_VIEW, width: s.view.width, height: s.view.height },
-      past: [], future: [], gestureBase: null,
+      past: [], future: [], gestureBase: null, presentMeta: null, pendingMeta: null,
       selection: { layerName: copyDoc.selected_strand_name ?? null, handle: null },
       docRevision: s.docRevision + 1,
     };
@@ -400,7 +434,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     doc,
     selection: { layerName: doc.selected_strand_name, handle: null },
     docRevision: s.docRevision + 1,
-    past: [], future: [], gestureBase: null,    // a fresh load starts new history
+    past: [], future: [], gestureBase: null, presentMeta: null, pendingMeta: null,    // a fresh load starts new history
+    historyLog: appendLog(s.historyLog, 'load', buildMeta({ action: 'system.load', source: 'system' }, null)),
     // Any in-flight mask edit/create session belongs to the old document — drop it.
     maskEditTarget: null, maskCreateMode: false, firstMaskedLayer: null, eraser: null,
     // Preview pairs name layers in the OLD document — they mean nothing here.
@@ -446,17 +481,33 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   }),
 
   // Snapshot present as the gesture baseline (first call of a gesture wins).
-  beginGesture: () => set((s) => (s.gestureBase ? {} : { gestureBase: cloneDoc(s.doc) })),
+  // An optional `meta` names the action the gesture is about to perform — handy
+  // for drags, where pointer-down knows what was grabbed and pointer-up does not.
+  // The commit that closes the gesture may still override it.
+  beginGesture: (meta) => set((s) => (
+    s.gestureBase ? {} : { gestureBase: cloneDoc(s.doc), pendingMeta: meta ?? null }
+  )),
 
   // End a gesture: push the baseline to `past` iff the document changed visibly.
   // A real edit also flags the active tab dirty (Phase 5 session tracking).
-  commit: () => set((s) => {
+  // `meta` records WHAT made this state (falling back to whatever beginGesture
+  // staged). It rides on the new present state, so an undo can say what it is
+  // about to reverse, and it is journalled so the session keeps the full trail.
+  commit: (meta) => set((s) => {
     if (!s.gestureBase) return {};
-    if (areVisuallyEqual(s.gestureBase, s.doc)) return { gestureBase: null };
-    const past = [...s.past, s.gestureBase];
+    if (areVisuallyEqual(s.gestureBase, s.doc)) return { gestureBase: null, pendingMeta: null };
+    // The baseline keeps the provenance of the state it IS (presentMeta); the
+    // action being committed becomes the provenance of the new present.
+    const past = [...s.past, { doc: s.gestureBase, meta: s.presentMeta }];
     if (past.length > HISTORY_CAP) past.shift();
     const tabs = s.tabs.map((t) => (t.id === s.activeTabId && !t.dirty ? { ...t, dirty: true } : t));
-    return { past, future: [], gestureBase: null, tabs };
+    const input = meta ?? s.pendingMeta;
+    const built = input ? buildMeta(input, s.mode) : null;
+    return {
+      past, future: [], gestureBase: null, pendingMeta: null, tabs,
+      presentMeta: built,
+      historyLog: appendLog(s.historyLog, 'edit', built),
+    };
   }),
 
   // Abort a gesture: revert the live doc to the baseline and drop it WITHOUT pushing
@@ -469,19 +520,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       doc,
       docRevision: s.docRevision + 1,
       gestureBase: null,
+      pendingMeta: null,
       selection: { layerName: doc.selected_strand_name ?? null, handle: null },
     };
   }),
 
   // Discrete edit = one undo step (begin + mutate + commit).
-  commitEdit: (fn) => { get().beginGesture(); get().mutateDoc(fn); get().commit(); },
+  commitEdit: (fn, meta) => { get().beginGesture(); get().mutateDoc(fn); get().commit(meta); },
 
   undo: () => set((s) => {
     if (!s.past.length) return {};
     const prev = s.past[s.past.length - 1];
     // shadow_enabled / show_control_points are canvas toggles -> carry current.
     const restored: EditorDocument = {
-      ...prev,
+      ...prev.doc,
       shadow_enabled: s.doc.shadow_enabled,
       show_control_points: s.doc.show_control_points,
     };
@@ -489,7 +541,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     return {
       doc: restored,
       past: s.past.slice(0, -1),
-      future: [...s.future, s.doc],
+      // The present state moves to the redo stack still carrying the action that
+      // made it — that action is exactly what this undo is reversing, and what a
+      // later redo would replay.
+      future: [...s.future, { doc: s.doc, meta: s.presentMeta }],
+      presentMeta: prev.meta,
+      pendingMeta: null,
+      historyLog: appendLog(s.historyLog, 'undo', s.presentMeta),
       gestureBase: null,
       docRevision: s.docRevision + 1,
       selection: selLives ? s.selection : { layerName: null, handle: null },
@@ -500,7 +558,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (!s.future.length) return {};
     const next = s.future[s.future.length - 1];
     const restored: EditorDocument = {
-      ...next,
+      ...next.doc,
       shadow_enabled: s.doc.shadow_enabled,
       show_control_points: s.doc.show_control_points,
     };
@@ -508,7 +566,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     return {
       doc: restored,
       future: s.future.slice(0, -1),
-      past: [...s.past, s.doc],
+      past: [...s.past, { doc: s.doc, meta: s.presentMeta }],
+      // Redoing re-enters a state, so its provenance becomes the present one again.
+      presentMeta: next.meta,
+      pendingMeta: null,
+      historyLog: appendLog(s.historyLog, 'redo', next.meta),
       gestureBase: null,
       docRevision: s.docRevision + 1,
       selection: selLives ? s.selection : { layerName: null, handle: null },
@@ -579,13 +641,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       doc: s.doc.selected_strand_name === name ? s.doc : { ...s.doc, selected_strand_name: name },
       docRevision: s.docRevision + 1,
     }));
-    get().beginGesture();   // baseline = doc with the mask selected; erases commit on exit
+    // baseline = doc with the mask selected; erases commit on exit
+    get().beginGesture({ action: 'mask.edit', source: 'mode', targets: [name] });
   },
   // OSS exit_mask_edit_mode: commit the session as one undo step (no-op if nothing
   // was erased — areVisuallyEqual discards it), then drop the target + eraser preview.
   exitMaskEdit: () => {
     if (get().maskEditTarget == null) return;
-    get().commit();
+    get().commit();   // uses the metadata staged by enterMaskEdit
     set((s) => ({ maskEditTarget: null, eraser: null, docRevision: s.docRevision + 1 }));
   },
 
@@ -628,10 +691,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const entering = !s.doc.lock_mode;
     if (entering) {
       const restore = [...s.previouslyLockedLayers];
-      get().commitEdit((d) => { d.lock_mode = true; d.locked_layers = restore; });
+      get().commitEdit((d) => { d.lock_mode = true; d.locked_layers = restore; },
+        { action: 'layer.lock_mode', source: 'panel', detail: 'on' });
     } else {
       set({ previouslyLockedLayers: [...s.doc.locked_layers] });
-      get().commitEdit((d) => { d.lock_mode = false; d.locked_layers = []; });
+      get().commitEdit((d) => { d.lock_mode = false; d.locked_layers = []; },
+        { action: 'layer.lock_mode', source: 'panel', detail: 'off' });
     }
   },
 

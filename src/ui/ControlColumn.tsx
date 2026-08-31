@@ -4,6 +4,7 @@ import { fitPan, viewCenter, zoomAbout, ZOOM_PERCENTAGE } from '../interaction/v
 import { STRINGS, t } from './i18n';
 import { ossIcon } from './icons';
 import type { Language } from '../model/types';
+import { historyShortLabel } from '../store/historyMeta';
 
 // OSS left control column (main_window.py) — sits at the top of the layer panel.
 // Four rows of 40×40 circular buttons. Colors are theme-independent literals
@@ -14,6 +15,11 @@ const vars = (v: V): React.CSSProperties => ({
   ['--bg' as string]: v.bg, ['--bgh' as string]: v.bgh, ['--bgp' as string]: v.bgp,
   ['--bd' as string]: v.bd, ['--gc' as string]: v.gc, ['--gs' as string]: `${v.gs}px`,
 });
+
+// Append the recorded provenance of the state an undo/redo would land on, e.g.
+// "Undo:\nUndo last action" + "\nMoved a point (1_2)". Empty `what` leaves the
+// plain OSS tooltip untouched.
+const withWhat = (tooltip: string, what: string): string => (what ? `${tooltip}\n${what}` : tooltip);
 
 const PURPLE: V = { bg: '#8A2BE2', bgh: '#DA70D6', bgp: '#663399', bd: '#6A1B9A', gc: '#fff', gs: 20 };
 const BLUE:   V = { bg: '#4387c2', bgh: '#2c5c8a', bgp: '#10253a', bd: '#3c77a5', gc: '#fff', gs: 24 };
@@ -55,6 +61,13 @@ function CCBtn(props: {
 export function ControlColumn() {
   const canUndo = useEditorStore((s) => s.past.length > 0);
   const canRedo = useEditorStore((s) => s.future.length > 0);
+  // What undo would reverse, and what redo would replay — recorded when each
+  // state was made (store/historyMeta.ts). Appended to the tooltip so the
+  // buttons say what they are about to do, not just that they exist.
+  const undoWhat = useEditorStore((s) => historyShortLabel(s.presentMeta));
+  const redoWhat = useEditorStore((s) => historyShortLabel(
+    s.future.length ? s.future[s.future.length - 1].meta : null,
+  ));
   const undo = useEditorStore((s) => s.undo);
   const redo = useEditorStore((s) => s.redo);
   const panMode = useEditorStore((s) => s.panMode);
@@ -96,8 +109,8 @@ export function ControlColumn() {
     <div className="control-column">
       <div className="cc-row cc-row-top">
         <CCBtn v={PURPLE} icon="home" title={tip('reset_tooltip', 'Reset states', lang)} onClick={resetStates} />
-        <CCBtn v={BLUE} icon="undo" title={tip('undo_tooltip', 'Undo', lang)} disabled={!canUndo} onClick={() => { undo(); requestRender(); }} />
-        <CCBtn v={BLUE} icon="redo" title={tip('redo_tooltip', 'Redo', lang)} disabled={!canRedo} onClick={() => { redo(); requestRender(); }} />
+        <CCBtn v={BLUE} icon="undo" title={withWhat(tip('undo_tooltip', 'Undo', lang), canUndo ? undoWhat : '')} disabled={!canUndo} onClick={() => { undo(); requestRender(); }} />
+        <CCBtn v={BLUE} icon="redo" title={withWhat(tip('redo_tooltip', 'Redo', lang), canRedo ? redoWhat : '')} disabled={!canRedo} onClick={() => { redo(); requestRender(); }} />
       </div>
       <div className="cc-row cc-row-mid">
         <CCBtn v={GOLD} icon="zoom_in" title={tip('zoom_in_tooltip', 'Zoom in', lang)} onClick={() => zoomBy(1 + ZOOM_PERCENTAGE)} />

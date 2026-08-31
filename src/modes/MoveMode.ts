@@ -53,7 +53,8 @@ export const MoveMode: Mode = {
         prevSelection: st.selection,
       };
       st.setSelection({ layerName: hit.layerName, handle: hit.handle });
-      st.beginGesture();
+      // Stage the provenance now: pointer-down is where we know WHAT was grabbed.
+      st.beginGesture({ action: 'move.handle', source: 'mode', targets: [hit.layerName], detail: hit.handle });
       // Press-time auto-adjust: grabbing cp1 on a collapsed triangle snaps cp2 onto the
       // end (passive) before the first move (and pins the center if the third CP is on).
       // Folds into this gesture's single undo step and reverts on cancel.

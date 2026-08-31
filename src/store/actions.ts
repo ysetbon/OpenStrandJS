@@ -808,6 +808,19 @@ export function toggleHidden(draft: EditorDocument, name: string): void {
   if (s) s.is_hidden = !s.is_hidden;
 }
 
+// The layers a whole-set edit actually touches: every non-mask strand sharing
+// `name`'s set number — the same membership test setColor / setWidth /
+// setWidthGridUnits apply. Exported so a history entry can record what an edit
+// really changed instead of just the layer that was clicked.
+export function setMemberNames(doc: EditorDocument, name: string): string[] {
+  const s = doc.strands[name];
+  if (!s) return [];
+  return doc.order.filter((k) => {
+    const t = doc.strands[k];
+    return !!t && t.type !== 'MaskedStrand' && t.set_number === s.set_number;
+  });
+}
+
 // Set fill or stroke color on a strand, optionally across its whole set (every
 // non-masked strand sharing set_number) — the desktop's color-propagation rule.
 export function setColor(
