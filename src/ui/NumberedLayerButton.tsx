@@ -4,7 +4,7 @@ import {
   toggleHidden, setShadowOnly, setHideShadow, setColor,
   resetMask, setCircleStrokeColor, setEndCircleStrokeColor, toggleCircleVisible, toggleLineVisible,
   toggleExtensionVisible, closeKnot,
-  toggleLock, toggleArrowVisible,
+  toggleLock, toggleArrowVisible, setMemberNames,
 } from '../store/actions';
 import { maskComponents } from '../model/layerName';
 import type { RGBA } from '../model/types';
@@ -187,8 +187,13 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
   // Edit Mask -> enter the per-mask deletion-rectangle erase session for this mask.
   const doEditMask = () => enterMaskEdit(name);
   const applyColor = (kind: 'fill' | 'stroke', wholeSet: boolean, rgba: RGBA) => {
+    // A whole-set colour change repaints every non-mask strand in the set, so the
+    // history entry names all of them, not just the layer that was clicked.
+    const targets = wholeSet
+      ? setMemberNames(useEditorStore.getState().doc, name)
+      : [name];
     commitEdit((d) => setColor(d, name, kind, rgba, wholeSet), {
-      action: 'strand.color', source: 'dialog', targets: [name],
+      action: 'strand.color', source: 'dialog', targets,
       detail: `${kind}${wholeSet ? ' (whole set)' : ''} rgba(${rgba.r},${rgba.g},${rgba.b},${rgba.a})`,
     });
   };

@@ -17,7 +17,6 @@ export function MaskGridDialog(props: { groupName: string; onClose: () => void }
   const lang = useEditorStore((s) => s.settings.language);
   const doc = useEditorStore((s) => s.doc);
   const curve = useEditorStore((s) => s.settings.curve_params);
-  const commitEdit = useEditorStore((s) => s.commitEdit);
 
   // Group's regular (non-masked) members in z-order — these index the matrix.
   const strands = useMemo(() => {
@@ -74,8 +73,23 @@ export function MaskGridDialog(props: { groupName: string; onClose: () => void }
     if (!pairs.length) return;
     // Pass the curve so createMask runs its crossing gate, mirroring OSS
     // create_masked_layer which refuses a mask whose two bodies don't overlap.
-    commitEdit((d) => { for (const [over, under] of pairs) createMask(d, over, under, curve); },
-      { action: 'mask.create', source: 'dialog', detail: `${pairs.length} pairs` });
+    // That gate can reject a picked pair, so the masks are collected as they are
+    // made and the history entry names the ones that actually exist rather than
+    // the count that was asked for. Committing separately (rather than through
+    // commitEdit) is what lets the metadata be built from the result.
+    const st = useEditorStore.getState();
+    const created: string[] = [];
+    st.beginGesture();
+    st.mutateDoc((d) => {
+      for (const [over, under] of pairs) {
+        const made = createMask(d, over, under, curve);
+        if (made) created.push(made);
+      }
+    });
+    st.commit({
+      action: 'mask.create', source: 'dialog', targets: created,
+      detail: `${created.length} of ${pairs.length} pairs`,
+    });
     setChecked({}); // applied masks now render as checked + disabled
   };
 

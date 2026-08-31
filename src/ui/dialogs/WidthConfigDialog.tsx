@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Modal } from '../Modal';
 import { useEditorStore } from '../../store/editorStore';
-import { setWidth, setWidthGridUnits } from '../../store/actions';
+import { setMemberNames, setWidth, setWidthGridUnits } from '../../store/actions';
 import { requestRender } from '../../renderer/renderScheduler';
 import { t } from '../i18n';
 
@@ -66,12 +66,16 @@ export function WidthConfigDialog(props: {
   const colorWidth = Math.max(0, total - 2 * effStroke);
 
   const apply = () => {
+    // A whole-set resize changes every non-mask strand in the set — record them all.
+    const targets = wholeSet
+      ? setMemberNames(useEditorStore.getState().doc, layerName)
+      : [layerName];
     useEditorStore.getState().commitEdit((d) => {
       setWidth(d, layerName, 'width', Math.trunc(colorWidth), wholeSet);
       setWidth(d, layerName, 'stroke_width', Math.trunc(effStroke), wholeSet);
       setWidthGridUnits(d, layerName, squares, wholeSet);
     }, {
-      action: 'strand.width', source: 'dialog', targets: [layerName],
+      action: 'strand.width', source: 'dialog', targets,
       detail: `${squares} squares${wholeSet ? ' (whole set)' : ''}`,
     });
     requestRender();

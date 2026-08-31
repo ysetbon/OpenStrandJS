@@ -32,6 +32,7 @@ const ok = (n, c, x = '') => { console.log((c ? 'PASS  ' : 'FAIL  ') + n + (c ? 
 try {
   execFileSync(process.platform === 'win32' ? 'npx.cmd' : 'npx',
     ['tsc', 'src/store/editorStore.ts', 'src/store/historyMeta.ts', 'src/model/factory.ts',
+     'src/store/actions.ts',
      '--outDir', out, '--module', 'commonjs', '--target', 'es2020', '--skipLibCheck',
      '--esModuleInterop', '--moduleResolution', 'node'],
     { cwd: root, stdio: 'pipe' });
@@ -57,6 +58,7 @@ const require = createRequire(path.join(out, 'x.js'));
 const { useEditorStore } = require(path.join(out, 'store/editorStore.js'));
 const { historyLabel, historyShortLabel, ACTIONS } = require(path.join(out, 'store/historyMeta.js'));
 const { makeStrand } = require(path.join(out, 'model/factory.js'));
+const { setMemberNames } = require(path.join(out, 'store/actions.js'));
 
 const st = () => useEditorStore.getState();
 const addStrand = (name) => (d) => {
@@ -139,6 +141,23 @@ ok('an unlabelled state says so rather than rendering blank', historyLabel(null)
 ok('the short label drops the source suffix',
   historyShortLabel({ action: 'layer.delete', source: 'panel', mode: null, targets: ['2_1'], at: 1 })
     === `${ACTIONS['layer.delete']} (2_1)`);
+
+// ------------------------------------------------ what a whole-set edit records
+// A whole-set colour/width change touches every non-mask strand in the set, so
+// the entry has to name them all — recording only the clicked layer understates
+// what the step did.
+{
+  const doc = { order: [], strands: {} };
+  const add = (name, set, type = 'Strand') => {
+    doc.order.push(name);
+    doc.strands[name] = { ...makeStrand({ layer_name: name, set_number: set, start: { x: 0, y: 0 }, end: { x: 1, y: 1 } }), type };
+  };
+  add('1_1', 1); add('1_2', 1); add('2_1', 2); add('1_3', 1, 'MaskedStrand');
+  ok('a whole-set edit names every member of the set',
+    setMemberNames(doc, '1_1').join(',') === '1_1,1_2');
+  ok('...and never a mask, which those edits skip', !setMemberNames(doc, '1_1').includes('1_3'));
+  ok('an unknown layer names nothing', setMemberNames(doc, 'nope').length === 0);
+}
 
 rmSync(out, { recursive: true, force: true });
 console.log(fails ? `\n${fails} FAILURE(S)` : '\nall green');
