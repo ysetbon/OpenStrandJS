@@ -126,6 +126,29 @@ export async function getSessionActions(sessionId: string): Promise<SessionActio
   } catch { return []; } finally { db.close(); }
 }
 
+// Home / "Reset states": drop THIS session's snapshots and start the step
+// numbering over, then record `doc` as the new step 1 — the mirror of OSS
+// clear_history(), which unlinks temp_states/<session>_*.json and re-saves the
+// current state. A null `doc` (empty canvas) leaves the session with no steps,
+// exactly as OSS's save_state bails out on an empty canvas.
+export async function resetSessionSnapshots(
+  doc: EditorDocument | null, meta: HistoryMeta | null,
+): Promise<void> {
+  stepCounter = 0;
+  lastSerialized = '';
+  const db = await openDb();
+  if (db) {
+    try {
+      const t = db.transaction(STORE, 'readwrite');
+      const store = t.objectStore(STORE);
+      const mine = (await reqProm(store.index('session').getAll(SESSION_ID))) as Snapshot[];
+      for (const s of mine) if (s.id != null) store.delete(s.id);
+      await new Promise<void>((res) => { t.oncomplete = () => res(); t.onerror = () => res(); });
+    } catch { /* ignore */ } finally { db.close(); }
+  }
+  if (doc) await recordSnapshot(doc, meta);
+}
+
 // Delete every snapshot that is not part of the current session.
 export async function clearOtherSessions(): Promise<number> {
   const db = await openDb();
