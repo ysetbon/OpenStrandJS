@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.join(OSS_ROOT, "json_to_png_exporter"))
 
 
 def main():
+    """Load a fixture through OSS and dump its layer state data as JSON."""
     if len(sys.argv) != 2:
         print("usage: oss_layer_state.py <fixture.json>", file=sys.stderr)
         return 2
@@ -66,6 +67,7 @@ def main():
     conns = lsm.get_layer_connections(canvas.strands)
 
     def pos(s):
+        """Return strand position as [start_x, start_y, end_x, end_y]."""
         return [round(s.start.x()), round(s.start.y()), round(s.end.x()), round(s.end.y())]
 
     out = {

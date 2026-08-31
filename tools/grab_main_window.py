@@ -24,6 +24,7 @@ os.chdir(OSS_ROOT)
 
 
 def main():
+    """Grab the OpenStrand Studio main window and save as PNG."""
     out = sys.argv[1] if len(sys.argv) > 1 else "main_window_grab.png"
     W = int(os.environ.get("W", "1400"))
     H = int(os.environ.get("H", "860"))
