@@ -6,18 +6,24 @@
  * --group-child-hover-bg for a child). QTreeWidget: indentation 16, no native
  * triangles, item padding 2px 4px 2px 14px (LTR). */
 
+/* The panel stands in for OSS's whole right_panel column: QVBoxLayout with
+ * contentsMargins(0,0,0,0) and spacing 0, holding the create-group row and the
+ * group tree back to back. The insets below belong to those two children, not
+ * here — see .gp-create-btn and .gp-tree. */
 .gp-panel {
   display: flex;
   flex-direction: column;
   min-width: 220px;
-  /* QVBoxLayout contentsMargins(0, 5, 0, 5) — vertical, not horizontal. */
-  margin: 5px 0;
-  gap: 4px;
+  margin: 0;
+  gap: 0;
   background: var(--panel-bg);
 }
 
 /* Create Group button: fixed 140x50, 14px bold like every other OSS button,
- * in a row with 2px vertical margins (group_button_layout). */
+ * flush with the top of the column inside group_button_layout's
+ * contentsMargins(0, 2, 0, 2). Only the dark theme gives it a border
+ * (2px solid #000000); default and light say `border: none`, so the fill has to
+ * reach all four edges of the 140x50 box there. */
 .gp-create-btn {
   box-sizing: border-box;
   width: 140px;
@@ -29,7 +35,7 @@
   cursor: pointer;
   background: var(--create-group-bg);
   color: var(--create-group-text);
-  border: 2px solid var(--create-group-border);
+  border: var(--create-group-border-width) solid var(--create-group-border);
   border-radius: var(--create-group-radius);
 }
 
@@ -44,6 +50,9 @@
 .gp-tree {
   display: flex;
   flex-direction: column;
+  /* GroupPanel's own QVBoxLayout contentsMargins(0, 5, 0, 5). Only the tree is
+   * inside it — the button sits in a sibling container above. */
+  margin: 5px 0;
   /* OSS QTreeWidget scrolls internally; a long group list shouldn't overflow the
    * panel. Grow to fill the panel and scroll once it runs out of room. */
   flex: 1 1 auto;

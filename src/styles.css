@@ -24,8 +24,15 @@ body {
 }
 
 /* ---- main-window shell (splitter: left_widget | layer panel) ---- */
+/* .shell is main_window.py's QHBoxLayout(central_widget), which keeps Qt's
+ * default contentsMargins(9, 9, 9, 9) — so the whole app content is inset 9px
+ * from every window edge, with the window background showing through. Its
+ * spacing (6) never applies: the layout holds only the splitter. */
 .app { height: 100%; }
-.shell { display: flex; height: 100%; min-height: 0; background: var(--window-bg); }
+.shell {
+  display: flex; height: 100%; min-height: 0; padding: 9px;
+  background: var(--window-bg);
+}
 
 .left-widget {
   display: flex; flex-direction: column;
@@ -79,8 +86,11 @@ body {
   display: flex; flex-direction: column; overflow: hidden;
 }
 /* Right sub-column: fixed 270px group panel. */
+/* right_panel.setFixedWidth(GROUP_PANEL_FULL_WIDTH = 270): the 270 is the
+ * column itself, with the splitter handle beside it — so the 1px hairline
+ * standing in for that handle goes on top of the 270, not inside it. */
 .lp-right {
-  flex: 0 0 270px; min-width: 270px;
+  flex: 0 0 271px; min-width: 271px;
   display: flex; flex-direction: column; overflow: hidden;
   border-inline-start: 1px solid var(--panel-border);
 }
