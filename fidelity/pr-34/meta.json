@@ -4,8 +4,8 @@
   "pr": 34,
   "branch": "claude/undo-redo-state-metadata-1y92mc",
   "title": "Record what produced every undo/redo state",
-  "sha": "8c7f51829f",
-  "updated": "2026-08-31T16:58:09.564Z",
+  "sha": "824a03455d",
+  "updated": "2026-08-31T17:08:01.096Z",
   "summary": {
     "fixtures": 3,
     "perfect": 3,
