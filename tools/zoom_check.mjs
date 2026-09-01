@@ -13,7 +13,10 @@
 //   * a step keeps the world point under the viewport centre pinned, so the
 //     drawing cannot walk out of view;
 //   * the step reaches the canvas — the drawing's inked bounding box grows and
-//     shrinks with it — rather than only moving a number in the store.
+//     shrinks with it — rather than only moving a number in the store;
+//   * the home button ("Reset states") is NOT a view reset: OSS wires it to
+//     layer_panel.reset_to_current_state, which only clears the undo history,
+//     so a press leaves the zoom and pan exactly where the zoom buttons put them.
 //
 // Runs against the dev server (not dist-editor) because the assertions read
 // view.zoom through the DEV-only window.__store hook.
@@ -168,11 +171,29 @@ try {
   ok('and smaller after Zoom Out', spanOut < span1 * 0.85,
     `${span1.toFixed(3)} -> ${spanOut.toFixed(3)}`);
 
-  // ------------------------------------------------ 5. Reset restores zoom 1.0
+  // ------------------------ 5. Reset states clears history and leaves the view alone
+  // OSS: layer_panel.reset_to_current_state -> undo_redo_manager.clear_history(
+  // save_current=True). It empties the undo stack and re-saves the current drawing
+  // as step 1; zoom_factor and pan_offset are never touched (Center and the zoom
+  // buttons own the view). The zoom is still ~0.45 from the steps above, well away
+  // from 1.0, so a button that had quietly gone back to resetting the view would
+  // fail here rather than pass by coincidence.
+  await page.evaluate(() => window.__store.getState().commitEdit((d) => {
+    d.strands[d.order[0]].start.x += 10;
+  }));
+  await page.waitForTimeout(300);
+  const undoBtn = page.locator('.control-column .cc-btn[title^="Undo"]');
+  ok('there is an undo step to clear before Reset states', await undoBtn.isEnabled());
+  const preReset = await view();
   await page.locator('.control-column .cc-btn[title^="Reset"]').click();
   await page.waitForTimeout(700);
   v = await view();
-  ok('Reset states returns to zoom 1.0 (OSS zoom_factor default)', near(v.zoom, 1), `zoom=${v.zoom}`);
+  ok('Reset states leaves the zoom where it was (OSS clear_history never touches zoom_factor)',
+    near(v.zoom, preReset.zoom) && !near(v.zoom, 1, 1e-3), `zoom=${preReset.zoom} -> ${v.zoom}`);
+  ok('...and the pan where it was', near(v.panX, preReset.panX) && near(v.panY, preReset.panY),
+    `pan=${preReset.panX},${preReset.panY} -> ${v.panX},${v.panY}`);
+  ok('...while emptying the undo stack (OSS: keep only the current state as step 1)',
+    !(await undoBtn.isEnabled()));
 
   ok('no page errors', errors.length === 0, errors.join(' | '));
 } finally {
