@@ -37,6 +37,8 @@ body {
 .left-widget {
   display: flex; flex-direction: column;
   flex: 1 1 auto; min-width: 300px; min-height: 0;
+  /* Size container for the toolbar's compact-gap breakpoint (toolbar.css). */
+  container-type: inline-size;
 }
 .canvas-wrap { position: relative; flex: 1 1 auto; min-height: 0; display: flex; }
 

@@ -1,6 +1,14 @@
 /* OSS toolbar (main_window.py). Fixed 40px row, 10px gap, colored mode/toggle
  * buttons (theme-independent literal fills supplied per-button via --bg/--bgh/--bgp
- * CSS vars), checked == 4px solid black border. State + gear after a flex spacer. */
+ * CSS vars), checked == 4px solid black border. State + gear after a flex spacer.
+ *
+ * Sizing follows OSS, where a QPushButton is never narrower than its label:
+ * every button keeps its natural width (flex-shrink 0), the gap gives back
+ * its slack when the row gets tight (main_window._apply_toolbar_spacing,
+ * TOOLBAR_SPACING 10 -> COMPACT_TOOLBAR_SPACING 2), and only once nothing is
+ * left to give does the row scroll sideways. The width that matters is the
+ * toolbar's own (viewport minus the layer panel), so the breakpoint is a
+ * container query on .left-widget, not a viewport media query. */
 
 .toolbar {
   display: flex;
@@ -12,38 +20,39 @@
   box-sizing: border-box;
   background: var(--window-bg);
   border-bottom: 1px solid var(--panel-border);
-  overflow: hidden;
+  /* Last resort once the gaps are at their floor: scroll, never shrink. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
 
 .tb-spacer { flex: 1 1 auto; }
 
 .tb-btn {
-  flex: 0 1 auto;
+  flex: 0 0 auto;             /* natural width, never crushed into "V..." */
   height: 38px;
-  max-width: 110px;
-  min-width: 0;
   padding: 0 4px;
   border-radius: 7px;
   border: 1px solid transparent;
-  font: 700 18px system-ui, -apple-system, sans-serif;
+  /* 14px is what OSS setup_button_styles uses. The 18px it replaced dated
+   * from when the whole page was zoomed to 0.8 (18 * 0.8 ~= 14.4); that zoom
+   * is gone, so 18px had grown the row ~200px past what OSS needs. */
+  font: 700 14px system-ui, -apple-system, sans-serif;
   color: #000;                /* black text on the colored fills, like OSS */
   background: var(--bg);
   cursor: pointer;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .tb-btn:hover { background: var(--bgh); }
 .tb-btn:active { background: var(--bgp); }
 .tb-btn.checked { border: 4px solid #000; }
 
-/* Narrow layouts (phones use an 800px pinned viewport; small desktop windows
- * too): the row can't fit every full-size button, and flex-shrinking crushes
- * them into unreadable slivers. Scroll the toolbar horizontally instead —
- * every button keeps its natural size. */
-@media (max-width: 850px) {
-  .toolbar { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
-  .tb-btn { flex: 0 0 auto; }
+/* Tight row (a 1440px-wide viewport with the default 490px layer panel, or
+ * anything narrower, phones included): tighten the gaps to OSS's compact 2px
+ * before letting the row scroll. Queried against .left-widget's width, which
+ * is exactly the toolbar's width. */
+@container (max-width: 1000px) {
+  .toolbar { gap: 2px; }
 }
 
 /* State button: square (no radius), full toolbar height, gold. */
@@ -55,7 +64,7 @@
   border-radius: 0;
   background: #FFD700;
   color: #000;
-  font: 700 18px system-ui, -apple-system, sans-serif;
+  font: 700 14px system-ui, -apple-system, sans-serif;
   cursor: pointer;
 }
 .tb-state:hover { background: #FFC200; }
