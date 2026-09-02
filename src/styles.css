@@ -77,7 +77,8 @@ body {
 /* ---- layer panel (OSS QHBoxLayout: left_panel | 270px right group_panel) ---- */
 .layer-panel {
   width: var(--panel-w, 490px); flex: 0 0 var(--panel-w, 490px);
-  min-width: 460px;
+  /* App.tsx lowers both vars by the compact reduction on narrow windows. */
+  min-width: var(--panel-min-w, 460px);
   border-inline-start: 1px solid var(--panel-border);
   background: var(--panel-bg); color: var(--text);
   display: flex; flex-direction: row; overflow: hidden;
@@ -90,13 +91,19 @@ body {
 /* Right sub-column: fixed 270px group panel. */
 /* right_panel.setFixedWidth(GROUP_PANEL_FULL_WIDTH = 270): the 270 is the
  * column itself, with the splitter handle beside it — so the 1px hairline
- * standing in for that handle goes on top of the 270, not inside it. */
+ * standing in for that handle goes on top of the 270, not inside it.
+ * On compact windows App.tsx narrows --group-panel-w to the Create Group
+ * button (layer_panel.set_compact_reduction), so the button's far edge is the
+ * panel's — and the screen's — outer edge. */
 .lp-right {
-  flex: 0 0 271px; min-width: 271px;
+  flex: 0 0 var(--group-panel-w, 271px); min-width: var(--group-panel-w, 271px);
   display: flex; flex-direction: column; overflow: hidden;
   border-inline-start: 1px solid var(--panel-border);
 }
 .lp-right .gp-panel { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+/* Compact: the column is exactly the button; the panel's 220px floor must not
+ * push it back out. */
+.shell.compact .lp-right .gp-panel { min-width: 0; }
 .lp-right .gp-tree { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 /* 10px transparent splitter strip at the very top (OSS SplitterHandle). */
 .lp-left > .lp-splitter-handle { flex: 0 0 10px; height: 10px; width: 100%; background: transparent; cursor: col-resize; }
