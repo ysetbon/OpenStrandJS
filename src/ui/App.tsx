@@ -21,18 +21,17 @@ import { startHistoryRecorder } from './settings/history';
 // The panel is sized to its widest CONTENT rather than to a round number, so
 // the canvas keeps everything the panel does not actually need:
 //
-//   list column   132px layer button + 12px scrollbar gutter + 2 slack = 146
+//   list column   132px layer button + 12px scrollbar room + 2 slack = 146
 //   group column  112px Create Group button + the 1px hairline that stands in
 //                 for the splitter handle beside it = 113
 //   +1            .layer-panel's own border-inline-start
 //
-// The scrollbar gutter is reserved at all times (styles.css
-// `scrollbar-gutter: stable`), exactly as OSS reserves its scrollbar extent in
-// list_w, so the fixed-width buttons neither shift nor get squeezed the moment
-// the list grows past the viewport. It has to fit whichever thin scrollbar the
-// browser draws — Chromium honours the 8px in styles.css and lays out 10,
-// Firefox reads only `thin` and is a little wider — so the reservation is the
-// widest of those plus OSS's own 2px of slack.
+// The 12px is what a scrolling list needs to take without narrowing the
+// buttons, the way OSS's list_w carries its scrollbar extent: it must fit
+// whichever thin scrollbar the browser draws — Chromium lays out 10px for
+// `scrollbar-width: thin`, Firefox a little more — plus OSS's own 2px of
+// slack. The room is only claimed while the scrollbar is on screen; see
+// styles.css for why it is not reserved permanently.
 //
 // 112px clears the widest Create Group label of the seven languages (French
 // "Créer Groupe", 90px in bold 14px) with 11px each side, and the list column
