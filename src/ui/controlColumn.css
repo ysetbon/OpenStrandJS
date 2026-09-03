@@ -1,4 +1,5 @@
-/* OSS left control column. Rows of 40×40 circular buttons, horizontally centered.
+/* OSS left control column. Rows of 36×36 circular buttons (OSS 40, scaled with
+ * the panel so a row of three stays inside the layer buttons), centered.
  * Per-button colors arrive via --bg/--bgh/--bgp/--bd/--gc/--gs CSS vars. */
 
 .control-column {
@@ -9,20 +10,21 @@
 }
 
 /* OSS per-panel margins (layer_panel.py): top_panel 5,5,5,5; zoom/refresh 5,0,5,5.
-   Row gap lives in per-row padding (no column gap), intra-row spacing is 6px. */
+   Row gap lives in per-row padding (no column gap), intra-row spacing is 4px
+   so three 36px circles plus gaps (116px) stay inside the 132px buttons. */
 .cc-row {
   display: flex;
   justify-content: center;
-  gap: 6px;
+  gap: 4px;
 }
 .cc-row-top { padding: 5px 5px 5px; }
 .cc-row-mid { padding: 0 5px 5px; }
 
 .cc-btn {
-  width: 40px;
-  height: 40px;
-  flex: 0 0 40px;
-  border-radius: 20px;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border-radius: 18px;
   border: 1px solid var(--bd);
   background: var(--bg);
   cursor: pointer;
@@ -37,10 +39,11 @@
 .cc-btn.checked { background: var(--bgp); }
 
 /* PNG icon (OSS layer_panel_icons): sized by the same per-button --gs the old
- * text glyphs used, so proportions match the desktop app. */
+ * text glyphs used, scaled by the same 0.9 the circles were so each icon keeps
+ * its proportion of the button. */
 .cc-icon {
-  width: var(--gs);
-  height: var(--gs);
+  width: calc(var(--gs) * 0.9);
+  height: calc(var(--gs) * 0.9);
   object-fit: contain;
   pointer-events: none;
   user-select: none;

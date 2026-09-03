@@ -1,12 +1,13 @@
 /* OSS NumberedLayerButton (numbered_layer_button.py).
- * 146×40px, border: none, no radius, fill = strand color (rgba), checkable.
+ * 132×40px (OSS 146, narrowed with the panel — see src/ui/App.tsx), border:
+ * none, no radius, fill = strand color (rgba), checkable.
  * Layer name: bold 16px (12pt) WHITE with a BLACK outline, centered.
  * All colors here are theme-INDEPENDENT OSS literals. */
 
 .nlb {
   position: relative;
   box-sizing: border-box;
-  width: 146px;
+  width: 132px;
   height: 40px;
   flex: 0 0 auto;
   border: none;
@@ -126,18 +127,18 @@
   --nlb-border: 2px dashed rgba(96, 96, 96, 1);
 }
 
-/* ---- padlock toggle (OSS 1.109 lock rework): 26px circle, vertically
- * centered, margin 6 on the side opposite the green attachable strip (left for
- * LTR, right for RTL). White when unlocked, amber rgba(255,220,160,235/255)
- * when locked; hover = translucent blue tint over the same icon
+/* ---- padlock toggle (OSS 1.109 lock rework): 22px circle (OSS 26, scaled with
+ * the button), vertically centered, margin 5 on the side opposite the green
+ * attachable strip (left for LTR, right for RTL). White when unlocked, amber
+ * rgba(255,220,160,235/255) when locked; hover = a translucent blue tint
  * (numbered_layer_button.py lock_button_rect / paintEvent). ---- */
 .nlb-padlock {
   position: absolute;
-  left: 6px;
+  left: 5px;
   top: 50%;
   transform: translateY(-50%);
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   border: 1px solid rgba(30, 30, 30, 0.67);
   background: rgba(255, 255, 255, 0.82);
@@ -158,30 +159,30 @@
   border-radius: 50%;
   background: rgba(0, 120, 215, 0.27);
 }
-.nlb-rtl .nlb-padlock { left: auto; right: 6px; }
-/* OSS lock_open/lock_closed pixmap, drawn inset 3px inside the circle. */
+.nlb-rtl .nlb-padlock { left: auto; right: 5px; }
+/* OSS lock_open/lock_closed pixmap, drawn inset ~3px inside the circle. */
 .nlb-padlock-img {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   object-fit: contain;
   pointer-events: none;
   user-select: none;
 }
 
 /* ---- Copy/Paste Strand Data indicators (1.109, OSS geometry) ----
- * A 26px-wide indicator column on the TRAILING side (right for LTR, 13px from
+ * A 22px-wide indicator column on the TRAILING side (right for LTR, 9px from
  * the edge — 4px clear of the green strip; mirrored for RTL). Copy badge =
- * sharp 26×26 copy_badge.png vertically centered (click = hint + Clear).
+ * sharp 22×22 copy_badge.png vertically centered (click = hint + Clear).
  * Paste chips = one segmented sharp rectangle on the same column, split into
  * a ▲ start cell (top) and a ● end cell (bottom), shown while the button is
  * hovered (numbered_layer_button.py copy_badge_rect / paste_chip_rects). ---- */
 .nlb-copybadge {
   position: absolute;
-  right: 13px;
+  right: 9px;
   top: 50%;
   transform: translateY(-50%);
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   padding: 2px;
   border: none;
   background: rgba(255, 255, 255, 0.9);
@@ -196,13 +197,13 @@
 }
 .nlb-copybadge:hover { background: rgba(0, 120, 215, 0.3); }
 .nlb-copybadge img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
-.nlb-rtl .nlb-copybadge { right: auto; left: 13px; }
+.nlb-rtl .nlb-copybadge { right: auto; left: 9px; }
 .nlb-chips {
   position: absolute;
-  right: 13px;
+  right: 9px;
   top: 50%;
   transform: translateY(-50%);
-  width: 26px;
+  width: 22px;
   display: none;
   flex-direction: column;
   z-index: 5;                    /* the hover stack paints OVER the badge */
@@ -224,7 +225,7 @@
 .nlb-chips button + button { border-top: 1px solid rgba(30, 30, 30, 0.35); }
 .nlb-chips button:hover { background: rgba(0, 120, 215, 0.25); }
 .nlb-chips button img { width: 12px; height: 12px; object-fit: contain; pointer-events: none; }
-.nlb-rtl .nlb-chips { right: auto; left: 13px; }
+.nlb-rtl .nlb-chips { right: auto; left: 9px; }
 
 .nlb-copy-panel {
   display: flex;

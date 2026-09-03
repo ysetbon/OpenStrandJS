@@ -76,9 +76,9 @@ body {
 
 /* ---- layer panel (OSS QHBoxLayout: left_panel | 270px right group_panel) ---- */
 .layer-panel {
-  width: var(--panel-w, 490px); flex: 0 0 var(--panel-w, 490px);
-  /* App.tsx lowers both vars by the compact reduction on narrow windows. */
-  min-width: var(--panel-min-w, 460px);
+  width: var(--panel-w, 260px); flex: 0 0 var(--panel-w, 260px);
+  /* Both vars come from App.tsx; the min is the content floor (see there). */
+  min-width: var(--panel-min-w, 260px);
   border-inline-start: 1px solid var(--panel-border);
   background: var(--panel-bg); color: var(--text);
   display: flex; flex-direction: row; overflow: hidden;
@@ -88,14 +88,14 @@ body {
   flex: 1 1 auto; min-width: 0;
   display: flex; flex-direction: column; overflow: hidden;
 }
-/* Right sub-column: the group panel, exactly as wide as its 140px Create Group
+/* Right sub-column: the group panel, exactly as wide as its 112px Create Group
  * button (App.tsx GROUP_PANEL_W) plus the 1px hairline standing in for the
  * splitter handle beside it — so the button's far edge is the panel's, and the
  * screen's, outer edge at every window size and zoom. (OSS's full-size
  * right_panel is 270 with the button at its inner edge; its compact mode,
  * layer_panel.set_compact_reduction, trims it to the button like this.) */
 .lp-right {
-  flex: 0 0 var(--group-panel-w, 141px); min-width: var(--group-panel-w, 141px);
+  flex: 0 0 var(--group-panel-w, 113px); min-width: var(--group-panel-w, 113px);
   display: flex; flex-direction: column; overflow: hidden;
   border-inline-start: 1px solid var(--panel-border);
 }
@@ -114,9 +114,23 @@ body {
   overflow-y: auto; flex: 1 1 auto; min-height: 0;
   display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
   gap: 2px; padding: 0;
+  /* A thin scrollbar: the classic 17px gutter is a sixth of the list column,
+   * and the list never holds anything the extra width would help read.
+   *
+   * The gutter is reserved whether or not the list currently overflows, which
+   * is what OSS does (list_w = button + scrollbar extent + 2) and what keeps
+   * the fixed-width buttons from being squeezed — and shifted — the moment an
+   * eleventh layer appears. Chromium takes the 8px below; Firefox honours only
+   * `thin`, which is a couple of px wider, so App.tsx reserves 12. */
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
 }
-/* Each list item hugs the 146px button width and centers (OSS NumberedLayerButton). */
-.lp-item { position: relative; display: flex; flex-direction: column; align-items: center; width: 146px; align-self: center; }
+.lp-list::-webkit-scrollbar { width: 8px; }
+.lp-list::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+.lp-list::-webkit-scrollbar-thumb { background: var(--scrollbar-handle); border-radius: 4px; }
+.lp-list::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-handle-hover); }
+/* Each list item hugs the 132px button width and centers (OSS NumberedLayerButton). */
+.lp-item { position: relative; display: flex; flex-direction: column; align-items: center; width: 132px; align-self: center; }
 /* Blue insertion line at the drop target — full-width absolute overlay,
    QColor(0,120,215), 2px, square (no radius). top driven by inline style. */
 .lp-drop-line {
