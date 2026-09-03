@@ -19,15 +19,16 @@
   background: var(--panel-bg);
 }
 
-/* Create Group button: fixed 140x50, 14px bold like every other OSS button,
- * flush with the top of the column inside group_button_layout's
- * contentsMargins(0, 2, 0, 2). Only the dark theme gives it a border
+/* Create Group button: fixed 112x46 (OSS 140x50, trimmed to the widest label —
+ * French "Créer Groupe" at 90px keeps 11px each side), 14px bold like every
+ * other OSS button, flush with the top of the column inside
+ * group_button_layout's contentsMargins(0, 2, 0, 2). Only the dark theme gives it a border
  * (2px solid #000000); default and light say `border: none`, so the fill has to
- * reach all four edges of the 140x50 box there. */
+ * reach all four edges of the 112x46 box there. */
 .gp-create-btn {
   box-sizing: border-box;
-  width: 140px;
-  height: 50px;
+  width: 112px;
+  height: 46px;
   align-self: flex-start;
   margin: 2px 0;
   font-size: 14px;

@@ -13,7 +13,9 @@
   display: block;
   width: 100%;
   box-sizing: border-box;
-  padding: 5px 10px;
+  /* 6px each side leaves 132px for the label in the 146px column — 36px clear
+   * of the widest of the seven languages (Spanish "Nuevo Cordón", 96px). */
+  padding: 5px 6px;
   font-size: 14px;
   font-weight: bold;
   color: #000;

@@ -13,45 +13,43 @@ import { startHistoryRecorder } from './settings/history';
 // as classes / dir on <html>; the canvas wrapper is forced LTR so painting is
 // never mirrored (matches OSS is_rtl handling).
 // Layer-panel widths. The group column is always exactly the Create Group
-// button (group_layers.py gives it a fixed 140px), so the button's far edge —
-// the outer screen edge, right in LTR and left in RTL — is where the panel
-// ends at every window size and browser zoom. (OSS's full-size right_panel is
-// 270px with the button anchored to its inner edge; the empty outer strip that
-// leaves is the one thing this port drops.)
+// button, so the button's far edge — the outer screen edge, right in LTR and
+// left in RTL — is where the panel ends at every window size and browser zoom.
+// (OSS's full-size right_panel is 270px with the button anchored to its inner
+// edge; the empty outer strip that leaves is the one thing this port drops.)
 //
-// OSS compact layout (main_window.py COMPACT_WINDOW_WIDTH / layer_panel.py
-// set_compact_reduction): on a narrow window the list column shrinks to
-// exactly the 146px layer buttons plus a scrollbar gutter so the toolbar keeps
-// its room; wide windows keep the full list column. OSS switches at a 1350px
-// window with its 350px panel, so the switch here is offset by the difference
-// in full-size panel width, keeping the toolbar the same room at the switch.
-// .lp-right: 140 + the 1px hairline standing in for the splitter handle.
-const GROUP_PANEL_W = 141;
-// OSS list_w: LAYER_LIST_BUTTON_WIDTH 146 + scrollbar extent (17) + 2.
-const LIST_COLUMN_COMPACT_W = 165;
-const LIST_COLUMN_DEFAULT_W = 219;
-const LIST_COLUMN_MIN_W = 189;
-const PANEL_DEFAULT_W = LIST_COLUMN_DEFAULT_W + GROUP_PANEL_W;   // 360
-const PANEL_MIN_W = LIST_COLUMN_MIN_W + GROUP_PANEL_W;           // 330
+// The panel is sized to its widest CONTENT rather than to a round number, so
+// the canvas keeps everything the panel does not actually need:
+//
+//   list column   132px layer button + 12px scrollbar gutter + 2 slack = 146
+//   group column  112px Create Group button + the 1px hairline that stands in
+//                 for the splitter handle beside it = 113
+//   +1            .layer-panel's own border-inline-start
+//
+// The scrollbar gutter is reserved at all times (styles.css
+// `scrollbar-gutter: stable`), exactly as OSS reserves its scrollbar extent in
+// list_w, so the fixed-width buttons neither shift nor get squeezed the moment
+// the list grows past the viewport. It has to fit whichever thin scrollbar the
+// browser draws — Chromium honours the 8px in styles.css and lays out 10,
+// Firefox reads only `thin` and is a little wider — so the reservation is the
+// widest of those plus OSS's own 2px of slack.
+//
+// 112px clears the widest Create Group label of the seven languages (French
+// "Créer Groupe", 90px in bold 14px) with 11px each side, and the list column
+// clears the widest bottom-stack label (Spanish "Nuevo Cordón", 96px) with
+// 24px each side.
+//
+// This is also OSS's own compact geometry (layer_panel.py set_compact_reduction
+// trims the list column to exactly the buttons plus a scrollbar gutter), so the
+// port no longer needs a separate wide/compact split: the compact column is the
+// only column, and it is narrower at every window size than the old compact
+// mode was. The splitter can still widen the panel past this floor.
+const GROUP_PANEL_W = 113;
+const LIST_COLUMN_W = 146;
+const PANEL_BORDER_W = 1;
+const PANEL_DEFAULT_W = LIST_COLUMN_W + GROUP_PANEL_W + PANEL_BORDER_W;   // 260
+const PANEL_MIN_W = PANEL_DEFAULT_W;
 const PANEL_MAX_W = 860;
-const PANEL_COMPACT_W = LIST_COLUMN_COMPACT_W + GROUP_PANEL_W;   // 306
-const COMPACT_REDUCTION = PANEL_DEFAULT_W - PANEL_COMPACT_W;
-const COMPACT_WINDOW_WIDTH = 1350 + (PANEL_DEFAULT_W - 350);
-
-/** True while the viewport is narrower than OSS's compact threshold. */
-function useCompactLayout(): boolean {
-  const query = `(max-width: ${COMPACT_WINDOW_WIDTH - 1}px)`;
-  const [compact, setCompact] = useState(() =>
-    typeof window !== 'undefined' && window.matchMedia(query).matches);
-  useEffect(() => {
-    const mq = window.matchMedia(query);
-    const onChange = () => setCompact(mq.matches);
-    onChange();
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, [query]);
-  return compact;
-}
 
 export function App() {
   const theme = useEditorStore((s) => s.settings.theme);
@@ -59,14 +57,6 @@ export function App() {
   const showTabs = useEditorStore((s) => s.showTabs);
   const [panelW, setPanelW] = useState(PANEL_DEFAULT_W);
   const rtl = isRTL(language);
-  const compact = useCompactLayout();
-  // The splitter keeps the user's chosen width; compact mode takes the
-  // reduction off it (never below the compact floor), like OSS re-applying the
-  // outer split when the panel's minimum drops.
-  const effectivePanelW = compact
-    ? Math.max(PANEL_COMPACT_W, panelW - COMPACT_REDUCTION)
-    : panelW;
-  const panelMinW = compact ? PANEL_COMPACT_W : PANEL_MIN_W;
 
   useEffect(() => {
     const root = document.documentElement;
@@ -100,10 +90,10 @@ export function App() {
   return (
     <div className="app">
       <div
-        className={`shell${compact ? ' compact' : ''}`}
+        className="shell"
         style={{
-          ['--panel-w' as string]: `${effectivePanelW}px`,
-          ['--panel-min-w' as string]: `${panelMinW}px`,
+          ['--panel-w' as string]: `${panelW}px`,
+          ['--panel-min-w' as string]: `${PANEL_MIN_W}px`,
           ['--group-panel-w' as string]: `${GROUP_PANEL_W}px`,
         }}
       >
@@ -117,7 +107,7 @@ export function App() {
         <Splitter
           width={panelW}
           setWidth={setPanelW}
-          min={compact ? PANEL_COMPACT_W + COMPACT_REDUCTION : PANEL_MIN_W}
+          min={PANEL_MIN_W}
           max={PANEL_MAX_W}
           rtl={rtl}
         />

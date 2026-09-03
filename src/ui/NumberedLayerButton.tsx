@@ -22,7 +22,58 @@ import { ossIcon } from './icons';
 import { t } from './i18n';
 import './layerButton.css';
 
-// OSS NumberedLayerButton (numbered_layer_button.py). 146×40px, border: none, no
+// ---- centred-label auto-fit -------------------------------------------------
+// The layer name is painted centred across the WHOLE button, while the padlock
+// and the copy/paste column are absolute overlays on top of it, so a long name
+// runs underneath them. A mask name is two layer names joined with an
+// underscore, so it is the case that overflows: "10_12_11_12" is 97px in the
+// bold 16px face against the 78px a locked button leaves clear. OSS paints the
+// name at a fixed size and lets it collide; here it steps down just far enough
+// to clear whichever overlays that button is actually showing, which is what
+// lets the panel be this narrow. Short names — every unmasked layer — are
+// untouched at 16px.
+//
+// Geometry mirrors layerButton.css: the button is 132px, the padlock is a 22px
+// circle 5px in, the copy/paste column is 22px wide 9px in, and the attachable
+// strip is 9px flush to the trailing edge.
+const LAYER_BUTTON_W = 132;
+const PADLOCK_REACH = 5 + 22;
+const INDICATOR_REACH = 9 + 22;
+const ATTACH_REACH = 9;
+const LABEL_CLEARANCE = 3;      // breathing room, and the 1px text outline
+const LABEL_FONT_PX = 16;       // .nlb-label font-size
+const LABEL_MIN_PX = 10;
+
+let metricsCtx: CanvasRenderingContext2D | null | undefined;
+
+/** Width of `text` in the label's own bold face, via one shared canvas. */
+function measureLabel(text: string, px: number): number {
+  if (metricsCtx === undefined) metricsCtx = document.createElement('canvas').getContext('2d');
+  if (!metricsCtx) return 0;
+  metricsCtx.font = `700 ${px}px system-ui, -apple-system, sans-serif`;
+  return metricsCtx.measureText(text).width;
+}
+
+/**
+ * Font size for a centred label that must clear the overlays on this button.
+ * The text is centred, so an overlay reaching `r` from either edge caps the
+ * label at `2 * (half - r)` however few sides it sits on.
+ */
+function fitLabelSize(text: string, opts: {
+  padlock: boolean; indicator: boolean; attach: boolean;
+}): number {
+  const reach = Math.max(
+    opts.padlock ? PADLOCK_REACH : 0,
+    opts.indicator ? INDICATOR_REACH : 0,
+    opts.attach ? ATTACH_REACH : 0,
+  );
+  const room = LAYER_BUTTON_W - 2 * reach - 2 * LABEL_CLEARANCE;
+  const natural = measureLabel(text, LABEL_FONT_PX);
+  if (room <= 0 || natural <= room || natural <= 0) return LABEL_FONT_PX;
+  return Math.max(LABEL_MIN_PX, Math.floor(LABEL_FONT_PX * room / natural));
+}
+
+// OSS NumberedLayerButton (numbered_layer_button.py). 132×40px, border: none, no
 // border-radius. The layer name is rendered bold 16px (12pt) WHITE with a BLACK
 // outline (-webkit-text-stroke + a dual draw fallback), centered, +1px paint
 // nudge. All OSS state colors here are theme-INDEPENDENT literals.
@@ -231,6 +282,16 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
   const isPasteTarget =
     multiSelectMode && !!strandClipboard && !isCopySource &&
     !!strand && strand.type !== 'MaskedStrand' && !locked;
+
+  // Shrink the name only as far as the overlays this button actually shows
+  // require. The paste chips are hidden until hover but occupy the same column
+  // as the badge, so a paste target reserves it too rather than reflowing the
+  // name under the pointer.
+  const labelPx = fitLabelSize(name, {
+    padlock: !!selectable || locked,
+    indicator: isCopySource || isPasteTarget,
+    attach: !!attachable,
+  });
 
   // ---- circle / line gating by scanning children attached to this strand ----
   const childSides = (): { start: boolean; end: boolean } => {
@@ -585,7 +646,13 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
         onDrop={(e) => { if (onDrop) { e.preventDefault(); onDrop(orderIdx, e); } }}
         onDragEnd={(e) => onDragEnd?.(orderIdx, e)}
       >
-        <span className="nlb-label" data-text={name}>{name}</span>
+        <span
+          className="nlb-label"
+          data-text={name}
+          style={labelPx === LABEL_FONT_PX ? undefined : { fontSize: `${labelPx}px` }}
+        >
+          {name}
+        </span>
 
         {/* attachable green inner box (9px black outline is .nlb-attachable::before) */}
         {attachable && <span className="nlb-attach" aria-hidden />}
