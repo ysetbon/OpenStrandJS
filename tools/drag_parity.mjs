@@ -67,7 +67,9 @@ const GESTURES = [
   // drop the final position if it were wrong.
   { id: 'move-flick', mode: 'move', grab: { kind: 'handle', which: 'end' },
     path: Array.from({ length: 24 }, (_, i) => [Math.round(Math.cos(i / 3) * 110), Math.round(Math.sin(i / 3) * 110)]) },
-  // Press and release without moving: must select, must NOT create an undo step.
+  // Press and release without moving: selection reverts to whatever was selected
+  // before the press (move mode never leaves a new strand selected on release,
+  // move_mode.py:1648-1650), and must NOT create an undo step.
   { id: 'move-click-only', mode: 'move', grab: { kind: 'handle', which: 'end' }, path: [] },
   // ESC mid-drag: revert, no history entry, pre-press selection restored.
   { id: 'move-escape', mode: 'move', grab: { kind: 'handle', which: 'end' },

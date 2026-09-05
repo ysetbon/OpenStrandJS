@@ -3,7 +3,11 @@
 // control points move alone. Grab + selection semantics are a faithful port of
 // OpenStrand Studio's move_mode press logic (moveGrab): a click that misses every
 // endpoint/control-point square neither grabs NOR changes the selection (move mode
-// has no body hit-test — a body click does nothing, move_mode.py:1428-1443).
+// has no body hit-test — a body click does nothing, move_mode.py:1428-1443). A grab
+// that HITS a handle selects it only as a transient drag highlight: on release the
+// selection always reverts to whatever was selected before the press, whether the
+// pointer moved or not (move_mode.py:1648-1650) — move mode itself never leaves a
+// new strand selected once you let go.
 
 import { useEditorStore } from '../store/editorStore';
 import { moveGrab } from '../interaction/hitTest';
@@ -110,6 +114,7 @@ export const MoveMode: Mode = {
   onPointerUp(_p: PointerInfo, ctx: ModeContext) {
     if (drag) {
       const layer = drag.layer;
+      const prevSelection = drag.prevSelection;
       drag = null;
       const st = useEditorStore.getState();
       st.setDragging(false);
@@ -118,6 +123,13 @@ export const MoveMode: Mode = {
       // Re-hide cp2/center if the curve returned to straight (OSS mouseReleaseEvent:1620).
       st.mutateDoc((draft) => resetStraightCurveFlags(draft, layer));
       st.commit();               // one drag = one undo step (no-op if nothing changed)
+      // The grab-time selection (onPointerDown) is a TRANSIENT drag highlight, not a
+      // real selection change: OSS mouseReleaseEvent always restores the pre-press
+      // selection once a grab succeeded, whether the pointer moved or not
+      // (final_selected_strand = originally_selected_strand when was_moving,
+      // move_mode.py:1648-1650) — move mode never leaves a new strand selected on
+      // release; only Select mode's body click does that.
+      st.setSelection(prevSelection);
       ctx.requestRender();       // dragging=false -> one full-quality render (shadows + supersample)
     }
   },
