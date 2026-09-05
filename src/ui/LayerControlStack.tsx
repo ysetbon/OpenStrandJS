@@ -43,7 +43,9 @@ export function LayerControlStack() {
   const lang = useEditorStore((s) => s.settings.language);
   const lockMode = useEditorStore((s) => s.doc.lock_mode);
   const lockedLayers = useEditorStore((s) => s.doc.locked_layers);
-  const selected = useEditorStore((s) => s.selection.layerName);
+  // The panel's selection, not the canvas's: OSS update_delete_button_state keys off
+  // get_selected_layer() (the checked layer button), which a move-mode drag never moves.
+  const selected = useEditorStore((s) => s.doc.selected_strand_name);
   const strands = useEditorStore((s) => s.doc.strands);
   const multiSelectMode = useEditorStore((s) => s.multiSelectMode);
   const multiSelectedLayers = useEditorStore((s) => s.multiSelectedLayers);

@@ -235,6 +235,8 @@ export interface EditorState {
   setSettings: (patch: Partial<Settings>) => void;
   setMode: (mode: ModeName) => void;
   setSelection: (sel: Selection) => void;
+  // Canvas-only selection: leaves doc.selected_strand_name (the layer-panel button) alone.
+  setTransientSelection: (sel: Selection) => void;
   setDragging: (b: boolean) => void;
   setDragMoving: (moving: string[]) => void;
   setHover: (hover: { layerName: string | null; handle: HandleKind | null }) => void;
@@ -630,6 +632,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       ? { selection }
       : { selection, doc: { ...s.doc, selected_strand_name: selection.layerName } }
   )),
+  // The one exception to the lockstep above: a move-mode drag. OSS move_mode writes
+  // canvas.selected_* directly and never calls canvas.select_strand(), so a drag
+  // never reaches layer_panel.select_layer() — the highlighted layer button stays
+  // where it was while the canvas highlight follows the grabbed strand.
+  setTransientSelection: (selection) => set({ selection }),
   setDragging: (dragging) => set({ dragging }),
   setDragMoving: (dragMoving) => set({ dragMoving }),
   setHover: (hover) => set({ hover }),
