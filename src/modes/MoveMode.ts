@@ -7,7 +7,9 @@
 // that HITS a handle selects it only as a transient drag highlight: on release the
 // selection always reverts to whatever was selected before the press, whether the
 // pointer moved or not (move_mode.py:1648-1650) — move mode itself never leaves a
-// new strand selected once you let go.
+// new strand selected once you let go. That transient highlight is canvas-only:
+// the layer panel's highlighted button never moves during a drag (OSS move_mode
+// never calls canvas.select_strand(), the only path into layer_panel.select_layer()).
 
 import { useEditorStore } from '../store/editorStore';
 import { moveGrab } from '../interaction/hitTest';
@@ -56,7 +58,7 @@ export const MoveMode: Mode = {
         lastSnap: snapMove(p.world, st.settings, st.view.zoom, p.ctrl),
         prevSelection: st.selection,
       };
-      st.setSelection({ layerName: hit.layerName, handle: hit.handle });
+      st.setTransientSelection({ layerName: hit.layerName, handle: hit.handle });
       // Stage the provenance now: pointer-down is where we know WHAT was grabbed.
       st.beginGesture({ action: 'move.handle', source: 'mode', targets: [hit.layerName], detail: hit.handle });
       // Press-time auto-adjust: grabbing cp1 on a collapsed triangle snaps cp2 onto the
@@ -128,8 +130,10 @@ export const MoveMode: Mode = {
       // selection once a grab succeeded, whether the pointer moved or not
       // (final_selected_strand = originally_selected_strand when was_moving,
       // move_mode.py:1648-1650) — move mode never leaves a new strand selected on
-      // release; only Select mode's body click does that.
-      st.setSelection(prevSelection);
+      // release; only Select mode's body click does that. Transient on the way back
+      // too: doc.selected_strand_name was never touched, so the layer button is
+      // already right.
+      st.setTransientSelection(prevSelection);
       ctx.requestRender();       // dragging=false -> one full-quality render (shadows + supersample)
     }
   },
@@ -146,7 +150,7 @@ export const MoveMode: Mode = {
       st.setDragMoving([]);
       endWeldGesture();
       st.cancelGesture();             // restore the pre-drag document, drop the gesture
-      st.setSelection(d.prevSelection);
+      st.setTransientSelection(d.prevSelection);
       ctx.requestRender();
     }
   },
