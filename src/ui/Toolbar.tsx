@@ -1,12 +1,13 @@
 import { useRef, useState } from 'react';
-import { useEditorStore } from '../store/editorStore';
+import { tabTitleFor, useEditorStore } from '../store/editorStore';
 import { SettingsDialog } from './SettingsDialog';
+import { UnsavedChangesDialog } from './UnsavedChangesDialog';
 import { LayerStateDialog } from './LayerStateDialog';
 import { AngleAdjustDialog } from './dialogs/AngleAdjustDialog';
 import { t } from './i18n';
 import { ossIcon } from './icons';
 import { loadProject, serializeProject } from '../io/saveLoad';
-import { downloadJSON } from '../io/fileDialog';
+import { saveProjectFile } from '../io/fileDialog';
 import { exportPng } from '../io/exportPng';
 import { fitPan } from '../interaction/viewTransform';
 import type { ModeName } from '../model/types';
@@ -62,6 +63,9 @@ export function Toolbar() {
   // The strand the angle dialog is editing, or null when it is closed. OSS keeps
   // this on the canvas as angle_adjust_mode.active_strand.
   const [angleTarget, setAngleTarget] = useState<string | null>(null);
+  // Load with unsaved changes on the active tab: OSS load_project prompts
+  // Save / Discard / Cancel before the file picker opens.
+  const [loadPromptOpen, setLoadPromptOpen] = useState(false);
   const selectedLayer = useEditorStore((s) => s.selection.layerName);
   const selectedType = useEditorStore((s) =>
     (s.selection.layerName ? s.doc.strands[s.selection.layerName]?.type : undefined));
@@ -80,14 +84,46 @@ export function Toolbar() {
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    try { applyDoc(JSON.parse(await file.text())); }
+    try {
+      applyDoc(JSON.parse(await file.text()));
+      // OSS load_project -> tab_manager.mark_active_saved(filename): the active
+      // tab is clean and titled after the loaded file.
+      const st = useEditorStore.getState();
+      st.markTabSaved(st.activeTabId, file.name);
+    }
     catch (err) { console.error('Failed to load file:', err); alert('Could not load that file — see console.'); }
     e.target.value = '';
   }
 
-  function onSave() {
-    downloadJSON('openstrand_project.json', serializeProject(useEditorStore.getState().doc));
+  // OSS save_project: returns true only when a file was actually written; the
+  // active tab is then clean and titled after the file (mark_active_saved).
+  async function onSave(): Promise<boolean> {
+    const st = useEditorStore.getState();
+    const active = st.tabs.find((tb) => tb.id === st.activeTabId);
+    const res = await saveProjectFile(active?.filePath ?? 'openstrand_project.json', serializeProject(st.doc));
+    if (res.saved) useEditorStore.getState().markTabSaved(st.activeTabId, res.filename);
+    return res.saved;
   }
+
+  // OSS load_project: a dirty active tab is prompted first; Save must succeed
+  // (a cancelled save keeps the current tab and aborts the load).
+  function onLoad() {
+    const st = useEditorStore.getState();
+    const active = st.tabs.find((tb) => tb.id === st.activeTabId);
+    if (active?.dirty) { setLoadPromptOpen(true); return; }
+    fileRef.current?.click();
+  }
+  const loadAfterSave = async () => {
+    if (!(await onSave())) return;
+    setLoadPromptOpen(false);
+    fileRef.current?.click();
+  };
+  const loadDiscard = () => { setLoadPromptOpen(false); fileRef.current?.click(); };
+  const activeTabTitle = (() => {
+    const st = useEditorStore.getState();
+    const active = st.tabs.find((tb) => tb.id === st.activeTabId);
+    return active ? tabTitleFor(active, lang) : '';
+  })();
 
   // OSS handle_angle_adjust_click (main_window.py:1245-1262): with no selection, or
   // with a MASK selected, the button unpresses again immediately and nothing opens.
@@ -120,8 +156,8 @@ export function Toolbar() {
     if (b.toggle === 'points') { mutateDoc((d) => { d.show_control_points = !d.show_control_points; }); return; }
     if (b.toggle === 'shadow') { mutateDoc((d) => { d.shadow_enabled = !d.shadow_enabled; }); return; }
     if (b.toggle === 'tabs') { toggleTabs(); return; }
-    if (b.action === 'save') { onSave(); return; }
-    if (b.action === 'load') { fileRef.current?.click(); return; }
+    if (b.action === 'save') { void onSave(); return; }
+    if (b.action === 'load') { onLoad(); return; }
     if (b.action === 'image') { exportPng(); return; }
   };
 
@@ -151,6 +187,14 @@ export function Toolbar() {
       {angleTarget && <AngleAdjustDialog layerName={angleTarget} onClose={closeAngleAdjust} />}
       {stateOpen && <LayerStateDialog onClose={() => setStateOpen(false)} />}
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
+      {loadPromptOpen && (
+        <UnsavedChangesDialog
+          tabTitle={activeTabTitle}
+          onSave={() => { void loadAfterSave(); }}
+          onDiscard={loadDiscard}
+          onCancel={() => setLoadPromptOpen(false)}
+        />
+      )}
       <input ref={fileRef} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={onFile} />
     </div>
   );
