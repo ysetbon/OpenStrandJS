@@ -5,8 +5,9 @@
 
 import { create } from 'zustand';
 import type {
-  EditorDocument, HandleKind, ModeName, Point, Selection, Settings, StrandRecord, ViewState,
+  EditorDocument, HandleKind, Language, ModeName, Point, Selection, Settings, StrandRecord, ViewState,
 } from '../model/types';
+import { t as rawT } from '../ui/translations';
 
 // Transient new-strand / attach gesture (the rubber-band preview). Not part of
 // the document and not undoable; committed to the doc on pointer-up.
@@ -116,20 +117,50 @@ function saveSettings(s: Settings): void {
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch { /* ignore */ }
 }
 
-// Floating tab-edge overlay position, persisted across sessions.
+// Floating tab-edge overlay position, persisted across sessions (OSS
+// user_settings.txt "TabEdgePosition: anchor:<name>" / "ratio:<cx>,<cy>",
+// tab_bar_widget.get_position_setting / apply_position_setting). The edge is
+// either docked to one of the six magnet anchors, or free-floating at a stored
+// CENTER ratio of the canvas (so it keeps its relative place on resize).
+export const TAB_EDGE_ANCHORS = [
+  'top_left', 'top_center', 'top_right',
+  'bottom_left', 'bottom_center', 'bottom_right',
+] as const;
+export type TabEdgeAnchor = typeof TAB_EDGE_ANCHORS[number];
+export interface TabEdgePosition { anchor: TabEdgeAnchor | null; ratio: [number, number] | null; }
 const TAB_EDGE_KEY = 'openstrandjs.tabEdgePosition';
-const DEFAULT_TAB_EDGE: { anchor: string; dx: number; dy: number } = { anchor: 'bottom_center', dx: 0, dy: 0 };
+const DEFAULT_TAB_EDGE: TabEdgePosition = { anchor: 'bottom_center', ratio: null };
 
-function loadTabEdgePosition(): { anchor: string; dx: number; dy: number } {
+function loadTabEdgePosition(): TabEdgePosition {
   try {
     const raw = typeof localStorage !== 'undefined' && localStorage.getItem(TAB_EDGE_KEY);
-    if (raw) return { ...DEFAULT_TAB_EDGE, ...JSON.parse(raw) };
+    if (raw) {
+      const p = JSON.parse(raw) as { anchor?: unknown; ratio?: unknown };
+      if (Array.isArray(p.ratio) && p.ratio.length === 2
+          && typeof p.ratio[0] === 'number' && typeof p.ratio[1] === 'number') {
+        const clamp = (v: number) => Math.max(0, Math.min(1, v));
+        return { anchor: null, ratio: [clamp(p.ratio[0]), clamp(p.ratio[1])] };
+      }
+      // Also accepts the older {anchor, dx, dy} shape: the anchor is kept, the
+      // free offset (which OSS never had) is dropped.
+      if (typeof p.anchor === 'string' && (TAB_EDGE_ANCHORS as readonly string[]).includes(p.anchor)) {
+        return { anchor: p.anchor as TabEdgeAnchor, ratio: null };
+      }
+    }
   } catch { /* ignore */ }
   return { ...DEFAULT_TAB_EDGE };
 }
 
-function saveTabEdgePosition(p: { anchor: string; dx: number; dy: number }): void {
+function saveTabEdgePosition(p: TabEdgePosition): void {
   try { localStorage.setItem(TAB_EDGE_KEY, JSON.stringify(p)); } catch { /* ignore */ }
+}
+
+// OSS TabManager.title_for: an unsaved "Untitled N" tab is titled in the current
+// language (so it re-translates on a language change); file-backed / duplicated
+// tabs keep their stored title.
+export function tabTitleFor(tab: { name: string; untitledIndex?: number }, lang: Language): string {
+  if (tab.untitledIndex != null) return `${rawT('untitled', lang)} ${tab.untitledIndex}`;
+  return tab.name;
 }
 
 // view.zoom is pure-OSS 1.0 (= OSS zoom_factor default). The app's "65% default
@@ -204,6 +235,9 @@ export interface EditorState {
   }[];
   activeTabId: number;
   nextTabId: number;
+  // OSS TabManager._untitled_counter: "Untitled N" numbers are handed out by
+  // their own counter (duplicates and file-backed tabs never consume one).
+  untitledCounter: number;
   newTab: () => void;
   switchTab: (id: number) => void;
   closeTab: (id: number) => void;
@@ -212,9 +246,9 @@ export interface EditorState {
   markActiveDirty: () => void;
   markTabSaved: (id: number, path: string) => void;
   setTabEdgeVisible: (b: boolean) => void;
-  // Floating tab-edge overlay anchor/offset, persisted to localStorage.
-  tabEdgePosition: { anchor: string; dx: number; dy: number };
-  setTabEdgePosition: (pos: { anchor: string; dx?: number; dy?: number }) => void;
+  // Floating tab-edge overlay dock (anchor or free center ratio), persisted to localStorage.
+  tabEdgePosition: TabEdgePosition;
+  setTabEdgePosition: (pos: TabEdgePosition) => void;
 
   loadDocument: (doc: EditorDocument) => void;
   setDoc: (doc: EditorDocument) => void;
@@ -341,17 +375,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   presentMeta: null,
   pendingMeta: null,
   historyLog: [],
-  tabs: [{ id: 1, name: 'Untitled 1', untitledIndex: 1 }],
+  tabs: [{ id: 1, name: '', untitledIndex: 1 }],
   activeTabId: 1,
   nextTabId: 2,
+  untitledCounter: 1,
   tabEdgePosition: loadTabEdgePosition(),
 
   newTab: () => set((s) => {
     const tabs = s.tabs.map((t) => (t.id === s.activeTabId ? { ...t, doc: s.doc, view: s.view } : t));
     const id = s.nextTabId;
-    tabs.push({ id, name: `Untitled ${id}` });
+    const untitledCounter = s.untitledCounter + 1;
+    tabs.push({ id, name: '', untitledIndex: untitledCounter });
     return {
-      tabs, activeTabId: id, nextTabId: id + 1,
+      tabs, activeTabId: id, nextTabId: id + 1, untitledCounter,
       doc: emptyDocument(), view: { ...DEFAULT_VIEW, width: s.view.width, height: s.view.height },
       past: [], future: [], gestureBase: null, presentMeta: null, pendingMeta: null, selection: { layerName: null, handle: null },
       historyLog: appendLog(s.historyLog, 'reset', buildMeta({ action: 'system.new', source: 'system' }, null)),
@@ -374,18 +410,25 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     };
   }),
 
+  // OSS TabManager.close_tab (tab_manager.py): with no tabs left a fresh
+  // "Untitled N" replaces the closed one; closing the LIVE tab falls back to the
+  // neighbour that took its slot (the next tab, or the last one); closing a
+  // background tab leaves the live tab alone.
   closeTab: (id) => set((s) => {
+    const idx = s.tabs.findIndex((t) => t.id === id);
+    if (idx < 0) return {};
     const remaining = s.tabs.filter((t) => t.id !== id);
     if (remaining.length === 0) {
       const nid = s.nextTabId;
+      const untitledCounter = s.untitledCounter + 1;
       return {
-        tabs: [{ id: nid, name: `Untitled ${nid}` }], activeTabId: nid, nextTabId: nid + 1,
+        tabs: [{ id: nid, name: '', untitledIndex: untitledCounter }], activeTabId: nid, nextTabId: nid + 1, untitledCounter,
         doc: emptyDocument(), view: { ...s.view }, past: [], future: [], gestureBase: null, presentMeta: null, pendingMeta: null,
         selection: { layerName: null, handle: null }, docRevision: s.docRevision + 1,
       };
     }
     if (id !== s.activeTabId) return { tabs: remaining };
-    const target = remaining[0];
+    const target = remaining[Math.min(idx, remaining.length - 1)];
     const doc = target.doc ?? emptyDocument();
     return {
       tabs: remaining, activeTabId: target.id,
@@ -395,17 +438,22 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     };
   }),
 
-  // Clone the active doc into a brand-new tab named "<name> copy". The new tab
-  // becomes active and starts clean (no dirty flag, fresh history).
+  // OSS TabManager.duplicate_tab: clone the source into a new tab titled
+  // "<title> copy" (translated suffix), inserted right AFTER the source, made
+  // active, and flagged dirty (the copy exists nowhere on disk).
   duplicateTab: (id) => set((s) => {
     // Persist the active doc/view into its tab first so the source is current.
     const persisted = s.tabs.map((t) => (t.id === s.activeTabId ? { ...t, doc: s.doc, view: s.view } : t));
-    const src = persisted.find((t) => t.id === id);
-    if (!src) return {};
+    const idx = persisted.findIndex((t) => t.id === id);
+    if (idx < 0) return {};
+    const src = persisted[idx];
     const srcDoc = src.doc ?? (id === s.activeTabId ? s.doc : emptyDocument());
     const nid = s.nextTabId;
     const copyDoc = cloneDoc(srcDoc);
-    const tabs = [...persisted, { id: nid, name: `${src.name} copy`, doc: copyDoc, view: src.view }];
+    const lang = s.settings.language;
+    const name = `${tabTitleFor(src, lang)} ${rawT('tab_copy_suffix', lang)}`;
+    const tabs = [...persisted];
+    tabs.splice(idx + 1, 0, { id: nid, name, doc: copyDoc, view: src.view, dirty: true });
     return {
       tabs, activeTabId: nid, nextTabId: nid + 1,
       doc: copyDoc, view: src.view ? { ...src.view } : { ...DEFAULT_VIEW, width: s.view.width, height: s.view.height },
@@ -422,19 +470,21 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     return { tabs: s.tabs.map((t) => (t.id === s.activeTabId ? { ...t, dirty: true } : t)) };
   }),
 
-  // Record that a tab was saved to `path`: clears dirty, sets filePath and name.
+  // OSS TabManager.mark_active_saved: the tab is clean, remembers its file, and
+  // is titled after the file name WITHOUT its extension; it is no longer an
+  // auto-translated "Untitled N" tab.
   markTabSaved: (id, path) => set((s) => {
-    const name = path.split(/[\\/]/).pop() || path;
-    return { tabs: s.tabs.map((t) => (t.id === id ? { ...t, dirty: false, filePath: path, name } : t)) };
+    const base = path.split(/[\\/]/).pop() || path;
+    const name = base.replace(/\.[^.]+$/, '') || base;
+    return { tabs: s.tabs.map((t) => (t.id === id ? { ...t, dirty: false, filePath: path, name, untitledIndex: undefined } : t)) };
   }),
 
   // Tab-edge overlay visibility reuses the showTabs flag.
   setTabEdgeVisible: (b) => set({ showTabs: b }),
 
-  setTabEdgePosition: (pos) => set((s) => {
-    const next = { anchor: pos.anchor, dx: pos.dx ?? s.tabEdgePosition.dx, dy: pos.dy ?? s.tabEdgePosition.dy };
-    saveTabEdgePosition(next);
-    return { tabEdgePosition: next };
+  setTabEdgePosition: (pos) => set(() => {
+    saveTabEdgePosition(pos);
+    return { tabEdgePosition: pos };
   }),
 
   loadDocument: (doc) => set((s) => ({
@@ -697,7 +747,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   multiSelectMode: false,
   multiSelectedLayers: [],
   previouslyLockedLayers: [],
-  showTabs: true,
+  // OSS setup_tabs_feature: the edge starts hidden and the Tabs button unchecked.
+  showTabs: false,
   drawNames: false,
   setPanMode: (panMode) => set({ panMode }),
   togglePanMode: () => set((s) => ({ panMode: !s.panMode })),

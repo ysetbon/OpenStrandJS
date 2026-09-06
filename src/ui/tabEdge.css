@@ -1,5 +1,5 @@
-/* Floating draggable Tab Edge (UI_PORT_PLAN §2.7).
-   Parented absolutely inside .canvas-wrap; translucent panel + grip + chips. */
+/* Floating draggable tab edge (OSS tab_bar_widget.py). Absolutely positioned
+   inside .canvas-wrap; every colour is a --tab-* token from theme.css. */
 
 .tab-edge {
   position: absolute;
@@ -8,128 +8,57 @@
   align-items: center;
   gap: 8px;
   height: 53px;
-  padding: 0 10px 0 0;
+  /* OSS layout margins: grip strip 26 on the leading side, 12 trailing, 6 top/bottom. */
+  padding: 6px 12px 6px 26px;
   border-radius: 13px;
   background: var(--tab-panel-bg, rgba(25, 25, 25, 0.529));
   border: 1px solid var(--tab-border, rgba(210, 210, 210, 0.471));
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
-  user-select: none;
   box-sizing: border-box;
-}
-
-.tab-edge-dragging {
-  cursor: grabbing;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38);
-}
-
-/* Grip strip — 26px wide, 3 rows × 2 cols dot matrix; the drag handle. */
-.tab-edge-grip {
-  flex: 0 0 26px;
-  align-self: stretch;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-top-left-radius: 13px;
-  border-bottom-left-radius: 13px;
-  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
   touch-action: none;
+  cursor: default;
 }
-.tab-edge-grip:active { cursor: grabbing; }
+.tab-edge-rtl { padding: 6px 26px 6px 12px; }
+/* Closed hand while the edge is being dragged (OSS ClosedHandCursor). */
+.tab-edge-dragging, .tab-edge-dragging * { cursor: grabbing !important; }
 
-.tab-grip-dots {
-  display: grid;
-  grid-template-columns: repeat(2, 3px);
-  grid-template-rows: repeat(3, 3px);
-  gap: 3px;
+/* Grip strip: 26px wide on the leading edge, 2px dots in 2 columns (5px apart)
+   × 3 rows (9px apart), inactive text colour at alpha 150. Open hand on hover. */
+.tab-edge-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 26px;
+  cursor: grab;
 }
+.tab-edge-rtl .tab-edge-grip { left: auto; right: 0; }
+.tab-grip-dots {
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  margin-top: -11px;         /* rows at cy-10, cy-1, cy+8 */
+  display: grid;
+  grid-template-columns: repeat(2, 2px);
+  grid-template-rows: repeat(3, 2px);
+  column-gap: 3px;
+  row-gap: 7px;
+}
+.tab-edge-rtl .tab-grip-dots { left: auto; right: 11px; }
 .tab-grip-dots i {
-  width: 3px;
-  height: 3px;
+  width: 2px;
+  height: 2px;
   border-radius: 50%;
   background: var(--tab-inactive-text, #f0f0f0);
-  opacity: 0.55;
+  opacity: 0.588;            /* alpha 150 */
 }
 
-/* Plus button — 22×22. */
+/* Icon buttons (OSS IconButton): painted glyph in the chip's text colour, and a
+   faint rounded backdrop of that same colour (alpha 45) on hover. */
+.tab-icon-btn,
 .tab-edge-plus {
-  flex: 0 0 22px;
-  width: 22px;
-  height: 22px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--tab-inactive-text, #f0f0f0);
-  cursor: pointer;
-}
-.tab-edge-plus:hover { background: rgba(128, 128, 128, 0.176); /* alpha 45 */ }
-.tab-edge-plus:active { background: rgba(128, 128, 128, 0.27); }
-
-/* Chip strip. */
-.tab-edge-chips {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  max-width: 70vw;
-  padding: 2px;
-  scrollbar-width: thin;
-}
-.tab-edge-chips::-webkit-scrollbar { height: 6px; }
-.tab-edge-chips::-webkit-scrollbar-thumb {
-  background: rgba(128, 128, 128, 0.35);
-  border-radius: 3px;
-}
-
-/* Individual tab chip — 40px tall, radius 9. */
-.tab-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 40px;
-  max-width: 200px;
-  padding: 0 6px 0 10px;
-  border-radius: 9px;
-  background: var(--tab-inactive-bg, rgba(45, 45, 45, 0.667));
-  color: var(--tab-inactive-text, #f0f0f0);
-  cursor: pointer;
-  box-sizing: border-box;
-  white-space: nowrap;
-}
-.tab-chip-active {
-  background: var(--tab-active-bg, #e8e8e8);
-  color: var(--tab-active-text, #111111);
-}
-
-.tab-chip-dot {
-  flex: 0 0 7px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: currentColor;
-  opacity: 0.85;
-}
-
-.tab-chip-title {
-  font-size: 18px;
-  line-height: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 130px;
-}
-.tab-chip-active .tab-chip-title { font-weight: 700; }
-
-/* Icon buttons inside a chip — 18×18, hover backdrop alpha 45 radius 4. */
-.tab-icon-btn {
-  flex: 0 0 18px;
-  width: 18px;
-  height: 18px;
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -139,31 +68,83 @@
   background: transparent;
   color: inherit;
   cursor: pointer;
-  opacity: 0.82;
+  line-height: 0;
 }
-.tab-icon-btn:hover {
-  background: rgba(128, 128, 128, 0.176);
-  opacity: 1;
+.tab-icon-btn { width: 18px; height: 18px; }
+.tab-edge-plus { width: 22px; height: 22px; color: var(--tab-inactive-text, #f0f0f0); }
+.tab-icon-btn:hover,
+.tab-edge-plus:hover {
+  background: color-mix(in srgb, currentColor 17.6%, transparent);
 }
-.tab-icon-btn:active { background: rgba(128, 128, 128, 0.27); }
+.tab-icon-btn svg, .tab-edge-plus svg { display: block; }
 
-/* Snap pill hint — 128×38, shown over the candidate magnet anchor while dragging. */
-.tab-snap-pill {
+/* Tab chip: 40px tall, radius 9, margins 11/3/7/3 and spacing 7 (mirrored in RTL).
+   Chips share the edge's slack width like Qt's Preferred-policy widgets. */
+.tab-chip {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 40px;
+  padding: 3px 7px 3px 11px;
+  border-radius: 9px;
+  background: var(--tab-inactive-bg, rgba(45, 45, 45, 0.667));
+  color: var(--tab-inactive-text, #f0f0f0);
+  cursor: pointer;
+  box-sizing: border-box;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.tab-chip-rtl { padding: 3px 11px 3px 7px; }
+.tab-chip-active {
+  background: var(--tab-active-bg, #e8e8e8);
+  color: var(--tab-active-text, #111111);
+}
+
+/* Painted dirty dot: 6px circle in an 8px box, in the text colour. */
+.tab-chip-dot {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  box-sizing: border-box;
+  padding: 1px;
+  background: currentColor;
+  background-clip: content-box;
+  border-radius: 50%;
+}
+
+/* Title: 9pt (= 12px), bold on the active tab, expanding into the slack. */
+.tab-chip-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  line-height: normal;
+  text-align: start;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tab-chip-active .tab-chip-title { font-weight: 700; }
+
+/* Magnet overlay: full-canvas, mouse-transparent, under the edge. */
+.tab-snap-overlay {
   position: absolute;
+  left: 0;
+  top: 0;
   z-index: 39;
-  width: 128px;
-  height: 38px;
-  border-radius: 19px;
-  border: 1.5px dashed var(--tab-border, rgba(210, 210, 210, 0.471));
-  background: var(--tab-panel-bg, rgba(25, 25, 25, 0.4));
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
   pointer-events: none;
+  overflow: visible;
 }
 
-/* Unsaved-changes confirm — emphasized Save button. */
+/* Unsaved-changes prompt (OSS QMessageBox.Warning): icon beside the text. */
 .tab-confirm-body {
-  min-width: 220px;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 260px;
   padding: 4px 0;
 }
+.tab-confirm-icon { flex: 0 0 auto; }
+.tab-confirm-text { display: flex; flex-direction: column; gap: 14px; }
+.tab-confirm-title { white-space: pre-wrap; }
 .tab-confirm-save { font-weight: 600; }

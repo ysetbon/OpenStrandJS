@@ -1,33 +1,33 @@
 import React, { useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
-import { t } from './i18n';
-import { Modal } from './Modal';
+import { serializeProject } from '../io/saveLoad';
+import { saveProjectFile } from '../io/fileDialog';
+import { UnsavedChangesDialog } from './UnsavedChangesDialog';
 
-// A single tab chip inside the floating TabEdge. Height 40, radius 9.
-// Contents: [dirty dot if tab.dirty][title 9pt, bold when active][duplicate icon][close X].
-// Closing a dirty tab opens an unsaved-changes confirm (Save / Discard / Cancel).
+// OSS tab_bar_widget.TabChip: a 40px-tall, radius-9 chip laid out as
+// [dirty dot][title 9pt, bold when active][duplicate][close] (margins 11/3/7/3,
+// spacing 7). In RTL the row is mirrored: [close][duplicate][title][dot].
+// The edge sizes chips to 1.1× their natural width (TAB_WIDTH_SCALE) and the
+// title expands into the slack. Pressing a chip never starts an edge drag.
 export function TabChip(props: {
   id: number;
-  name: string;
+  title: string;
   active: boolean;
   dirty?: boolean;
+  rtl: boolean;
 }): JSX.Element {
-  const { id, name, active, dirty } = props;
-  const lang = useEditorStore((s) => s.settings.language);
+  const { id, title, active, dirty, rtl } = props;
   const switchTab = useEditorStore((s) => s.switchTab);
   const closeTab = useEditorStore((s) => s.closeTab);
   const duplicateTab = useEditorStore((s) => s.duplicateTab);
   const markTabSaved = useEditorStore((s) => s.markTabSaved);
-  // "Skip the unsaved-changes prompt when closing a tab" (Settings -> General).
-  // FLAGGED DEVIATION: OSS stores this setting and never reads it back
-  // (settings_dialog.py:69/138 are its only mentions), so ticking it there does
-  // nothing. The prompt it names exists here, so the box does what it says.
+  // "Skip the unsaved-changes prompt when closing a tab" (Settings -> General;
+  // OSS canvas.skip_close_tab_warning read in TabManager.close_tab).
   const skipCloseWarning = useEditorStore((s) => s.settings.skip_close_tab_warning);
 
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  const onCloseClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const onCloseClick = () => {
     if (dirty && !skipCloseWarning) {
       setConfirmOpen(true);
       return;
@@ -35,14 +35,17 @@ export function TabChip(props: {
     closeTab(id);
   };
 
-  const onDuplicate = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    duplicateTab(id);
-  };
-
-  // Save = mark saved then close (file plumbing wired later; treat as in-memory save).
-  const doSave = () => {
-    markTabSaved(id, name);
+  // Save = write THIS tab's project to a file, then close it. If the save is
+  // cancelled the tab stays (OSS: "if not saved: return"). A background tab is
+  // serialized from its stored doc, so the live tab is never disturbed.
+  const doSave = async () => {
+    const s = useEditorStore.getState();
+    const tab = s.tabs.find((tb) => tb.id === id);
+    if (!tab) { setConfirmOpen(false); return; }
+    const doc = id === s.activeTabId ? s.doc : (tab.doc ?? s.doc);
+    const res = await saveProjectFile(tab.filePath ?? 'openstrand_project.json', serializeProject(doc));
+    if (!res.saved) return;
+    markTabSaved(id, res.filename);
     setConfirmOpen(false);
     closeTab(id);
   };
@@ -52,71 +55,68 @@ export function TabChip(props: {
   };
   const doCancel = () => setConfirmOpen(false);
 
+  // Consume presses so the click selects the chip instead of dragging the edge.
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+
+  const dot = dirty ? <span className="tab-chip-dot" aria-hidden /> : null;
+  const label = <span className="tab-chip-title" dir={rtl ? 'rtl' : 'ltr'}>{title}</span>;
+  const dup = (
+    <button
+      type="button"
+      className="tab-icon-btn"
+      aria-label="Duplicate tab"
+      onPointerDown={stop}
+      onClick={(e) => { stop(e); duplicateTab(id); }}
+    >
+      <DuplicateGlyph />
+    </button>
+  );
+  const close = (
+    <button
+      type="button"
+      className="tab-icon-btn"
+      aria-label="Close tab"
+      onPointerDown={stop}
+      onClick={(e) => { stop(e); onCloseClick(); }}
+    >
+      <CloseGlyph />
+    </button>
+  );
+
   return (
     <>
       <div
-        className={'tab-chip' + (active ? ' tab-chip-active' : '')}
+        className={'tab-chip' + (active ? ' tab-chip-active' : '') + (rtl ? ' tab-chip-rtl' : '')}
         role="tab"
         aria-selected={active}
-        title={name}
+        onPointerDown={stop}
         onClick={() => switchTab(id)}
       >
-        {dirty ? <span className="tab-chip-dot" aria-hidden /> : null}
-        <span className="tab-chip-title">{name}</span>
-        <button
-          type="button"
-          className="tab-icon-btn tab-chip-dup"
-          title="Duplicate"
-          aria-label="Duplicate tab"
-          onClick={onDuplicate}
-        >
-          <DuplicateGlyph />
-        </button>
-        <button
-          type="button"
-          className="tab-icon-btn tab-chip-close"
-          title={t('close', lang)}
-          aria-label={t('close', lang)}
-          onClick={onCloseClick}
-        >
-          <CloseGlyph />
-        </button>
+        {rtl ? <>{close}{dup}{label}{dot}</> : <>{dot}{label}{dup}{close}</>}
       </div>
 
       {confirmOpen ? (
-        <Modal
-          title={t('unsaved_tab_title', lang)}
-          onClose={doCancel}
-          footer={
-            <>
-              <button type="button" onClick={doCancel}>{t('cancel', lang)}</button>
-              <button type="button" onClick={doDiscard}>{t('discard', lang)}</button>
-              <button type="button" className="tab-confirm-save" onClick={doSave}>{t('save', lang)}</button>
-            </>
-          }
-        >
-          <div className="tab-confirm-body">{name}</div>
-        </Modal>
+        <UnsavedChangesDialog tabTitle={title} onSave={doSave} onDiscard={doDiscard} onCancel={doCancel} />
       ) : null}
     </>
   );
 }
 
-// 18×18 overlapping-squares "duplicate" glyph.
+// OSS IconButton('duplicate'), 18×18: two overlapping 5px squares, pen 1.6.
 function DuplicateGlyph(): JSX.Element {
   return (
-    <svg width="13" height="13" viewBox="0 0 18 18" aria-hidden focusable="false">
-      <rect x="5.5" y="5.5" width="9" height="9" rx="1.6" fill="none" stroke="currentColor" strokeWidth="1.4" />
-      <rect x="3" y="3" width="9" height="9" rx="1.6" fill="none" stroke="currentColor" strokeWidth="1.4" />
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden focusable="false">
+      <rect x="8" y="5" width="5" height="5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      <rect x="5" y="8" width="5" height="5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
     </svg>
   );
 }
 
-// 18×18 X "close" glyph.
+// OSS IconButton('close'), 18×18: an X from (5,5) to (13,13), pen 1.6 round caps.
 function CloseGlyph(): JSX.Element {
   return (
-    <svg width="13" height="13" viewBox="0 0 18 18" aria-hidden focusable="false">
-      <path d="M4.5 4.5 L13.5 13.5 M13.5 4.5 L4.5 13.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden focusable="false">
+      <path d="M5 5 L13 13 M13 5 L5 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   );
 }

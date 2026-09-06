@@ -26,3 +26,41 @@ export function downloadDataURL(filename: string, dataUrl: string): void {
   a.click();
   a.remove();
 }
+
+// Result of a project save: OSS save_project returns True only when a file was
+// actually written (False when the user cancels the Save dialog), and callers
+// (tab close / load prompts) rely on that to avoid discarding work.
+export interface SaveResult { saved: boolean; filename: string; }
+
+// Save a project JSON, reporting whether it really happened. Where the browser
+// offers a real Save dialog (File System Access API: Chrome/Edge), use it — the
+// user picks the name, and cancelling is observable. Elsewhere fall back to a
+// download, which cannot be cancelled once triggered, so it counts as saved.
+export async function saveProjectFile(suggestedName: string, data: unknown): Promise<SaveResult> {
+  const name = suggestedName.endsWith('.json') ? suggestedName : `${suggestedName}.json`;
+  const picker = (window as unknown as {
+    showSaveFilePicker?: (opts: unknown) => Promise<{
+      name: string;
+      createWritable: () => Promise<{ write: (d: string) => Promise<void>; close: () => Promise<void> }>;
+    }>;
+  }).showSaveFilePicker;
+  if (typeof picker === 'function') {
+    try {
+      const handle = await picker.call(window, {
+        suggestedName: name,
+        types: [{ description: 'JSON Files', accept: { 'application/json': ['.json'] } }],
+      });
+      const w = await handle.createWritable();
+      await w.write(JSON.stringify(data, null, 2));
+      await w.close();
+      return { saved: true, filename: handle.name };
+    } catch (err) {
+      // AbortError = the user cancelled the dialog. Anything else (a denied
+      // permission, a write failure) is also "not saved".
+      if (!(err instanceof DOMException && err.name === 'AbortError')) console.error('Save failed:', err);
+      return { saved: false, filename: name };
+    }
+  }
+  downloadJSON(name, data);
+  return { saved: true, filename: name };
+}
