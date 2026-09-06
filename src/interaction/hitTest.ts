@@ -10,7 +10,8 @@
 // checks — locks only block moving/attaching, enforced elsewhere).
 
 import type { EditorDocument, HandleKind, Point, Settings, StrandRecord } from '../model/types';
-import { distToPolyline, sampleCenterline } from './hitGeometry';
+import { distToPolyline, geometryParams, sampleCenterline } from './hitGeometry';
+import { biasControlsVisible, biasPositions } from '../model/biasControl';
 import { revisionConnTable } from './connections';
 import { maskComponents } from '../model/layerName';
 
@@ -34,8 +35,20 @@ function isInteractable(s: StrandRecord | undefined, doc: EditorDocument): s is 
 // offered on the same gate as OSS draws/grabs it: enable_third_control_point AND
 // triangle_has_moved (NOT control_point_center_locked, which is only SET by grabbing it —
 // move_mode.py:2080; strand_drawing_canvas.py:6174). So visible == grabbable.
-export function strandHandles(s: StrandRecord, enableThird = false): { handle: HandleKind; pos: Point }[] {
+export function strandHandles(
+  s: StrandRecord, enableThird = false, showBias = false,
+): { handle: HandleKind; pos: Point }[] {
   const out: { handle: HandleKind; pos: Point }[] = [];
+  // Curvature bias squares come first — OSS tests them before every other control
+  // point (move_mode.py:1987). Only when biasControlsVisible (settings + locked
+  // centre + moved triangle), which the caller evaluates.
+  if (showBias) {
+    const bp = biasPositions(s);
+    if (bp) {
+      out.push({ handle: 'bias_triangle', pos: bp.triangle });
+      out.push({ handle: 'bias_circle', pos: bp.circle });
+    }
+  }
   if (enableThird && s.triangle_has_moved && s.control_point_center) {
     out.push({ handle: 'control_point_center', pos: s.control_point_center });
   }
@@ -76,7 +89,7 @@ function pointInDeletionRect(p: Point, r: import('../model/types').DeletionRect)
 // protrude only ~2px past the flat end and are covered by the tolerance.
 function strandFootprintHit(world: Point, s: StrandRecord, settings: Settings): boolean {
   const reach = s.width / 2 + s.stroke_width + HIT_TOL;
-  const poly = sampleCenterline(s, settings.curve_params);
+  const poly = sampleCenterline(s, geometryParams(settings));
   if (distToPolyline(world, poly) <= reach) return true;
   const cc = (s.extra?.closed_connections as [boolean, boolean] | undefined) ?? [false, false];
   for (const side of [0, 1] as const) {
@@ -93,8 +106,9 @@ function maskFootprintHit(world: Point, ms: StrandRecord, doc: EditorDocument, s
   if (!comp) return false;
   const a = doc.strands[comp.first], b = doc.strands[comp.second];
   if (!a || !b) return false;
-  const dA = distToPolyline(world, sampleCenterline(a, settings.curve_params));
-  const dB = distToPolyline(world, sampleCenterline(b, settings.curve_params));
+  const geo = geometryParams(settings);
+  const dA = distToPolyline(world, sampleCenterline(a, geo));
+  const dB = distToPolyline(world, sampleCenterline(b, geo));
   const strokeLayer = dA <= a.width / 2 + a.stroke_width + HIT_TOL && dB <= b.width / 2 + b.stroke_width + HIT_TOL;
   const fillLayer = dA <= a.width / 2 + HIT_TOL && dB <= b.width / 2 + b.stroke_width + 2 + HIT_TOL;
   if (!strokeLayer && !fillLayer) return false;
@@ -180,14 +194,23 @@ function canMoveSide(doc: EditorDocument, s: StrandRecord, side: 0 | 1): boolean
 }
 
 // Grabbable control points of a strand, in OSS try_move_control_points order:
-// cp1 (always) -> cp2 (only if control_point2_shown) -> center. OSS gates the center
+// bias squares (when shown, move_mode.py:1987) -> cp1 (always) -> cp2 (only if
+// control_point2_shown) -> center. OSS gates the center
 // on the GLOBAL enable_third_control_point toggle AND triangle_has_moved (move_mode.py:
 // 2080); grabbing it is what LOCKS it. So we gate on `enableThird && triangle_has_moved`,
 // NOT on control_point_center_locked (which would be chicken-and-egg: locked is only set
 // BY grabbing the center). With the feature off (default), the center is never grabbable —
 // exactly matching OSS with the toggle off.
-function moveCpHandles(s: StrandRecord, enableThird: boolean): { handle: HandleKind; pos: Point }[] {
-  const out: { handle: HandleKind; pos: Point }[] = [{ handle: 'control_point1', pos: s.control_points[0] }];
+function moveCpHandles(s: StrandRecord, enableThird: boolean, showBias: boolean): { handle: HandleKind; pos: Point }[] {
+  const out: { handle: HandleKind; pos: Point }[] = [];
+  if (showBias) {
+    const bp = biasPositions(s);
+    if (bp) {
+      out.push({ handle: 'bias_triangle', pos: bp.triangle });
+      out.push({ handle: 'bias_circle', pos: bp.circle });
+    }
+  }
+  out.push({ handle: 'control_point1', pos: s.control_points[0] });
   if (s.control_point2_shown) out.push({ handle: 'control_point2', pos: s.control_points[1] });
   if (enableThird && s.triangle_has_moved && s.control_point_center) {
     out.push({ handle: 'control_point_center', pos: s.control_point_center });
@@ -205,7 +228,8 @@ export function moveGrab(world: Point, doc: EditorDocument, settings: Settings, 
     if (!moveGrabbable(s)) continue;
     if (doc.lock_mode && doc.locked_layers.includes(name)) continue;  // locked: no CP grab
     if (!allowedByMoveSelection(doc, settings, name, true)) continue;
-    for (const h of moveCpHandles(s, enableThird)) {
+    // Bias squares use the same 50px grab area (curvature_bias_control.selection_size).
+    for (const h of moveCpHandles(s, enableThird, biasControlsVisible(s, settings, doc))) {
       if (inSquare(world, h.pos, CP_HALF)) return { layerName: name, handle: h.handle };
     }
   }
@@ -271,8 +295,9 @@ export function maskHitTest(world: Point, doc: EditorDocument, settings: Setting
     // Match the renderer's mask region: first.stroked(width) ∩
     // second.stroked(width + 2*stroke + 4) -> first uses ±width/2, second is
     // expanded by stroke + 2 on each side.
-    const inA = distToPolyline(world, sampleCenterline(a, settings.curve_params)) <= a.width / 2 + 1;
-    const inB = distToPolyline(world, sampleCenterline(b, settings.curve_params)) <= b.width / 2 + b.stroke_width + 3;
+    const geo = geometryParams(settings);
+    const inA = distToPolyline(world, sampleCenterline(a, geo)) <= a.width / 2 + 1;
+    const inB = distToPolyline(world, sampleCenterline(b, geo)) <= b.width / 2 + b.stroke_width + 3;
     if (inA && inB) return name;
   }
   return null;

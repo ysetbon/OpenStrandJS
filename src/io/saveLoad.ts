@@ -12,6 +12,7 @@
 import type {
   DeletionRect, EditorDocument, GroupRecord, KnotConnection, Point, RGBA, StrandRecord, StrandType,
 } from '../model/types';
+import { readBiasData, serializedBias } from '../model/biasControl';
 import { resolveGroupMembers } from '../model/group';
 
 // Keys consumed into typed StrandRecord fields — everything else goes to `extra`.
@@ -282,6 +283,10 @@ function serializeStrand(s: StrandRecord, index: number): Record<string, unknown
   if (s.triangle_has_moved !== undefined) out.triangle_has_moved = s.triangle_has_moved;
   if (s.control_point2_shown !== undefined) out.control_point2_shown = s.control_point2_shown;
   if (s.control_point2_activated !== undefined) out.control_point2_activated = s.control_point2_activated;
+  // Curvature bias rides `extra`, but its square positions are derived from the
+  // (possibly edited) control points — refresh them the way OSS's
+  // update_positions_from_biases does before it serializes bias_control.
+  if (s.type !== 'MaskedStrand' && readBiasData(s)) out.bias_control = serializedBias(s);
 
   if (s.type === 'AttachedStrand') {
     out.attached_to = s.attached_to ?? null;

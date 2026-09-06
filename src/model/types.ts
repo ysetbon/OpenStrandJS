@@ -133,7 +133,11 @@ export type ModeName = 'select' | 'move' | 'attach' | 'mask' | 'view' | 'rotate'
 
 export type HandleKind =
   | 'start' | 'end'
-  | 'control_point1' | 'control_point2' | 'control_point_center';
+  | 'control_point1' | 'control_point2' | 'control_point_center'
+  // Curvature bias squares (curvature_bias_control.py): slide along the
+  // centre->cp1 / centre->cp2 lines. Data lives in `extra.bias_control`
+  // (see model/biasControl.ts).
+  | 'bias_triangle' | 'bias_circle';
 
 export interface Selection {
   layerName: LayerName | null;

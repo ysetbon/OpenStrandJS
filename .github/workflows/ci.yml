@@ -93,6 +93,13 @@ jobs:
       - name: Guards — drag masks, third control point, curvature bias
         run: node tools/curve_and_mask_check.mjs
 
+      # Curvature bias CONTROLS (curvature_bias_control.py): the triangle/circle
+      # squares on the centre->cp lines — show/grab gate, grab priority, the
+      # pointer->bias projection, undo, save/load, copy/paste, and a real hover +
+      # drag against the editor with overlay pixel checks.
+      - name: Guards — curvature bias controls
+        run: node tools/bias_check.mjs
+
       - name: Guards — rotate / angle dialog / width dialog reach the canvas
         run: node tools/tier3_ui_check.mjs dist-editor
 

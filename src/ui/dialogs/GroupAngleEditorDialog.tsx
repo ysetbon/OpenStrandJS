@@ -7,6 +7,7 @@ import { setStrandAngle } from '../../store/actions';
 import { requestRender } from '../../renderer/renderScheduler';
 import { t } from '../i18n';
 import type { EditorDocument } from '../../model/types';
+import { geometryParams } from '../../interaction/hitGeometry';
 
 // "Edit Strand Angles" for a group — OSS StrandAngleEditDialog (group_layers.py:6109).
 // A 9-column table (Layer, Angle, Adjust ±1°, Fast Adjust, End X, End Y, x, 180+x,
@@ -90,7 +91,7 @@ export function GroupAngleEditorDialog(props: {
   // from the resulting doc (a welded sibling's angle can shift).
   const setAngle = (n: string, deg: number) => {
     const v = normalize180(deg);
-    const curve = useEditorStore.getState().settings.curve_params;
+    const curve = geometryParams(useEditorStore.getState().settings);
     useEditorStore.getState().mutateDoc((d) => setStrandAngle(d, n, v, curve));
     const doc = useEditorStore.getState().doc;
     const next: Record<string, number> = {};

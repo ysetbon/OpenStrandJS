@@ -24,6 +24,7 @@ import { useEditorStore } from '../store/editorStore';
 import { rotateGrab, snapshotRotate, applyRotateSnapshot, seedMaskCenters } from '../store/actions';
 import type { RotateSnapshot } from '../store/actions';
 import type { Mode, ModeContext, PointerInfo } from './Mode';
+import { geometryParams } from '../interaction/hitGeometry';
 
 let gesture: { snap: RotateSnapshot; rotated: boolean } | null = null;
 
@@ -49,7 +50,7 @@ export const RotateMode: Mode = {
     // Ground each dependent mask's centroid from the CURRENT geometry so its erase
     // windows drift from the very first frame rather than from the second.
     const moving = new Set<string>([snap.name, ...snap.children.map((c) => c.name)]);
-    st.mutateDoc((d) => seedMaskCenters(d, moving, st.settings.curve_params));
+    st.mutateDoc((d) => seedMaskCenters(d, moving, geometryParams(st.settings)));
     st.setDragging(true);
     st.setDragMoving([...moving]);
     ctx.requestRender();
@@ -63,7 +64,7 @@ export const RotateMode: Mode = {
     g.rotated = true;
     // In-place edit, same contract as MoveMode: snapshotRotate + beginGesture
     // ran at pointer-down, so the undo baseline is already independent.
-    st.mutateDocLive((d) => applyRotateSnapshot(d, g.snap, angle, st.settings.curve_params));
+    st.mutateDocLive((d) => applyRotateSnapshot(d, g.snap, angle, geometryParams(st.settings)));
     ctx.requestRender();   // paint this move in THIS frame, not the next one
   },
 

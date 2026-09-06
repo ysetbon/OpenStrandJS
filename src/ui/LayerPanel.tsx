@@ -19,6 +19,7 @@ import { GroupAngleEditorDialog } from './dialogs/GroupAngleEditorDialog';
 import { RenameDialog } from './dialogs/RenameDialog';
 import { MainStrandSelectDialog } from './dialogs/MainStrandSelectDialog';
 import { MaskGridDialog } from './dialogs/MaskGridDialog';
+import { geometryParams } from '../interaction/hitGeometry';
 
 // Adapters: the C4 dialogs expose onSubmit; GroupPanel's contract expects
 // onAccept. GroupMove/Rotate/Shadow already match ({groupName,onClose}) so they
@@ -157,7 +158,7 @@ export function LayerPanel() {
     if (!first) { st.setFirstMaskedLayer(name); requestRender(); return; }
     if (first === name) { st.setFirstMaskedLayer(null); requestRender(); return; }
     let newName: string | null = null;
-    commitEdit((d) => { newName = createMask(d, first, name, st.settings.curve_params); },
+    commitEdit((d) => { newName = createMask(d, first, name, geometryParams(st.settings)); },
       { action: 'mask.create', source: 'panel', targets: [first, name] });
     st.setFirstMaskedLayer(null);
     if (newName) setSelection({ layerName: newName, handle: null });

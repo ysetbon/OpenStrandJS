@@ -4,6 +4,7 @@ import { useEditorStore, cloneDoc } from '../../store/editorStore';
 import { snapshotAngleAdjust, applyAngleAdjustSnapshot, clearAllLocks } from '../../store/actions';
 import { requestRender } from '../../renderer/renderScheduler';
 import { t } from '../i18n';
+import { geometryParams } from '../../interaction/hitGeometry';
 
 // OSS "Adjust Angle and Length" (angle_adjust_mode.py prompt_for_adjustments:127-263).
 // Two slider+spinbox rows over the selected strand, previewing live:
@@ -58,7 +59,7 @@ export function AngleAdjustDialog(props: { layerName: string; onClose: () => voi
     setAngle(a);
     setLength(l);
     const st = useEditorStore.getState();
-    st.mutateDoc((d) => applyAngleAdjustSnapshot(d, snap, a, l, st.settings.curve_params));
+    st.mutateDoc((d) => applyAngleAdjustSnapshot(d, snap, a, l, geometryParams(st.settings)));
     // angle_adjustment is measured from the angle at activate() (:218).
     st.setAngleAdjust({ layerName, spanDeg: a - snap.initialAngle });
   };
