@@ -10,6 +10,11 @@ import './dialogs.css';
 // and only that one acts on a key.
 const modalStack: object[] = [];
 
+/**
+ * Shared dialog shell for every OSS QDialog port: a dimmed backdrop, a title bar
+ * the user can drag the window around by, an optional close X, and Escape/Enter
+ * handling owned by the topmost open dialog only.
+ */
 export function Modal(props: {
   title: string;
   onClose: () => void;
