@@ -140,15 +140,29 @@ try {
   }
 
   // ------------------------------------------------ 4. middle-drag pan, likewise
+  // Same closed hand and pan-button press as a right-drag, and the view moves
+  // with the drag; everything lets go on release.
   await setMode('attach');
   await page.mouse.move(cx, cy);
+  const beforeMiddle = await state();
   await page.mouse.down({ button: 'middle' });
   await settle();
   ok('middle-button press shows the closed hand', (await cursor()) === 'grabbing', `got '${await cursor()}'`);
+  ok('middle-button press presses the pan button with the closed-hand icon',
+    (await panIcon()) === 'pan_closed.png' && (await panChecked()), `icon=${await panIcon()} checked=${await panChecked()}`);
+  ok('middle-button press sets store.panning', (await state()).panning === true);
   await page.mouse.move(cx - 40, cy, { steps: 3 });
+  await settle();
+  const midMiddle = await state();
+  ok('middle-button drag pans the view',
+    midMiddle.view.panX === beforeMiddle.view.panX - 40 && midMiddle.view.panY === beforeMiddle.view.panY,
+    `pan ${beforeMiddle.view.panX},${beforeMiddle.view.panY} -> ${midMiddle.view.panX},${midMiddle.view.panY}`);
   await page.mouse.up({ button: 'middle' });
   await settle();
   ok('middle-button release restores the mode cursor', (await cursor()) === 'crosshair', `got '${await cursor()}'`);
+  ok('middle-button release lets the pan button go (open-hand icon, unchecked)',
+    (await panIcon()) === 'pan_open.png' && !(await panChecked()), `icon=${await panIcon()} checked=${await panChecked()}`);
+  ok('middle-button release clears store.panning', (await state()).panning === false);
 
   // ------------------------------------------------ 5. the hand tool (pan mode)
   // OSS toggle_pan_mode: OpenHandCursor + the pan button checked with the

@@ -102,6 +102,7 @@ export class InteractionHost {
     return this.mode().cursor;
   }
 
+  /** Write cursorFor() to the canvas element, touching the style only on a change. */
   private syncCursor(): void {
     const cursor = this.cursorFor();
     if (this.el.style.cursor !== cursor) this.el.style.cursor = cursor;
