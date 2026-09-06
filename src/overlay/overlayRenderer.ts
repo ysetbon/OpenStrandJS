@@ -20,7 +20,7 @@ import {
 } from '../model/factory';
 import { worldToScreen } from '../interaction/viewTransform';
 import { strandHandles } from '../interaction/hitTest';
-import { sampleCenterline } from '../interaction/hitGeometry';
+import { geometryParams, sampleCenterline } from '../interaction/hitGeometry';
 import { biasControlsVisible, biasPositions, readBias, NEUTRAL_BIAS } from '../model/biasControl';
 
 export interface OverlayState {
@@ -443,7 +443,7 @@ function maskBodyHighlight(
 ): void {
   const s = st.doc.strands[layer];
   if (!s || s.type === 'MaskedStrand') return;
-  const world = sampleCenterline(s, st.settings.curve_params, 18, st.settings.enable_curvature_bias_control);
+  const world = sampleCenterline(s, geometryParams(st.settings));
   if (world.length < 2) return;
   const pts = world.map((wp) => worldToScreen(wp, st.view));
   const half = (s.width + s.stroke_width * 2) * st.view.zoom / 2;   // body half-width
@@ -591,7 +591,19 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, st: OverlayState): vo
       if (!allowedBySelection(st, name, true)) continue;
       drawConnectors(ctx, st, s);
       drawGlyphs(ctx, st, s);
-      // Curvature bias squares follow the glyphs (canvas.py:6312-6315, :6494).
+    }
+  }
+  // Curvature bias squares follow the glyphs (canvas.py:6312-6315, :6494) but sit
+  // under their OWN gate: biasControlsVisible already folds in show_control_points
+  // plus OSS's lone-strand clause, so a single strand with control points hidden
+  // still shows the squares it can grab (visible == grabbable).
+  if (!hideCpInView) {
+    const affected = st.dragging && mode === 'move' && selection.handle ? selection.layerName : null;
+    for (const name of doc.order) {
+      const s = doc.strands[name];
+      if (!interactable(s, doc)) continue;
+      if (affected && name !== affected) continue;
+      if (!allowedBySelection(st, name, true)) continue;
       if (biasControlsVisible(s, st.settings, doc)) drawBiasControls(ctx, st, s);
     }
   }

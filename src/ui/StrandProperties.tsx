@@ -4,6 +4,7 @@ import {
   resetMask, setColor, setMemberNames, setShadowOnly, setStrandAngleLength, setWidth,
 } from '../store/actions';
 import { ColorField } from './ColorField';
+import { geometryParams } from '../interaction/hitGeometry';
 
 // Editor for the selected strand: fill/stroke color (RGBA), width + stroke width,
 // "apply to whole set" propagation, shadow-only. Masked strands get Reset mask.
@@ -22,7 +23,7 @@ export function StrandProperties() {
   const commitEdit = useEditorStore((s) => s.commitEdit);
   // Threaded into the angle/length edit so a mask built on this strand drifts
   // its deletion rectangles with the same centroid rule a drag uses.
-  const curve = useEditorStore((s) => s.settings.curve_params);
+  const curve = useEditorStore((s) => geometryParams(s.settings));
   const [wholeSet, setWholeSet] = useState(false);
   const doc = useEditorStore((s) => s.doc);
 

@@ -30,8 +30,12 @@ export const NEUTRAL_BIAS = 0.5;
 // OSS undo_redo_manager treats |Δbias| <= 0.001 as "unchanged".
 export const BIAS_EPS = 0.001;
 
+// A stored bias is a fraction of the centre->cp line, so anything outside [0, 1]
+// (a hand-edited file, a foreign writer) is clamped at the read boundary; a
+// missing or non-finite value reads as the fallback.
+const clamp01 = (v: number): number => Math.max(0, Math.min(1, v));
 const num = (v: unknown, fallback: number): number =>
-  typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+  typeof v === 'number' && Number.isFinite(v) ? clamp01(v) : fallback;
 
 export function readBiasData(s: StrandRecord): BiasControlData | null {
   const bc = s.extra?.bias_control;
@@ -101,7 +105,7 @@ export function serializedBias(s: StrandRecord): BiasControlData {
 // Write one bias. Always installs a FRESH bias_control object (never mutates the
 // one in place) so an in-flight gesture's cloned undo baseline can't alias it.
 export function setBias(s: StrandRecord, kind: BiasKind, value: number): void {
-  const v = Math.max(0, Math.min(1, value));
+  const v = clamp01(value);
   const b = readBias(s);
   if (kind === 'triangle') b.triangle = v; else b.circle = v;
   s.extra = {
@@ -119,8 +123,9 @@ export function setBiases(s: StrandRecord, triangle: number, circle: number): vo
 // Are this strand's bias squares shown/grabbable? Port of
 // curvature_bias_control.py::should_show_controls:
 //   * both General-page toggles on (bias requires the third control point);
-//   * the centre is LOCKED (manually positioned) — bias only shapes the 3-point
-//     profile, which is what a locked centre selects;
+//   * the centre is LOCKED (manually positioned). This gates only the SQUARES:
+//     OSS keeps the stored biases and _build_curve_profile applies them to the
+//     unlocked profile too (strand.py:1534-1560), as does strand-renderer.js;
 //   * the triangle has moved (the same gate as the centre square itself);
 //   * control points are shown — or the document holds a single strand, OSS's
 //     "test mode" shortcut.

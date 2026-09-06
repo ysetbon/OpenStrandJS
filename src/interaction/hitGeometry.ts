@@ -17,7 +17,16 @@ const norm = (v: Point): Point => { const l = len(v); return l < 0.001 ? { x: 0,
 interface Cubic { p0: Point; cp1: Point; cp2: Point; p3: Point; }
 type Profile = { mode: 'line' } | { mode: 'multi'; segments: Cubic[] };
 
-type Curve = Settings['curve_params'];
+// The curve-shaping inputs every geometry helper needs: OSS's three curve
+// parameters plus the curvature-bias toggle (both read off the canvas in
+// _build_curve_profile). `geometryParams(settings)` builds one from the live
+// settings; a bare `settings.curve_params` still type-checks and simply means
+// "bias off", which is what the fidelity oracle and older callers expect.
+type Curve = Settings['curve_params'] & { enable_curvature_bias_control?: boolean };
+
+export function geometryParams(settings: Pick<Settings, 'curve_params' | 'enable_curvature_bias_control'>): Curve {
+  return { ...settings.curve_params, enable_curvature_bias_control: settings.enable_curvature_bias_control };
+}
 
 // Faithful port of _build_curve_profile. The curvature biases are read from the
 // strand only while the setting is on (OSS reads bias_control.triangle_bias /
@@ -80,7 +89,9 @@ function cubicAt(c: Cubic, t: number): Point {
 
 // Sampled centerline (world space). ~per-segment resolution good enough for
 // click hit-testing.
-export function sampleCenterline(s: StrandRecord, curve: Curve, perSeg = 18, enableBias = false): Point[] {
+export function sampleCenterline(
+  s: StrandRecord, curve: Curve, perSeg = 18, enableBias = !!curve.enable_curvature_bias_control,
+): Point[] {
   const enableThird = s.control_point_center != null;
   const prof = buildProfile(s, curve, enableThird, enableBias);
   if (prof.mode === 'line') return [s.start, s.end];

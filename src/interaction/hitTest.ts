@@ -10,7 +10,7 @@
 // checks — locks only block moving/attaching, enforced elsewhere).
 
 import type { EditorDocument, HandleKind, Point, Settings, StrandRecord } from '../model/types';
-import { distToPolyline, sampleCenterline } from './hitGeometry';
+import { distToPolyline, geometryParams, sampleCenterline } from './hitGeometry';
 import { biasControlsVisible, biasPositions } from '../model/biasControl';
 import { revisionConnTable } from './connections';
 import { maskComponents } from '../model/layerName';
@@ -89,7 +89,7 @@ function pointInDeletionRect(p: Point, r: import('../model/types').DeletionRect)
 // protrude only ~2px past the flat end and are covered by the tolerance.
 function strandFootprintHit(world: Point, s: StrandRecord, settings: Settings): boolean {
   const reach = s.width / 2 + s.stroke_width + HIT_TOL;
-  const poly = sampleCenterline(s, settings.curve_params, 18, settings.enable_curvature_bias_control);
+  const poly = sampleCenterline(s, geometryParams(settings));
   if (distToPolyline(world, poly) <= reach) return true;
   const cc = (s.extra?.closed_connections as [boolean, boolean] | undefined) ?? [false, false];
   for (const side of [0, 1] as const) {
@@ -106,9 +106,9 @@ function maskFootprintHit(world: Point, ms: StrandRecord, doc: EditorDocument, s
   if (!comp) return false;
   const a = doc.strands[comp.first], b = doc.strands[comp.second];
   if (!a || !b) return false;
-  const bias = settings.enable_curvature_bias_control;
-  const dA = distToPolyline(world, sampleCenterline(a, settings.curve_params, 18, bias));
-  const dB = distToPolyline(world, sampleCenterline(b, settings.curve_params, 18, bias));
+  const geo = geometryParams(settings);
+  const dA = distToPolyline(world, sampleCenterline(a, geo));
+  const dB = distToPolyline(world, sampleCenterline(b, geo));
   const strokeLayer = dA <= a.width / 2 + a.stroke_width + HIT_TOL && dB <= b.width / 2 + b.stroke_width + HIT_TOL;
   const fillLayer = dA <= a.width / 2 + HIT_TOL && dB <= b.width / 2 + b.stroke_width + 2 + HIT_TOL;
   if (!strokeLayer && !fillLayer) return false;
@@ -295,9 +295,9 @@ export function maskHitTest(world: Point, doc: EditorDocument, settings: Setting
     // Match the renderer's mask region: first.stroked(width) ∩
     // second.stroked(width + 2*stroke + 4) -> first uses ±width/2, second is
     // expanded by stroke + 2 on each side.
-    const bias = settings.enable_curvature_bias_control;
-    const inA = distToPolyline(world, sampleCenterline(a, settings.curve_params, 18, bias)) <= a.width / 2 + 1;
-    const inB = distToPolyline(world, sampleCenterline(b, settings.curve_params, 18, bias)) <= b.width / 2 + b.stroke_width + 3;
+    const geo = geometryParams(settings);
+    const inA = distToPolyline(world, sampleCenterline(a, geo)) <= a.width / 2 + 1;
+    const inB = distToPolyline(world, sampleCenterline(b, geo)) <= b.width / 2 + b.stroke_width + 3;
     if (inA && inB) return name;
   }
   return null;

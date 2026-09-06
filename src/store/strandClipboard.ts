@@ -15,7 +15,7 @@
 // the biases are stored and re-derived on paste).
 
 import type { EditorDocument, Point, RGBA, StrandRecord } from '../model/types';
-import { readBias, readBiasData, setBiases } from '../model/biasControl';
+import { readBias, setBiases } from '../model/biasControl';
 
 export const COPY_PROPERTIES = [
   'start_point',
@@ -92,10 +92,10 @@ export function snapshotStrandData(
       control_point2_shown: !!s.control_point2_shown,
       control_point2_activated: !!s.control_point2_activated,
     };
-    if (readBiasData(s)) {
-      const b = readBias(s);
-      snap.control_points.bias = { triangle_bias: b.triangle, circle_bias: b.circle };
-    }
+    // Always stored, neutral included: OSS gives every strand a bias control when
+    // the feature is on, so copying a neutral source onto a biased target resets it.
+    const b = readBias(s);
+    snap.control_points.bias = { triangle_bias: b.triangle, circle_bias: b.circle };
   }
   return snap;
 }

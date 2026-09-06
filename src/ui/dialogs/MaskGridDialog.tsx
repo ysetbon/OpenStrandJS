@@ -4,6 +4,7 @@ import { useEditorStore } from '../../store/editorStore';
 import { createMask } from '../../store/actions';
 import { resolveGroupMembers } from '../../model/group';
 import { t, tf } from '../i18n';
+import { geometryParams } from '../../interaction/hitGeometry';
 
 // OSS "Create Mask Grid" (mask_grid_dialog.py): an N×N directional crossing
 // matrix. Rows and columns are the group's strands; ticking cell (row, col)
@@ -16,7 +17,7 @@ export function MaskGridDialog(props: { groupName: string; onClose: () => void }
   const { groupName, onClose } = props;
   const lang = useEditorStore((s) => s.settings.language);
   const doc = useEditorStore((s) => s.doc);
-  const curve = useEditorStore((s) => s.settings.curve_params);
+  const curve = useEditorStore((s) => geometryParams(s.settings));
 
   // Group's regular (non-masked) members in z-order — these index the matrix.
   const strands = useMemo(() => {

@@ -15,6 +15,7 @@ import { useEditorStore } from '../store/editorStore';
 import { maskStrandsAtPoint } from '../interaction/hitTest';
 import { createMask } from '../store/actions';
 import type { Mode, ModeContext, PointerInfo } from './Mode';
+import { geometryParams } from '../interaction/hitGeometry';
 
 export const MaskMode: Mode = {
   name: 'mask',
@@ -48,7 +49,7 @@ export const MaskMode: Mode = {
     const first = pending[0];
     let newName: string | null = null;
     st.commitEdit(
-      (draft) => { newName = createMask(draft, first, layer, st.settings.curve_params); },
+      (draft) => { newName = createMask(draft, first, layer, geometryParams(st.settings)); },
       { action: 'mask.create', source: 'mode', targets: [first, layer] },
     );
     st.setMaskPending([]);

@@ -61,7 +61,7 @@ try { symlinkSync(path.join(root, 'node_modules'), path.join(out, 'node_modules'
 const require = createRequire(path.join(out, 'x.js'));
 const { moveHandle } = require(path.join(out, 'store/actions.js'));
 const { moveGrab } = require(path.join(out, 'interaction/hitTest.js'));
-const { sampleCenterline } = require(path.join(out, 'interaction/hitGeometry.js'));
+const { sampleCenterline, geometryParams, maskCentroid, strandsCross } = require(path.join(out, 'interaction/hitGeometry.js'));
 const bias = require(path.join(out, 'model/biasControl.js'));
 const { strandVisualEqual } = require(path.join(out, 'store/visualEqual.js'));
 const { serializeProject, loadProject } = require(path.join(out, 'io/saveLoad.js'));
@@ -121,6 +121,11 @@ console.log('--- positions + writes (update_positions_from_biases / setBias)');
   ok('a fresh extra object is installed (no aliasing into an undo baseline)', s.extra !== before);
   ok('values are clamped to [0, 1]', (bias.setBias(s, 'circle', 1.7), near(bias.readBias(s).circle, 1)));
   ok('absent data reads as neutral', bias.isNeutralBias(mk()));
+  const dirty = mk({ extra: { bias_control: { triangle_bias: 4, circle_bias: -2 } } });
+  ok('out-of-range stored values are clamped at the read boundary',
+    near(bias.readBias(dirty).triangle, 1) && near(bias.readBias(dirty).circle, 0));
+  const junk = mk({ extra: { bias_control: { triangle_bias: 'x', circle_bias: NaN } } });
+  ok('non-numeric stored values read as neutral', bias.isNeutralBias(junk));
 }
 
 console.log('--- show / grab gate (should_show_controls)');
@@ -181,6 +186,20 @@ console.log('--- hit-test centerline honours the bias only while enabled');
   ok('a biased strand samples a different centerline when the setting is on', maxDiff(a, b) > 5, String(maxDiff(a, b)));
   ok('...and the same centerline as neutral when the setting is off', maxDiff(a, c) < 1e-9, String(maxDiff(a, c)));
   ok('endpoints are fixed either way', near(b[0].x, 100) && near(b[b.length - 1].x, 500));
+  // The mask helpers take the same Curve object; geometryParams(settings) carries the
+  // toggle so mask creation / centroid drift see the same centerline as hit-testing.
+  const geoOn = geometryParams(SETTINGS()), geoOff = geometryParams(SETTINGS({ enable_curvature_bias_control: false }));
+  ok('geometryParams carries the toggle', geoOn.enable_curvature_bias_control === true && geoOff.enable_curvature_bias_control === false
+    && near(geoOn.base_fraction, CURVE.base_fraction));
+  const d1 = sampleCenterline(biased, geoOn), d2 = sampleCenterline(biased, geoOff);
+  ok('sampleCenterline defaults its bias gate from the Curve object', maxDiff(d1, b) < 1e-9 && maxDiff(d2, a) < 1e-9);
+  // A vertical crosser through the biased strand: its mask centroid moves with the bias.
+  const cross = mk({ layer_name: '2_1', set_number: 2, start: P(300, 100), end: P(300, 500), control_points: [P(300, 233), P(300, 366)],
+    control_point_center: P(300, 300), control_point_center_locked: false, triangle_has_moved: false });
+  const cOn = maskCentroid(biased, cross, geoOn), cOff = maskCentroid(biased, cross, geoOff);
+  ok('maskCentroid follows the bias when the toggle is on', cOn && cOff && Math.hypot(cOn.x - cOff.x, cOn.y - cOff.y) > 1,
+    JSON.stringify([cOn, cOff]));
+  ok('strandsCross still detects the crossing under either setting', strandsCross(biased, cross, geoOn) && strandsCross(biased, cross, geoOff));
 }
 
 console.log('--- undo dedup');
@@ -219,8 +238,11 @@ console.log('--- copy / paste (Control Points property)');
   applyStrandData(doc, snap, '2_1', 'start');
   ok('paste applies them to the target', near(bias.readBias(doc.strands['2_1']).triangle, 0.25)
     && near(bias.readBias(doc.strands['2_1']).circle, 0.9));
-  const snapNoBias = snapshotStrandData(mk(), ['control_points']);
-  ok('a neutral source snapshots no bias block', snapNoBias.control_points.bias === undefined);
+  const snapNeutral = snapshotStrandData(mk(), ['control_points']);
+  ok('a neutral source snapshots the neutral biases (OSS gives every strand a bias control)',
+    snapNeutral.control_points.bias && near(snapNeutral.control_points.bias.triangle_bias, 0.5));
+  applyStrandData(doc, snapNeutral, '2_1', 'start');
+  ok('...so pasting it onto a biased target resets the target to neutral', bias.isNeutralBias(doc.strands['2_1']));
   ok('the snapshot is a value copy', (bias.setBias(src, 'triangle', 0.7), near(snap.control_points.bias.triangle_bias, 0.25)));
 }
 rmSync(out, { recursive: true, force: true });
@@ -354,6 +376,16 @@ try {
     // F. third control point off force-hides bias controls too.
     await reset({ enable_third_control_point: false });
     out.noThirdHover = await hover(triSq);
+
+    // G. a LONE strand with control points hidden: OSS's should_show_controls still
+    // shows (and grabs) the bias squares, so they must be drawn and hoverable.
+    await reset({});
+    st().setDoc({ ...st().doc, show_control_points: false }); await settle(8);
+    out.loneHiddenHover = await hover(triSq);
+    await hover({ x: 900, y: 800 });         // move off so the hot-yellow tint doesn't colour the sample
+    await settle(4);
+    out.loneHiddenPx = pixel({ x: triSq.x + 6, y: triSq.y - 6 });
+    out.loneHiddenCp1Px = pixel({ x: cp1.x + 8, y: cp1.y + 2 });   // inside cp1's glyph if it were drawn
     return out;
   }, { project });
 } finally {
@@ -390,6 +422,11 @@ ok('with the bias setting off nothing is hovered there', r.offHover.handle === n
 ok('...and nothing is drawn there', !isGreen(r.offPx), JSON.stringify(r.offPx));
 ok('...and a drag there changes nothing', r.offDrag.bias === null && near(r.offDrag.cp1.x, 300), JSON.stringify(r.offDrag));
 ok('with the third control point off the bias squares are gone too', r.noThirdHover.handle === null, JSON.stringify(r.noThirdHover));
+
+console.log('--- browser: lone strand with control points hidden (OSS test-mode clause)');
+ok('the bias square is still hoverable', r.loneHiddenHover.handle === 'bias_triangle', JSON.stringify(r.loneHiddenHover));
+ok('...and still drawn', isGreen(r.loneHiddenPx), JSON.stringify(r.loneHiddenPx));
+ok('...while the regular glyph layer stays hidden', !isGreen(r.loneHiddenCp1Px), JSON.stringify(r.loneHiddenCp1Px));
 
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS');
 process.exit(fails ? 1 : 0);

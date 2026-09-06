@@ -18,6 +18,7 @@ import { moveHandle, snapGrid, snapMove, autoAdjustCp1OnGrab, resetStraightCurve
 import type { HandleKind, Point, Selection, StrandRecord } from '../model/types';
 import { biasPosition } from '../model/biasControl';
 import type { Mode, ModeContext, PointerInfo } from './Mode';
+import { geometryParams } from '../interaction/hitGeometry';
 
 const isBiasHandle = (h: HandleKind): boolean => h === 'bias_triangle' || h === 'bias_circle';
 
@@ -81,7 +82,7 @@ export const MoveMode: Mode = {
       }
       // Ground each affected mask's centroid from current geometry so its deletion
       // rectangles track from the very first drag frame (OSS keeps centers always-live).
-      st.mutateDoc((d) => seedMaskCenters(d, moving, st.settings.curve_params));
+      st.mutateDoc((d) => seedMaskCenters(d, moving, geometryParams(st.settings)));
       st.setDragging(true);
       // Topology is invariant across an endpoint drag: mint a per-gesture weld-graph
       // token so moveHandle reuses one cached connection table for the whole gesture.
@@ -113,7 +114,7 @@ export const MoveMode: Mode = {
       // In-place edit (no per-frame document clone, no layer-panel re-render):
       // the gesture's undo baseline was snapshotted at pointer-down, so the
       // history entry this drag will commit is untouched by it.
-      st.mutateDocLive((doc) => moveHandle(doc, d.layer, d.handle, pos, st.settings.curve_params));
+      st.mutateDocLive((doc) => moveHandle(doc, d.layer, d.handle, pos, geometryParams(st.settings)));
       ctx.requestRender();   // paint this move in THIS frame, not the next one
     } else {
       const hit = moveGrab(p.world, st.doc, st.settings, st.docRevision);   // hover mirrors what a press would grab
