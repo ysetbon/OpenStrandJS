@@ -137,6 +137,14 @@ jobs:
       - name: Guards — pan correctness
         run: node tools/pan_fidelity.mjs
 
+      # Collapsible group column (OSS group_rail.py, PRs #18/#19 there): the
+      # column collapses to a 40px rail and the canvas gains exactly that width,
+      # the state persists across a reload, the rail mirrors the groups, its
+      # create tile follows the language (G / ק), a tile expands and flashes
+      # its group, Ctrl+G toggles except under a modal dialog.
+      - name: Guards — collapsible group column
+        run: node tools/group_rail_check.mjs
+
       - name: Editor smoke — built app boots cleanly
         run: node tools/ci_smoke.mjs editor dist-editor
 

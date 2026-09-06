@@ -12,13 +12,20 @@
 //        Move Strands, Rotate Strands, Edit Strand Angles, Edit Shadows,
 //        Create Mask Grid, Duplicate Group, Rename Group, [sep], Delete Group.
 //
+// Collapsed (store.groupPanelCollapsed, OSS layer_panel.set_group_panel_collapsed),
+// the button and tree give way to the 40px GroupRail (OSS group_rail.py): its
+// create tile opens the very same Create Group dialog while staying collapsed,
+// and a group tile expands the column again, scrolls that group's row into view
+// and flashes it for 900ms in the tree's selection colors (OSS
+// GroupPanel.focus_group). The dialogs render in both states.
+//
 // The five member dialogs (Move/Rotate/ShadowEditor/Rename/MainStrandSelect) are
 // the subject of C4. To stay tsc-clean and self-contained *before* C4 lands,
 // GroupPanel accepts them via an optional `dialogs` prop (a GroupDialogs bag).
 // Integration (and C4) pass the real components; until then GroupPanel falls
 // back to built-in Modal-based placeholders so the panel is fully usable.
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import {
   createGroup,
@@ -31,6 +38,7 @@ import { resolveGroupMembers } from '../model/group';
 import { t } from './i18n';
 import { ContextMenu, MenuItem } from './ContextMenu';
 import { Modal } from './Modal';
+import { GroupRail } from './GroupRail';
 import './groupPanel.css';
 
 /* ------------------------------------------------------------------ */
@@ -211,8 +219,21 @@ export function GroupPanel(props: GroupPanelProps): JSX.Element {
   const strands = useEditorStore((s) => s.doc.strands);
   const lang = useEditorStore((s) => s.settings.language);
   const commitEdit = useEditorStore((s) => s.commitEdit);
+  const collapsed = useEditorStore((s) => s.groupPanelCollapsed);
+  const setGroupPanelCollapsed = useEditorStore((s) => s.setGroupPanelCollapsed);
+  // OSS disable_controls (mask editing) disables Create Group and, with it, the
+  // rail's create tile.
+  const controlsDisabled = useEditorStore((s) => s.maskEditTarget != null);
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  // Group row flashed in the selection colors after a rail tile expanded the
+  // column (OSS focus_group / FOCUS_FLASH_MS). One timer for all flashes,
+  // restarted on each call, so a second activation inside the flash window
+  // extends it rather than having the first timer wipe the second highlight.
+  const [flashGroup, setFlashGroup] = useState<string | null>(null);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  useEffect(() => () => { if (flashTimer.current) clearTimeout(flashTimer.current); }, []);
   const [menu, setMenu] = useState<{ group: string; x: number; y: number } | null>(null);
   const [dialog, setDialog] = useState<DialogState>({ kind: 'none' });
 
@@ -225,6 +246,39 @@ export function GroupPanel(props: GroupPanelProps): JSX.Element {
     setExpanded((e) => ({ ...e, [name]: !(name in e ? e[name] : true) }));
 
   const isExpanded = (name: string) => (name in expanded ? expanded[name] : true);
+
+  const FOCUS_FLASH_MS = 900;
+
+  // OSS GroupPanel.focus_group: expand the group, scroll its row to the top and
+  // flash it in the selection colors for a moment so the eye lands on it. The
+  // pointer is still over the rail's spot at that point, so hover cannot do
+  // this job. The scroll happens once the tree is back in the layout (below).
+  const focusGroup = (name: string) => {
+    if (!groups[name]) return;
+    setExpanded((e) => ({ ...e, [name]: true }));
+    setFlashGroup(name);
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => {
+      flashTimer.current = null;
+      setFlashGroup(null);
+    }, FOCUS_FLASH_MS);
+  };
+
+  useEffect(() => {
+    if (!flashGroup || collapsed) return;
+    const row = rowRefs.current[flashGroup];
+    if (row && typeof row.scrollIntoView === 'function') {
+      // QAbstractItemView.PositionAtTop
+      row.scrollIntoView({ block: 'start' });
+    }
+  }, [flashGroup, collapsed]);
+
+  // A rail tile: expand the column and bring that group into view
+  // (OSS layer_panel._on_rail_group_activated).
+  const onRailActivate = (name: string) => {
+    setGroupPanelCollapsed(false);
+    focusGroup(name);
+  };
 
   // One row per resolved member strand (whole branches — matches what move/rotate/
   // shadow operate on). resolveGroupMembers already returns distinct layer_names.
@@ -351,11 +405,24 @@ export function GroupPanel(props: GroupPanelProps): JSX.Element {
   };
 
   return (
-    <div className="gp-panel">
+    <div className={'gp-panel' + (collapsed ? ' gp-panel-collapsed' : '')}>
+      {collapsed ? (
+        // The G tile runs the normal Create Group flow, staying collapsed
+        // (OSS layer_panel._on_rail_create_requested).
+        <GroupRail
+          groupNames={groupNames}
+          createLabel={t('create_group_tile', lang)}
+          createEnabled={!controlsDisabled}
+          onCreate={() => setDialog({ kind: 'select' })}
+          onActivate={onRailActivate}
+        />
+      ) : (
+        <>
       <button
         className="gp-create-btn"
         onClick={() => setDialog({ kind: 'select' })}
         title={t('create_group', lang)}
+        disabled={controlsDisabled}
       >
         {t('create_group', lang)}
       </button>
@@ -366,9 +433,10 @@ export function GroupPanel(props: GroupPanelProps): JSX.Element {
           return (
             <div key={name} className="gp-group">
               <div
-                className="gp-group-row"
+                className={'gp-group-row' + (flashGroup === name ? ' gp-flash' : '')}
                 role="treeitem"
                 aria-expanded={open}
+                ref={(el) => { rowRefs.current[name] = el; }}
                 onClick={() => toggleExpand(name)}
                 onContextMenu={(e) => openMenu(e, name)}
               >
@@ -385,6 +453,8 @@ export function GroupPanel(props: GroupPanelProps): JSX.Element {
           );
         })}
       </div>
+        </>
+      )}
 
       {menu && (
         <ContextMenu

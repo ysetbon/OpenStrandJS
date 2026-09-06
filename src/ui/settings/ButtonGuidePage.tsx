@@ -127,13 +127,14 @@ export function ButtonGuidePage({ lang }: PageProps) {
   const groupKeys = [
     'create_group_desc', 'group_header_desc', 'select_group_desc', 'move_group_desc',
     'rotate_group_desc', 'edit_strand_angles_desc', 'duplicate_group_desc',
-    'rename_group_desc', 'delete_group_desc',
+    'rename_group_desc', 'delete_group_desc', 'collapse_group_panel_desc',
   ];
 
   const shortcutKeys = [
     'shortcut_space_desc', 'shortcut_escape_desc', 'shortcut_undo_desc', 'shortcut_redo_desc',
     'shortcut_new_strand_desc', 'shortcut_draw_names_desc', 'shortcut_lock_layers_desc',
-    'shortcut_delete_strand_desc', 'shortcut_deselect_all_desc', 'shortcut_clear_suppression_desc',
+    'shortcut_delete_strand_desc', 'shortcut_deselect_all_desc', 'shortcut_toggle_group_panel_desc',
+    'shortcut_clear_suppression_desc',
   ];
 
   // Canonical de-duplicated 15-item General-Settings list (the OSS first build

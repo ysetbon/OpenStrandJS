@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import { createGroup, createMask, reorderLayer } from '../store/actions';
 import { requestRender } from '../renderer/renderScheduler';
+import { isRTL } from './i18n';
 import { ControlColumn } from './ControlColumn';
 import { NumberedLayerButton } from './NumberedLayerButton';
 import { LayerControlStack } from './LayerControlStack';
@@ -82,6 +83,10 @@ export function LayerPanel() {
   const firstMaskedLayer = useEditorStore((s) => s.firstMaskedLayer);
   const enterMaskCreate = useEditorStore((s) => s.enterMaskCreate);
   const exitMaskCreate = useEditorStore((s) => s.exitMaskCreate);
+  // Group column collapse to the icon rail (OSS layer_panel.group_panel_collapsed).
+  const groupPanelCollapsed = useEditorStore((s) => s.groupPanelCollapsed);
+  const toggleGroupPanel = useEditorStore((s) => s.toggleGroupPanel);
+  const rtl = isRTL(useEditorStore((s) => s.settings.language));
 
   // OSS layer_panel masked_mode: holding Ctrl WHILE THE PANEL IS HOVERED enters the
   // transient mask-create mode (every button flat gray, two clicks make a mask);
@@ -91,6 +96,17 @@ export function LayerPanel() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Control' && panelHovered.current) useEditorStore.getState().enterMaskCreate();
+      // Ctrl+G (Cmd+G on Mac) collapses / expands the group column. OSS gives
+      // the QShortcut window context: live whenever the main window is active,
+      // silent while a modal dialog (Create Group's picker, Settings) has taken
+      // over — and never while typing in a field.
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'g') {
+        const tag = (e.target as HTMLElement | null)?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        if (document.querySelector('.modal-backdrop:not(.modeless)')) return;
+        e.preventDefault();
+        useEditorStore.getState().toggleGroupPanel();
+      }
     };
     const onKeyUp = (e: KeyboardEvent) => { if (e.key === 'Control') useEditorStore.getState().exitMaskCreate(); };
     window.addEventListener('keydown', onKeyDown);
@@ -291,9 +307,25 @@ export function LayerPanel() {
         <LayerControlStack />
       </div>
 
-      {/* Right sub-column: the fixed 270px group panel (OSS right_panel). */}
-      <div className="lp-right">
+      {/* Right sub-column: the group panel (OSS right_panel), or its 40px icon
+        * rail once collapsed. In both states the collapse/expand chevron sits
+        * pinned at the bottom so it never moves under the mouse; it points the
+        * way the column will move — toward the outer window edge to collapse,
+        * back toward the layer list to expand — mirrored in RTL. No tooltip,
+        * as in OSS. */}
+      <div className={'lp-right' + (groupPanelCollapsed ? ' lp-right-collapsed' : '')}>
         <GroupPanel dialogs={GROUP_DIALOGS} />
+        <div className="lp-group-toggle-row">
+          <button
+            type="button"
+            className="lp-group-toggle"
+            aria-expanded={!groupPanelCollapsed}
+            tabIndex={-1}
+            onClick={toggleGroupPanel}
+          >
+            {groupPanelCollapsed ? (rtl ? '›' : '‹') : (rtl ? '‹' : '›')}
+          </button>
+        </div>
       </div>
     </div>
   );

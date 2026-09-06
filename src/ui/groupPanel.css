@@ -48,6 +48,12 @@
   background: var(--create-group-pressed);
 }
 
+/* OSS disable_controls (mask editing) greys the Create Group button. */
+.gp-create-btn:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
 .gp-tree {
   display: flex;
   flex-direction: column;
@@ -80,6 +86,15 @@
 
 .gp-group-row:hover {
   background: var(--group-hover-bg);
+}
+
+/* The 900ms flash a rail tile gives its group once the column expands:
+ * OSS switches selection on just for the flash, so the row paints in the
+ * tree's ::item:selected colors (menu_selected_bg / menu_selected_text). */
+.gp-group-row.gp-flash,
+.gp-group-row.gp-flash:hover {
+  background: var(--menu-selected-bg);
+  color: var(--menu-selected-text);
 }
 
 .gp-arrow {
