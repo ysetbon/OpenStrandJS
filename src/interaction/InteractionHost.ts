@@ -2,6 +2,17 @@
 // pan FIRST (middle-drag, right-drag, or space+left-drag), otherwise delegates
 // to the active Mode. Lives outside React so high-frequency pointermove never
 // triggers a React re-render directly.
+//
+// It also owns the canvas CURSOR, mirroring OSS strand_drawing_canvas.py's
+// setCursor calls (see syncCursor for the precedence):
+//   * each mode's cursor is set on entry (set_mode + the mode's activate);
+//   * an Edit Mask session forces the crosshair (enter_mask_edit_mode);
+//   * the hand tool shows the open hand (toggle_pan_mode -> OpenHandCursor);
+//   * any pan DRAG shows the closed hand for its duration (mousePressEvent ->
+//     ClosedHandCursor) and the cursor it interrupted comes back on release
+//     (_pre_right_pan_cursor restored in mouseReleaseEvent).
+// OSS never changes the cursor on hover — a handle under the pointer highlights
+// in the overlay, the cursor stays the mode's — so neither do we.
 
 import { useEditorStore } from '../store/editorStore';
 import { screenToWorld, worldToScreen, zoomAbout } from './viewTransform';
@@ -46,20 +57,54 @@ export class InteractionHost {
     // to Attach resumed the dead gesture. Abort it via the outgoing mode's
     // onCancel, then drop stale hover so the new mode starts clean.
     this.unsubscribeMode = useEditorStore.subscribe((state, prev) => {
-      if (state.mode === prev.mode) return;
+      if (state.mode === prev.mode) {
+        // Not a mode switch, but the cursor may still have to change: the hand
+        // tool toggled (OSS toggle_pan_mode), an Edit Mask session started or
+        // ended (enter/exit_mask_edit_mode), or a doc change removed the mask
+        // being edited.
+        if (state.panMode !== prev.panMode || state.maskEditTarget !== prev.maskEditTarget
+            || state.doc !== prev.doc) this.syncCursor();
+        return;
+      }
       this.cancelPendingMove();   // the queued move belongs to the outgoing mode
       modes[prev.mode]?.onCancel?.(this.ctx());
       const st = useEditorStore.getState();
       if (st.hover.layerName !== null || st.hover.handle !== null) {
         st.setHover({ layerName: null, handle: null });
       }
-      this.el.style.cursor = this.editTarget() ? 'crosshair' : this.mode().cursor;
+      this.syncCursor();
       // Entering/leaving view mode can change the RENDERER-drawn selection
       // highlight (view_hide_highlight lives in #c, not the overlay), so those
       // transitions need a full render; every other switch is overlay-only.
       if (state.mode === 'view' || prev.mode === 'view') requestRender();
       else requestOverlay();
     });
+    this.syncCursor();
+  }
+
+  /**
+   * The cursor the canvas should show right now, from the store + gesture state.
+   * Precedence follows OSS strand_drawing_canvas.py:
+   *
+   *   1. a pan drag in progress   -> 'grabbing'  (ClosedHandCursor, mousePressEvent
+   *                                  for middle / right / hand-tool left button)
+   *   2. an Edit Mask session     -> 'crosshair' (enter_mask_edit_mode)
+   *   3. the hand tool is on      -> 'grab'      (toggle_pan_mode -> OpenHandCursor)
+   *   4. the active mode's cursor               (set_mode + Mode.activate)
+   *
+   * Written to the element only when it changes, so the per-frame move path can
+   * call this freely.
+   */
+  cursorFor(): string {
+    if (this.panning) return 'grabbing';
+    if (this.editTarget()) return 'crosshair';
+    if (useEditorStore.getState().panMode) return 'grab';
+    return this.mode().cursor;
+  }
+
+  private syncCursor(): void {
+    const cursor = this.cursorFor();
+    if (this.el.style.cursor !== cursor) this.el.style.cursor = cursor;
   }
 
   // Close a pan gesture. Just clear the flag: nothing has to be told that a pan
@@ -75,12 +120,17 @@ export class InteractionHost {
   // and any edit invalidates it by key.
   private endPanGesture(): void {
     this.panning = false;
+    // Closed hand -> whatever the pan interrupted (OSS restores _pre_right_pan_cursor;
+    // the hand tool goes back to the open hand). cursorFor() recomputes exactly that.
+    this.syncCursor();
+    // OSS _update_pan_button_icon(False): the layer panel's pan button lets go.
+    useEditorStore.getState().setPanning(false);
   }
 
   detach(): void {
     this.unsubscribeMode();
     this.cancelPendingMove();
-    this.panning = false;
+    if (this.panning) this.endPanGesture();
     // Hand back the renderer's retained scene (a paper project + an offscreen
     // canvas). Not needed for correctness — the scene is keyed — but this canvas is
     // going away, so there is nothing left to reuse it.
@@ -136,13 +186,26 @@ export class InteractionHost {
     try { this.el.setPointerCapture(e.pointerId); } catch { /* synthetic/no-op */ }
     // Preserve event order: a move recorded before this press is applied first.
     flushFrameTask(this.applyMove);
-    const panTool = useEditorStore.getState().panMode;   // hand tool active
+    const st = useEditorStore.getState();
+    const panTool = st.panMode;   // hand tool active
+    // A right-click while the hand tool is on switches it OFF instead of panning
+    // (OSS mousePressEvent: "Exit pan mode on right-click when pan mode is active"
+    // -> exit_pan_mode). The cursor follows through the store subscription.
+    if (panTool && e.button === 2) {
+      st.setPanMode(false);
+      return;
+    }
     const isPan = e.button === 1 || e.button === 2 || (e.button === 0 && (this.spaceHeld || panTool));
     if (isPan) {
-      const view = useEditorStore.getState().view;
+      const view = st.view;
       this.panning = true;
       this.panStart = this.toScreen(e);
       this.panOrigin = { x: view.panX, y: view.panY };
+      // Closed hand for the length of the drag (OSS ClosedHandCursor on press) and,
+      // mirrored into the layer panel, the pan button pressed with its closed-hand
+      // icon (OSS _update_pan_button_icon(True)).
+      this.syncCursor();
+      st.setPanning(true);
       return;
     }
     if (e.button !== 0) return;
@@ -213,10 +276,9 @@ export class InteractionHost {
       return;
     }
     this.mode().onPointerMove(this.info(e), this.ctx());
-    // Cursor feedback: crosshair during an Edit Mask session, grab over a handle.
-    const st = useEditorStore.getState();
-    const cursor = this.editTarget() ? 'crosshair' : (st.hover.handle ? 'grab' : this.mode().cursor);
-    if (this.el.style.cursor !== cursor) this.el.style.cursor = cursor;
+    // Re-assert the state-derived cursor after the mode ran (a mode may have
+    // changed the store, e.g. Select promoting itself to Attach on a pick).
+    this.syncCursor();
   };
 
   private onPointerMove = (e: PointerEvent) => {
@@ -230,6 +292,9 @@ export class InteractionHost {
     flushFrameTask(this.applyMove);
     this.pending = null;
     if (this.panning) { this.endPanGesture(); return; }
+    // A right/middle release that did not pan (e.g. the right-click that turned the
+    // hand tool off) is not a mode gesture — onPointerDown never forwarded the press.
+    if (e.button !== 0) return;
     // Finalize an Edit Mask erase: commit one deletion rectangle (one undo step),
     // OSS mouseReleaseEvent appends to deletion_rectangles + subtracts the path.
     if (this.maskErase) {

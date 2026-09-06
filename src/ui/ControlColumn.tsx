@@ -72,6 +72,13 @@ export function ControlColumn() {
   const redo = useEditorStore((s) => s.redo);
   const panMode = useEditorStore((s) => s.panMode);
   const togglePanMode = useEditorStore((s) => s.togglePanMode);
+  // Pan button state. OSS shows the closed hand + checked while the hand tool is
+  // on (layer_panel.update_pan_button: pan_closed.png if canvas.pan_mode) AND for
+  // the length of a right-drag pan in any mode (canvas._update_pan_button_icon
+  // presses it on the press, releases it on the release), so the button "grabs"
+  // with the canvas cursor whenever the drawing is being dragged.
+  const panning = useEditorStore((s) => s.panning);
+  const panHeld = panMode || panning;
   const multiSel = useEditorStore((s) => s.multiSelectMode);
   const toggleMulti = useEditorStore((s) => s.toggleMultiSelect);
   const lang = useEditorStore((s) => s.settings.language);
@@ -115,7 +122,7 @@ export function ControlColumn() {
       <div className="cc-row cc-row-mid">
         <CCBtn v={GOLD} icon="zoom_in" title={tip('zoom_in_tooltip', 'Zoom in', lang)} onClick={() => zoomBy(1 + ZOOM_PERCENTAGE)} />
         <CCBtn v={GOLD} icon="zoom_out" title={tip('zoom_out_tooltip', 'Zoom out', lang)} onClick={() => zoomBy(1 - ZOOM_PERCENTAGE)} />
-        <CCBtn v={RED} icon={panMode ? 'pan_closed' : 'pan_open'} title={tip('pan_tooltip', 'Pan (hand tool)', lang)} checked={panMode} onClick={togglePanMode} />
+        <CCBtn v={RED} icon={panHeld ? 'pan_closed' : 'pan_open'} title={tip('pan_tooltip', 'Pan (hand tool)', lang)} checked={panHeld} onClick={togglePanMode} />
       </div>
       <div className="cc-row cc-row-mid">
         <CCBtn v={GREEN} icon="refresh" title={tip('refresh_tooltip', 'Refresh', lang)} onClick={() => requestRender()} />

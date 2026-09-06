@@ -3,23 +3,22 @@ import { useEditorStore } from '../store/editorStore';
 import { requestRender, setOverlay } from '../renderer/renderScheduler';
 import { InteractionHost } from '../interaction/InteractionHost';
 import { drawOverlay } from '../overlay/overlayRenderer';
-import { modes } from '../modes';
 import { t } from './i18n';
 
 // The only component that touches <canvas>. Owns #c (renderer output) and
 // #overlay (handles/selection). Measures its box into the view state, mounts the
-// imperative InteractionHost on #c, and re-renders when document/view/settings
-// change.
+// imperative InteractionHost on #c (which also owns the canvas cursor), and
+// re-renders when document/view/settings change.
 export function CanvasStage() {
   const wrapRef = useRef<HTMLDivElement>(null);
   const setView = useEditorStore((s) => s.setView);
   const docRevision = useEditorStore((s) => s.docRevision);
   const view = useEditorStore((s) => s.view);
   const settings = useEditorStore((s) => s.settings);
-  const mode = useEditorStore((s) => s.mode);
   // Validated target: only active while the mask still exists in the current doc
   // (a tab switch / file load / undo / delete that removes it ends the session,
-  // so the banner + crosshair never get stuck across documents).
+  // so the banner never gets stuck across documents; InteractionHost applies the
+  // same test to the crosshair).
   const maskEditTarget = useEditorStore((s) =>
     (s.maskEditTarget && s.doc.strands[s.maskEditTarget]?.type === 'MaskedStrand') ? s.maskEditTarget : null);
   const lang = useEditorStore((s) => s.settings.language);
@@ -66,12 +65,6 @@ export function CanvasStage() {
   useEffect(() => {
     requestRender();
   }, [docRevision, view, settings]);
-
-  useEffect(() => {
-    const cCanvas = document.getElementById('c') as HTMLCanvasElement | null;
-    // An active Edit Mask session forces the crosshair (OSS enter_mask_edit_mode).
-    if (cCanvas) cCanvas.style.cursor = maskEditTarget ? 'crosshair' : (modes[mode]?.cursor ?? 'default');
-  }, [mode, maskEditTarget]);
 
   return (
     <div className="stage" ref={wrapRef}>

@@ -38,7 +38,9 @@ function handlePos(s: StrandRecord, handle: HandleKind): Point {
 
 export const MoveMode: Mode = {
   name: 'move',
-  cursor: 'crosshair',
+  // OSS Qt.OpenHandCursor (strand_drawing_canvas.py set_mode 'move'). It stays the
+  // open hand for the whole drag too: move_mode.py never calls setCursor.
+  cursor: 'grab',
 
   onPointerDown(p: PointerInfo, ctx: ModeContext) {
     const st = useEditorStore.getState();

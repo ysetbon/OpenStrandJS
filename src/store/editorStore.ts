@@ -314,6 +314,12 @@ export interface EditorState {
 
   // chrome UI flags (OSS main window). Not part of the document / undo history.
   panMode: boolean;            // hand tool: left-drag pans the canvas
+  // A pan DRAG is in progress on the canvas (hand-tool left-drag, right-drag or
+  // middle-drag). Transient gesture state, never saved. OSS mirrors a right-drag
+  // pan into the layer panel's pan button (canvas._update_pan_button_icon: checked
+  // + pan_closed.png for the length of the drag, back to pan_open.png on release),
+  // which is what ControlColumn reads this for.
+  panning: boolean;
   // OSS canvas.is_drawing_new_strand: armed by the "New Strand" button / 'N' key.
   // While set, the next attach-mode press-drag-release draws a NEW main strand
   // (never an attach) regardless of where it starts; AttachMode clears it on the
@@ -337,6 +343,7 @@ export interface EditorState {
   drawNames: boolean;          // draw layer names on the canvas (renderer task: later)
   setPanMode: (b: boolean) => void;
   togglePanMode: () => void;
+  setPanning: (b: boolean) => void;
   // Enter attach mode and arm a one-shot new-strand draw (OSS start_new_strand_mode:
   // sets is_drawing_new_strand + CrossCursor). No-op while lock mode is active.
   armNewStrand: () => void;
@@ -777,6 +784,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setFirstMaskedLayer: (firstMaskedLayer) => set({ firstMaskedLayer }),
 
   panMode: false,
+  panning: false,
   newStrandArmed: false,
   multiSelectMode: false,
   multiSelectedLayers: [],
@@ -786,6 +794,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   drawNames: false,
   setPanMode: (panMode) => set({ panMode }),
   togglePanMode: () => set((s) => ({ panMode: !s.panMode })),
+  setPanning: (panning) => set({ panning }),
   // Switch to attach mode and arm the next draw as a new main strand. Allowed
   // in lock mode too (OSS 1.109: New Strand stays available; only locked layers
   // are frozen).
