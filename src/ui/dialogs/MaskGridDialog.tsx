@@ -17,7 +17,10 @@ export function MaskGridDialog(props: { groupName: string; onClose: () => void }
   const { groupName, onClose } = props;
   const lang = useEditorStore((s) => s.settings.language);
   const doc = useEditorStore((s) => s.doc);
-  const curve = useEditorStore((s) => geometryParams(s.settings));
+  // Select the (reference-stable) settings slice and derive from it: a selector
+  // that built a fresh object per call would re-render this dialog forever.
+  const settings = useEditorStore((s) => s.settings);
+  const curve = geometryParams(settings);
 
   // Group's regular (non-masked) members in z-order — these index the matrix.
   const strands = useMemo(() => {
