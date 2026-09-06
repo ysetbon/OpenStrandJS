@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useEditorStore } from '../store/editorStore';
-import { requestRender, setOverlay } from '../renderer/renderScheduler';
+import { requestOverlay, requestRender, setOverlay } from '../renderer/renderScheduler';
 import { InteractionHost } from '../interaction/InteractionHost';
 import { drawOverlay } from '../overlay/overlayRenderer';
 import { t } from './i18n';
@@ -22,6 +22,7 @@ export function CanvasStage() {
   const maskEditTarget = useEditorStore((s) =>
     (s.maskEditTarget && s.doc.strands[s.maskEditTarget]?.type === 'MaskedStrand') ? s.maskEditTarget : null);
   const lang = useEditorStore((s) => s.settings.language);
+  const drawNames = useEditorStore((s) => s.drawNames);
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -34,7 +35,7 @@ export function CanvasStage() {
       drawOverlay(ctx2d, {
         doc: s.doc, view: s.view, selection: s.selection, settings: s.settings,
         hover: s.hover, pending: s.pending, maskPending: s.maskPending, eraser: s.eraser,
-        mode: s.mode, dragging: s.dragging, angleAdjust: s.angleAdjust,
+        mode: s.mode, dragging: s.dragging, drawNames: s.drawNames, angleAdjust: s.angleAdjust,
       });
     });
 
@@ -65,6 +66,12 @@ export function CanvasStage() {
   useEffect(() => {
     requestRender();
   }, [docRevision, view, settings]);
+
+  // "Draw Names" lives on the overlay (OSS toggle_name_drawing -> update()), so a
+  // toggle only needs the cheap overlay repaint, not a full renderFixture.
+  useEffect(() => {
+    requestOverlay();
+  }, [drawNames]);
 
   return (
     <div className="stage" ref={wrapRef}>

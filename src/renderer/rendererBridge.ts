@@ -21,7 +21,15 @@ declare global {
     endDrag?: () => void;
     renderPanFrame?: (meta: RenderMeta) => unknown;
     endPan?: () => void;
+    maskLabelClip?: (maskName: string, strands: RenderStrand[], meta: RenderMeta) => MaskLabelClip | null;
   }
+}
+
+// A mask's fill region (Qt get_mask_path()) in WORLD units: the SVG path data
+// the "Draw Names" label is clipped to, and the bounds it is centred on.
+export interface MaskLabelClip {
+  pathData: string;
+  bounds: { x: number; y: number; width: number; height: number };
 }
 
 export function callRender(strands: RenderStrand[], meta: RenderMeta): void {
@@ -58,6 +66,15 @@ export function callRenderPanFrame(meta: RenderMeta): boolean {
 
 export function callEndPan(): void {
   if (typeof window.endPan === 'function') window.endPan();
+}
+
+// Null when the renderer predates the helper or the mask has no region, so a
+// label simply falls back to being unclipped rather than breaking the overlay.
+export function callMaskLabelClip(
+  maskName: string, strands: RenderStrand[], meta: RenderMeta,
+): MaskLabelClip | null {
+  if (typeof window.maskLabelClip !== 'function') return null;
+  return window.maskLabelClip(maskName, strands, meta);
 }
 
 export function extractStrands(data: unknown, step?: number): unknown[] {

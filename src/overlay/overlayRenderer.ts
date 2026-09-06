@@ -22,6 +22,7 @@ import { worldToScreen } from '../interaction/viewTransform';
 import { strandHandles } from '../interaction/hitTest';
 import { geometryParams, sampleCenterline } from '../interaction/hitGeometry';
 import { biasControlsVisible, biasPositions, readBias, NEUTRAL_BIAS } from '../model/biasControl';
+import { drawStrandLabels } from './strandLabels';
 
 export interface OverlayState {
   doc: EditorDocument;
@@ -34,6 +35,8 @@ export interface OverlayState {
   eraser: { layerName: string; rect: { minX: number; minY: number; maxX: number; maxY: number } } | null;
   mode: ModeName;
   dragging: boolean;
+  // The layer panel's "Draw Names" toggle (OSS canvas.should_draw_names).
+  drawNames: boolean;
   // Live "Adjust Angle and Length" session, or null. Drives the arc + chord that
   // OSS's AngleAdjustMode.draw paints while the dialog is up.
   angleAdjust: { layerName: string; spanDeg: number } | null;
@@ -607,6 +610,10 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, st: OverlayState): vo
       if (biasControlsVisible(s, st.settings, doc)) drawBiasControls(ctx, st, s);
     }
   }
+
+  // Strand name labels (OSS paintEvent: drawn right after draw_control_points and
+  // before current_mode.draw, for EVERY strand in canvas.strands).
+  if (st.drawNames) drawStrandLabels(ctx, doc, st.settings, st.view);
 
   // New-strand / attach preview (the strand being drawn), under the overlays.
   if (st.pending) drawPending(ctx, st);

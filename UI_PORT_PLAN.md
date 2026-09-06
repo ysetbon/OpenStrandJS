@@ -71,7 +71,7 @@ Colors/order/button-set already matched.
   is #2C2C2C. Theming the renderer clear color affects the fidelity harness — deferred, decide separately.
 - **`createMaskGrid`** is best-effort pairwise (not the faithful crossing/ordering logic) — has a TODO.
 - **`edit_strand_angles`** menu item is a placeholder (no dialog yet).
-- **Draw Names** toggles a store flag but canvas name-drawing is a later renderer task.
+- **Draw Names** is drawn on the overlay (`overlay/strandLabels.ts`, a port of OSS `draw_strand_label`) and into the PNG export; `1` toggles it.
 - Multiline tooltips + full RTL audit of the new dialogs/menus not yet done.
 
 ---
@@ -170,7 +170,7 @@ Layer-button STATES:
 
 | # | key | EN | bg / hover / pressed | checkable | notes |
 |---|---|---|---|---|---|
-|1|`draw_names`|Draw Names|`#e07bdb` / `#e694e2` / `#ba62b5`|no| |
+|1|`draw_names`|Draw Names|`#e07bdb` / `#e694e2` / `#ba62b5`|no|shortcut `1`; disabled in mask edit|
 |2|`lock_layers`|Lock Layers|`#FFA500` / `#FFB84D` / `#E69500`|**yes**|checked→"Exit Lock"; deselect→"Clear Locks"; disables New/Delete|
 |3|`add_new_strand`|New Strand|`#90EE90` / `#BFFFBF` / `#7BBF7B`; disabled `#D3D3D3`/`#666`|no| |
 |4|`delete_strand`|Delete Strand|`#FF6B6B` / `#FF4C4C` / `#FF0000`; disabled `#D3D3D3`/`#666`|no|**starts disabled** |

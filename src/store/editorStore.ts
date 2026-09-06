@@ -340,7 +340,7 @@ export interface EditorState {
   setStrandClipboard: (snap: import('./strandClipboard').StrandDataSnapshot | null) => void;
   setStrandDataCopyOption: (key: string, on: boolean) => void;
   showTabs: boolean;           // tab strip visibility (Tabs toolbar toggle)
-  drawNames: boolean;          // draw layer names on the canvas (renderer task: later)
+  drawNames: boolean;          // draw layer names on the canvas (overlay/strandLabels.ts)
   setPanMode: (b: boolean) => void;
   togglePanMode: () => void;
   setPanning: (b: boolean) => void;
