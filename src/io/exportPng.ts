@@ -28,6 +28,11 @@ export function exportMeta(exportZoom = 2, margin = 40): { meta: RenderMeta; w: 
     shadow_enabled: doc.shadow_enabled,
     shadow_overrides: doc.shadow_overrides,
     curve_params: settings.curve_params,
+    // The two curve-shaping settings, so the exported bodies (and the Draw Names
+    // mask clip, which reads the same settings) use the live curve configuration
+    // rather than the renderer's inferred-from-data fallback.
+    enable_third_control_point: settings.enable_third_control_point,
+    enable_curvature_bias_control: settings.enable_curvature_bias_control,
     // Honor the Grid toggle in the export: when on, the renderer paints the grid
     // behind the strands (same path as the on-screen render). Off => no grid.
     show_grid: settings.show_grid,

@@ -56,7 +56,10 @@ export function LayerControlStack() {
   const toggleDrawNames = useEditorStore((s) => s.toggleDrawNames);
   // OSS disable_controls: Draw Names is greyed out for the length of an Edit
   // Mask session (the '1' shortcut clicks the button, so it is blocked too).
-  const maskEditing = useEditorStore((s) => s.maskEditTarget != null);
+  // Same validated-target test as CanvasStage / InteractionHost.editTarget: a
+  // target whose mask no longer exists is not an active session.
+  const maskEditing = useEditorStore((s) =>
+    !!s.maskEditTarget && s.doc.strands[s.maskEditTarget]?.type === 'MaskedStrand');
 
   const [confirmAll, setConfirmAll] = useState(false);
 
