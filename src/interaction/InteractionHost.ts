@@ -345,6 +345,12 @@ export class InteractionHost {
     if (e.code === 'Space') { this.spaceHeld = true; }
     const tag = (e.target as HTMLElement | null)?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return; // don't hijack typing
+    // A modal dialog (Adjust Angle and Length, Settings, ...) owns the keyboard
+    // while it is up: QDialog.exec_() blocks the main window, so OSS never sees
+    // these shortcuts then. Without this, the Escape that closed the angle dialog
+    // went on to clear the selection here, and Z/X could undo/redo straight
+    // through a dialog's open gesture. Modeless dialogs leave the canvas live.
+    if (document.querySelector('.modal-backdrop:not(.modeless)')) return;
     const st = useEditorStore.getState();
     const ctrl = e.ctrlKey || e.metaKey;
     const k = e.key.toLowerCase();

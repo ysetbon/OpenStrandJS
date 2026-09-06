@@ -1,6 +1,45 @@
 /* Minimal extras for the shared <Modal> shell. The core .modal-backdrop / .modal
- * styling lives in src/styles.css and is reused as-is; we only add the body +
- * right-aligned footer row here. */
+ * styling lives in src/styles.css and is reused as-is; we only add the title bar,
+ * the body + right-aligned footer row here. */
+
+/* Title bar: the drag handle (every OSS dialog is a movable window) and, when a
+ * dialog asks for it, the native-window-style close X. The h2 keeps its
+ * styles.css look; only the row around it is new. */
+.modal-titlebar {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: move;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+.modal-titlebar > h2 {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.modal-close {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  margin-top: -2px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.modal-close:hover {
+  opacity: 1;
+  background: var(--button-hover, rgba(128, 128, 128, 0.25));
+}
+.modal-close:active {
+  background: var(--button-pressed, rgba(128, 128, 128, 0.4));
+}
 
 .modal-body {
   display: flex;
