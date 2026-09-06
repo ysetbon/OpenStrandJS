@@ -1,0 +1,55 @@
+{
+  "sub": "pr-44",
+  "kind": "pr",
+  "pr": 44,
+  "branch": "claude/oss-prs-18-19-ossjs-gmtnzk",
+  "title": "Collapse the group column to a 40 px icon rail (port of OSS #18 and #19)",
+  "sha": "cd547d47e2",
+  "updated": "2026-09-06T13:28:17.131Z",
+  "summary": {
+    "fixtures": 3,
+    "perfect": 3,
+    "lowest": 100
+  },
+  "results": [
+    {
+      "fixture": "fid_shadow_unfolded_attach",
+      "match_pct": 100
+    },
+    {
+      "fixture": "fid_unfold_angled",
+      "match_pct": 100
+    },
+    {
+      "fixture": "fid_unfold_chain",
+      "match_pct": 100
+    }
+  ],
+  "selected": "fid_shadow_unfolded_attach",
+  "thumb": {
+    "file": "thumb.png",
+    "from": "fid_shadow_unfolded_attach",
+    "w": 364,
+    "h": 360
+  },
+  "thumbs": [
+    {
+      "fixture": "fid_shadow_unfolded_attach",
+      "file": "snaps/fid_shadow_unfolded_attach.png",
+      "w": 364,
+      "h": 360
+    },
+    {
+      "fixture": "fid_unfold_angled",
+      "file": "snaps/fid_unfold_angled.png",
+      "w": 371,
+      "h": 360
+    },
+    {
+      "fixture": "fid_unfold_chain",
+      "file": "snaps/fid_unfold_chain.png",
+      "w": 311,
+      "h": 360
+    }
+  ]
+}
