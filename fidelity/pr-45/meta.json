@@ -4,8 +4,8 @@
   "pr": 45,
   "branch": "claude/ossjs-mouse-cursor-behavior-a316zd",
   "title": "Canvas cursor: match OSS in every mode, and grab while panning",
-  "sha": "79e97e02f1",
-  "updated": "2026-09-06T14:44:07.538Z",
+  "sha": "ddc2ebca52",
+  "updated": "2026-09-06T14:49:06.250Z",
   "summary": {
     "fixtures": 3,
     "perfect": 3,
