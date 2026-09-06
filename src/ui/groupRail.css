@@ -1,0 +1,77 @@
+/* GroupRail — the group column collapsed to a 40px icon rail (OSS
+ * src/group_rail.py). Layout mirrors the Qt widget: QVBoxLayout with
+ * contentsMargins(0, 6, 0, 0), spacing 6, AlignHCenter|AlignTop; the create
+ * tile is 30x30 and borrows the Create Group button's theme (the
+ * --create-group-* tokens), the group tiles are 30x24 in the group panel's
+ * theme colors (group_bg / group_hover_bg / menu_selected_bg / text). */
+
+.gp-rail {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0 0;
+  background: var(--panel-bg);
+}
+
+/* The "G" tile: the Create Group button in compact form. QSS min/max-width
+ * override setFixedSize in OSS, so the size is restated after the borrowed
+ * button rules; here the box is simply fixed. */
+.gp-rail-create {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  font-size: 13px;
+  font-weight: bold;
+  line-height: 1;
+  cursor: pointer;
+  background: var(--create-group-bg);
+  color: var(--create-group-text);
+  border: var(--create-group-border-width) solid var(--create-group-border);
+  border-radius: var(--create-group-radius);
+}
+.gp-rail-create:hover:not(:disabled) { background: var(--create-group-hover); }
+.gp-rail-create:active:not(:disabled) { background: var(--create-group-pressed); }
+.gp-rail-create:disabled { cursor: default; opacity: 0.5; }
+
+/* Vertical-only scroller for the group tiles, no visible scrollbar. */
+.gp-rail-tiles {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  background: transparent;
+}
+.gp-rail-tiles::-webkit-scrollbar { display: none; }
+
+/* One tile per group: the first letter of its name. */
+.gp-rail-tile {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 24px;
+  padding: 0;
+  font-size: 11px;
+  font-weight: bold;
+  line-height: 1;
+  cursor: pointer;
+  background: var(--group-bg);
+  color: var(--text);
+  border: none;
+  border-radius: 3px;
+}
+.gp-rail-tile:hover { background: var(--group-hover-bg); }
+.gp-rail-tile:active { background: var(--menu-selected-bg); color: #FFFFFF; }

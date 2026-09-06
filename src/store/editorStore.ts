@@ -155,6 +155,24 @@ function saveTabEdgePosition(p: TabEdgePosition): void {
   try { localStorage.setItem(TAB_EDGE_KEY, JSON.stringify(p)); } catch { /* ignore */ }
 }
 
+// Whether the layer panel's group column is collapsed to its 40px icon rail
+// (OSS user_settings.txt "GroupPanelRail: true|false", written by
+// main_window._save_group_panel_rail on every toggle and restored on launch).
+const GROUP_RAIL_KEY = 'openstrandjs.groupPanelRail';
+
+function loadGroupPanelCollapsed(): boolean {
+  try {
+    const raw = typeof localStorage !== 'undefined' && localStorage.getItem(GROUP_RAIL_KEY);
+    // OSS accepts 'true' / '1' / 'yes' (case-insensitively); anything else is expanded.
+    if (typeof raw === 'string') return ['true', '1', 'yes'].includes(raw.trim().toLowerCase());
+  } catch { /* ignore */ }
+  return false;
+}
+
+function saveGroupPanelCollapsed(collapsed: boolean): void {
+  try { localStorage.setItem(GROUP_RAIL_KEY, collapsed ? 'true' : 'false'); } catch { /* ignore */ }
+}
+
 // OSS TabManager.title_for: an unsaved "Untitled N" tab is titled in the current
 // language (so it re-translates on a language change); file-backed / duplicated
 // tabs keep their stored title.
@@ -249,6 +267,11 @@ export interface EditorState {
   // Floating tab-edge overlay dock (anchor or free center ratio), persisted to localStorage.
   tabEdgePosition: TabEdgePosition;
   setTabEdgePosition: (pos: TabEdgePosition) => void;
+  // Group column collapsed to the icon rail (OSS layer_panel.group_panel_collapsed),
+  // persisted to localStorage on every toggle.
+  groupPanelCollapsed: boolean;
+  setGroupPanelCollapsed: (collapsed: boolean) => void;
+  toggleGroupPanel: () => void;
 
   loadDocument: (doc: EditorDocument) => void;
   setDoc: (doc: EditorDocument) => void;
@@ -380,6 +403,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   nextTabId: 2,
   untitledCounter: 1,
   tabEdgePosition: loadTabEdgePosition(),
+  groupPanelCollapsed: loadGroupPanelCollapsed(),
 
   newTab: () => set((s) => {
     const tabs = s.tabs.map((t) => (t.id === s.activeTabId ? { ...t, doc: s.doc, view: s.view } : t));
@@ -486,6 +510,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     saveTabEdgePosition(pos);
     return { tabEdgePosition: pos };
   }),
+
+  // OSS set_group_panel_collapsed / toggle_group_panel; the persisted value is the
+  // one thing the main window does with the group_panel_collapsed_changed signal.
+  setGroupPanelCollapsed: (collapsed) => set((s) => {
+    const next = !!collapsed;
+    if (next === s.groupPanelCollapsed) return {};
+    saveGroupPanelCollapsed(next);
+    return { groupPanelCollapsed: next };
+  }),
+  toggleGroupPanel: () => get().setGroupPanelCollapsed(!get().groupPanelCollapsed),
 
   loadDocument: (doc) => set((s) => ({
     doc,

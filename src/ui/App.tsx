@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import { isRTL } from './i18n';
 import { Toolbar } from './Toolbar';
@@ -44,18 +44,50 @@ import { startHistoryRecorder } from './settings/history';
 // only column, and it is narrower at every window size than the old compact
 // mode was. The splitter can still widen the panel past this floor.
 const GROUP_PANEL_W = 113;
+// The group column once collapsed to its icon rail (GroupRail, OSS
+// layer_panel.GROUP_PANEL_RAIL_WIDTH = 40): the 40px rail plus the same 1px
+// hairline. The panel minimum drops by the difference (72px here; 140 → 40 =
+// 100px in OSS) and the canvas gains exactly that.
+const GROUP_RAIL_W = 40 + 1;
 const LIST_COLUMN_W = 146;
 const PANEL_BORDER_W = 1;
 const PANEL_DEFAULT_W = LIST_COLUMN_W + GROUP_PANEL_W + PANEL_BORDER_W;   // 260
-const PANEL_MIN_W = PANEL_DEFAULT_W;
 const PANEL_MAX_W = 860;
+// OSS layer_panel animates the column between 140 and 40 over 200ms
+// (QVariantAnimation, InOutCubic); the shell's widths follow the same curve.
+const GROUP_ANIM_MS = 200;
+
+function panelMinFor(collapsed: boolean): number {
+  return LIST_COLUMN_W + (collapsed ? GROUP_RAIL_W : GROUP_PANEL_W) + PANEL_BORDER_W;
+}
 
 export function App() {
   const theme = useEditorStore((s) => s.settings.theme);
   const language = useEditorStore((s) => s.settings.language);
   const showTabs = useEditorStore((s) => s.showTabs);
-  const [panelW, setPanelW] = useState(PANEL_DEFAULT_W);
+  const groupCollapsed = useEditorStore((s) => s.groupPanelCollapsed);
+  // The persisted rail state is applied before the first paint, without
+  // animation (OSS restores it with animate=False on launch).
+  const [panelW, setPanelW] = useState(() => panelMinFor(useEditorStore.getState().groupPanelCollapsed));
+  const [groupAnimating, setGroupAnimating] = useState(false);
+  const panelMin = panelMinFor(groupCollapsed);
+  const groupW = groupCollapsed ? GROUP_RAIL_W : GROUP_PANEL_W;
   const rtl = isRTL(language);
+
+  // OSS main_window._apply_layer_panel_compact_width(force=True, keep_split=True):
+  // on a collapse or expand the panel keeps whatever extra width the user dragged
+  // it to, shifted by the change in minimum, so a collapse hands the canvas
+  // exactly the width the column gave up and an expand takes exactly that back.
+  const prevMin = useRef(panelMin);
+  useEffect(() => {
+    const oldMin = prevMin.current;
+    if (oldMin === panelMin) return;
+    prevMin.current = panelMin;
+    setPanelW((w) => Math.max(panelMin, w + (panelMin - oldMin)));
+    setGroupAnimating(true);
+    const id = window.setTimeout(() => setGroupAnimating(false), GROUP_ANIM_MS);
+    return () => window.clearTimeout(id);
+  }, [panelMin]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -89,11 +121,12 @@ export function App() {
   return (
     <div className="app">
       <div
-        className="shell"
+        className={'shell' + (groupAnimating ? ' shell-group-anim' : '')}
         style={{
           ['--panel-w' as string]: `${panelW}px`,
-          ['--panel-min-w' as string]: `${PANEL_MIN_W}px`,
-          ['--group-panel-w' as string]: `${GROUP_PANEL_W}px`,
+          ['--panel-min-w' as string]: `${panelMin}px`,
+          ['--group-panel-w' as string]: `${groupW}px`,
+          ['--group-anim-ms' as string]: `${GROUP_ANIM_MS}ms`,
         }}
       >
         <div className="left-widget">
@@ -106,7 +139,7 @@ export function App() {
         <Splitter
           width={panelW}
           setWidth={setPanelW}
-          min={PANEL_MIN_W}
+          min={panelMin}
           max={PANEL_MAX_W}
           rtl={rtl}
         />

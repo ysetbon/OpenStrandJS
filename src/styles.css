@@ -4,6 +4,7 @@
 @import './ui/layerButton.css';
 @import './ui/layerControls.css';
 @import './ui/groupPanel.css';
+@import './ui/groupRail.css';
 @import './ui/contextMenu.css';
 @import './ui/dialogs.css';
 @import './ui/tabEdge.css';
@@ -104,6 +105,38 @@ body {
  * it back out. */
 .lp-right .gp-panel { min-width: 0; }
 .lp-right .gp-tree { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+/* Collapsed to the icon rail: the column is exactly the 40px rail plus the
+ * hairline (App.tsx GROUP_RAIL_W), and the list column takes the rest. */
+.lp-right-collapsed .gp-panel { min-width: 0; }
+/* The collapse/expand chevron row pinned at the bottom of the group column in
+ * both states (OSS group_toggle_row: contentsMargins(0, 4, 0, 6), the 30x22
+ * QToolButton centred, styled from the group panel's theme colors: group_bg /
+ * text, hover group_hover_bg, pressed menu_selected_bg + white). */
+.lp-group-toggle-row {
+  flex: 0 0 auto;
+  display: flex; justify-content: center;
+  padding: 4px 0 6px;
+}
+.lp-group-toggle {
+  box-sizing: border-box;
+  width: 30px; height: 22px;
+  padding: 0 0 2px;
+  font-size: 15px; font-weight: bold; line-height: 1;
+  cursor: pointer;
+  background: var(--group-bg); color: var(--text);
+  border: none; border-radius: 3px;
+}
+.lp-group-toggle:hover { background: var(--group-hover-bg); }
+.lp-group-toggle:active { background: var(--menu-selected-bg); color: #FFFFFF; }
+/* The 200ms collapse/expand animation (OSS QVariantAnimation, InOutCubic).
+ * Only switched on around a toggle, so a splitter drag stays immediate. */
+.shell-group-anim .layer-panel,
+.shell-group-anim .lp-right {
+  transition:
+    width var(--group-anim-ms, 200ms) cubic-bezier(0.65, 0, 0.35, 1),
+    flex-basis var(--group-anim-ms, 200ms) cubic-bezier(0.65, 0, 0.35, 1),
+    min-width var(--group-anim-ms, 200ms) cubic-bezier(0.65, 0, 0.35, 1);
+}
 /* 10px transparent splitter strip at the very top (OSS SplitterHandle). */
 .lp-left > .lp-splitter-handle { flex: 0 0 10px; height: 10px; width: 100%; background: transparent; cursor: col-resize; }
 /* Scrollable layer list of NumberedLayerButtons. Bottom-aligned + centered, 2px
