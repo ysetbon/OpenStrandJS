@@ -4,8 +4,8 @@
   "pr": 49,
   "branch": "claude/layer-panel-draw-names-nr8b2e",
   "title": "Draw the layer panel's \"Draw Names\" labels on the canvas",
-  "sha": "83ff63dcc4",
-  "updated": "2026-09-06T21:46:51.475Z",
+  "sha": "2796052a90",
+  "updated": "2026-09-06T21:53:29.154Z",
   "summary": {
     "fixtures": 3,
     "perfect": 3,
