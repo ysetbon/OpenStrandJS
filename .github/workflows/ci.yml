@@ -137,6 +137,14 @@ jobs:
       - name: Guards — pan correctness
         run: node tools/pan_fidelity.mjs
 
+      # Canvas cursor + pan button (OSS strand_drawing_canvas.py setCursor calls):
+      # one cursor per mode on entry, crosshair in an Edit Mask session, open hand
+      # for the hand tool, CLOSED hand for the length of any pan drag with the
+      # interrupted cursor restored on release, the layer panel's pan button
+      # pressed for a right-drag pan, and no cursor change on hover.
+      - name: Guards — canvas cursor and pan button
+        run: node tools/cursor_check.mjs
+
       # Collapsible group column (OSS group_rail.py, PRs #18/#19 there): the
       # column collapses to a 40px rail and the canvas gains exactly that width,
       # the state persists across a reload, the rail mirrors the groups, its
