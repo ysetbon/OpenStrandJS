@@ -6,6 +6,7 @@
 // toggles preserved across undo, never undone). INCLUDED: shadow_overrides.
 
 import type { DeletionRect, EditorDocument, Point, RGBA, StrandRecord } from '../model/types';
+import { BIAS_EPS, readBias } from '../model/biasControl';
 
 const approx = (x: number, y: number) => Math.abs(x - y) < 0.1;
 
@@ -62,6 +63,10 @@ export function strandVisualEqual(a: StrandRecord, b: StrandRecord): boolean {
   if ((ea.arrow_head_visible !== false) !== (eb.arrow_head_visible !== false)) return false;
   if (JSON.stringify(ea.arrow_color ?? null) !== JSON.stringify(eb.arrow_color ?? null)) return false;
   if ((ea.arrow_transparency ?? 100) !== (eb.arrow_transparency ?? 100)) return false;
+  // Curvature bias (extra.bias_control) shapes the rendered curve; OSS's undo
+  // manager compares the two biases at 1e-3 (undo_redo_manager.py:647-660).
+  const ba = readBias(a), bb = readBias(b);
+  if (Math.abs(ba.triangle - bb.triangle) > BIAS_EPS || Math.abs(ba.circle - bb.circle) > BIAS_EPS) return false;
   if ((a.attached_to ?? null) !== (b.attached_to ?? null)) return false;
   if ((a.attachment_side ?? null) !== (b.attachment_side ?? null)) return false;
   if (rectSig(a.deletion_rectangles) !== rectSig(b.deletion_rectangles)) return false;

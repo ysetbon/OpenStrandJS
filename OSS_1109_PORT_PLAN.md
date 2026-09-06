@@ -228,7 +228,8 @@ documentation sections with their guide-text i18n.**
   chips on eligible targets (locked/masked skipped). Bonus fix: lock-state
   changes now create undo steps (areVisuallyEqual compares lock_mode +
   locked_layers, matching OSS's forced saves). Verified live: 17 checks.
-  Deferred: bias_control fields (renderer doesn't draw bias controls).
+  Bias_control travels with Control Points too (added with the bias-control
+  port, `src/model/biasControl.ts`).
 - **§4 DONE** (commit 5a861b7): per-strand Edit Shadows dialog (with the 1.109
   "via mask" proxy rows writing under the mask's key) + the auto_shadow.py port.
   The geometry probe (`window.computeShadowPairAreas`) runs through the SAME

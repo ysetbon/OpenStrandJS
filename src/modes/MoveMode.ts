@@ -16,7 +16,10 @@ import { moveGrab } from '../interaction/hitTest';
 import { movingStrandSet, beginWeldGesture, endWeldGesture } from '../interaction/connections';
 import { moveHandle, snapGrid, snapMove, autoAdjustCp1OnGrab, resetStraightCurveFlags, seedMaskCenters } from '../store/actions';
 import type { HandleKind, Point, Selection, StrandRecord } from '../model/types';
+import { biasPosition } from '../model/biasControl';
 import type { Mode, ModeContext, PointerInfo } from './Mode';
+
+const isBiasHandle = (h: HandleKind): boolean => h === 'bias_triangle' || h === 'bias_circle';
 
 let drag: {
   layer: string;
@@ -33,6 +36,8 @@ function handlePos(s: StrandRecord, handle: HandleKind): Point {
     case 'control_point1': return s.control_points[0];
     case 'control_point2': return s.control_points[1];
     case 'control_point_center': return s.control_point_center ?? s.start;
+    case 'bias_triangle': return biasPosition(s, 'triangle') ?? s.start;
+    case 'bias_circle': return biasPosition(s, 'circle') ?? s.start;
   }
 }
 
@@ -49,9 +54,13 @@ export const MoveMode: Mode = {
       const s = st.doc.strands[hit.layerName];
       const hp = handlePos(s, hit.handle);
       const moving = movingStrandSet(st.doc, hit.layerName, hit.handle);
+      // A bias square is line-constrained: OSS keeps drag_offset at (0,0) and projects
+      // the RAW pointer onto the centre->cp line (curvature_bias_control.py:283,
+      // handle_mouse_move), so the square jumps under the cursor's projection.
+      const bias = isBiasHandle(hit.handle);
       drag = {
         layer: hit.layerName, handle: hit.handle,
-        offset: { x: hp.x - p.world.x, y: hp.y - p.world.y },   // cursor-lock offset (no jump)
+        offset: bias ? { x: 0, y: 0 } : { x: hp.x - p.world.x, y: hp.y - p.world.y },   // cursor-lock offset (no jump)
         // Seed the snapped-target early-out to the snapped CLICK position (OSS seeds
         // last_snapped_pos = canvas.snap_to_grid(press pos), move_mode.py:1378 — the
         // plain settings-gated snap, NOT the zoom/Ctrl-gated move decision). This is
@@ -93,8 +102,10 @@ export const MoveMode: Mode = {
     const st = useEditorStore.getState();
     if (drag) {
       const raw = { x: p.world.x + drag.offset.x, y: p.world.y + drag.offset.y };
-      // Zoom/Ctrl-gated grid snap (OSS mouseMoveEvent:4036-4079).
-      const pos = snapMove(raw, st.settings, st.view.zoom, p.ctrl);
+      // Zoom/Ctrl-gated grid snap (OSS mouseMoveEvent:4036-4079). A bias drag is
+      // handled BEFORE the snap logic in OSS (move_mode.py:4019-4027) and never
+      // snaps: the bias control projects the raw pointer onto its line itself.
+      const pos = isBiasHandle(drag.handle) ? raw : snapMove(raw, st.settings, st.view.zoom, p.ctrl);
       // OSS skips the entire update when the snapped target is unchanged (move_mode.py:4086).
       if (drag.lastSnap && drag.lastSnap.x === pos.x && drag.lastSnap.y === pos.y) return;
       drag.lastSnap = pos;

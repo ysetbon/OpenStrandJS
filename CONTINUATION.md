@@ -74,7 +74,8 @@ groups (302dd52 — create-from-set + translate as a unit).
 browser and committed. Explicitly deferred (low-value / out of corpus scope):
 - Renderer decorations not exercised by the fixtures: **end caps** (circle/
   elliptical `_make_cap_*` / `has_circles`), **arrows**, **side lines**,
-  **extensions**, **bias control**. These are the known ~1–3% fidelity residual.
+  **extensions**. These are the known ~1–3% fidelity residual. (Bias control
+  has since been ported: renderer + editor squares, `tools/bias_check.mjs`.)
 - Editor: per-layer arrow/line/extension toggles (no renderer effect yet), group
   rotate + drag-the-group-on-canvas (nudge buttons cover translation), angle
   dialog as a separate modal (inline in StrandProperties instead).

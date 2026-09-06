@@ -44,10 +44,11 @@ is almost entirely the items below — they exist in Qt's output but the JS rend
    JS sampled ±width/2 offset. Improve sampling density / round-join handling at
    caps in `strokedOutline`/`strokedBodyAtWidth` (`web/strand-renderer.js`).
 
-4. **Bias control** — the renderer hardcodes bias 0.5; port
-   `curvature_bias_control.py` so triangle/circle bias affect the curve
-   (`strand.py::_build_curve_profile` uses `bias_control.triangle_bias/circle_bias`).
-   The JS `buildProfile` already has bias params wired (currently 0.5).
+4. **Bias control** — DONE. The renderer reads `bias_control.triangle_bias/
+   circle_bias` behind `enable_curvature_bias_control`, and the editor now has the
+   controls themselves (`src/model/biasControl.ts`, `bias_triangle`/`bias_circle`
+   handles in move mode, overlay squares + influence lines, save/load, copy/paste;
+   guard: `tools/bias_check.mjs`).
 
 5. **Arrows / side lines / extensions / dashed** — only when a fixture exercises
    them (the corpus doesn't yet — make new fixtures). `strand.py`:

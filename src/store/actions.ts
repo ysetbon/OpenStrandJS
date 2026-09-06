@@ -4,6 +4,7 @@
 // JSON-serializable for future snapshot history.
 
 import type { EditorDocument, GroupRecord, HandleKind, KnotConnection, Point, RGBA, Settings, ShadowOverride, StrandRecord } from '../model/types';
+import { biasFromPointer, setBias } from '../model/biasControl';
 import { gestureConnTable, connectedMovers } from '../interaction/connections';
 import { makeAttachedStrand, makeStrand } from '../model/factory';
 import { formatLayerName, maskComponents, nextFreeSet, nextIndexInSet, parseLayerName } from '../model/layerName';
@@ -75,7 +76,8 @@ export function snapAttachTarget(raw: Point, start: Point, settings: Settings): 
 // the full-snap branch at any zoom). When snap is DISABLED, Ctrl is a no-op: OSS's
 // `elif force_grid_snap` branch calls canvas.snap_to_grid, which early-returns the point
 // unchanged while snap_to_grid_enabled is False (strand_drawing_canvas.py:5266) — so
-// there is NO real "Ctrl override when off". `userSnap` excludes bias controls (none yet).
+// there is NO real "Ctrl override when off". `userSnap` excludes bias controls (OSS
+// move_mode.py:4046-4048; MoveMode never snaps a bias drag — it is line-constrained).
 export function snapMove(p: Point, settings: Settings, zoom: number, ctrl: boolean, isBias = false): Point {
   const g = settings.grid_size;
   const userSnap = settings.snap_to_grid_enabled && g > 0 && !isBias;
@@ -137,6 +139,15 @@ export function moveHandle(
     const atEnd = Math.abs(pos.x - s.end.x) < 1.0 && Math.abs(pos.y - s.end.y) < 1.0;
     s.control_point2_activated = !atEnd;
     recenter(s);
+    return;
+  }
+  if (handle === 'bias_triangle' || handle === 'bias_circle') {
+    // Curvature bias square: the pointer is projected onto the centre->cp line and
+    // the clamped fraction IS the bias (curvature_bias_control.py::handle_mouse_move).
+    // Nothing else moves; the renderer re-shapes the curve from the new bias.
+    const kind = handle === 'bias_triangle' ? 'triangle' : 'circle';
+    setBias(s, kind, biasFromPointer(s, kind, pos));
+    if (kind === 'triangle') s.triangle_has_moved = true;   // OSS handle_mouse_press side-effect
     return;
   }
   if (handle === 'control_point_center') {

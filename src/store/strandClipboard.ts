@@ -10,10 +10,12 @@
 // children glued to a moved parent endpoint follow it (start snaps, free end
 // stays, control points translate), recursively.
 //
-// Deferred vs OSS: bias_control positions (the renderer doesn't draw bias
-// controls yet, and the field would round-trip via `extra` anyway).
+// The curvature biases travel with Control Points, as in OSS (the desktop copies
+// bias_control's two values + positions; the positions are derived here, so only
+// the biases are stored and re-derived on paste).
 
 import type { EditorDocument, Point, RGBA, StrandRecord } from '../model/types';
+import { readBias, readBiasData, setBiases } from '../model/biasControl';
 
 export const COPY_PROPERTIES = [
   'start_point',
@@ -46,6 +48,8 @@ export interface StrandDataSnapshot {
     triangle_has_moved: boolean;
     control_point2_shown: boolean;
     control_point2_activated: boolean;
+    // Curvature bias (strand_data_clipboard.py snapshot["control_points"]["bias"]).
+    bias?: { triangle_bias: number; circle_bias: number };
   };
 }
 
@@ -88,6 +92,10 @@ export function snapshotStrandData(
       control_point2_shown: !!s.control_point2_shown,
       control_point2_activated: !!s.control_point2_activated,
     };
+    if (readBiasData(s)) {
+      const b = readBias(s);
+      snap.control_points.bias = { triangle_bias: b.triangle, circle_bias: b.circle };
+    }
   }
   return snap;
 }
@@ -176,6 +184,10 @@ export function applyStrandData(
     s.triangle_has_moved = controls.triangle_has_moved;
     s.control_point2_shown = controls.control_point2_shown;
     s.control_point2_activated = controls.control_point2_activated;
+    // OSS applies the copied biases only when the target already has a bias
+    // control object (`bias_data is not None and bias is not None`); the desktop
+    // gives every strand one when the feature is on, so apply whenever copied.
+    if (controls.bias) setBiases(s, controls.bias.triangle_bias, controls.bias.circle_bias);
     applied = geometryChanged = true;
   } else if (endpointChanged) {
     // OSS update_control_points_from_geometry: cp1/cp2 at 1/3 and 2/3 along the
