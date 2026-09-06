@@ -14,7 +14,7 @@
 import { useEditorStore } from '../store/editorStore';
 import { moveGrab } from '../interaction/hitTest';
 import { movingStrandSet, beginWeldGesture, endWeldGesture } from '../interaction/connections';
-import { moveHandle, snapMove, autoAdjustCp1OnGrab, resetStraightCurveFlags, seedMaskCenters } from '../store/actions';
+import { moveHandle, snapGrid, snapMove, autoAdjustCp1OnGrab, resetStraightCurveFlags, seedMaskCenters } from '../store/actions';
 import type { HandleKind, Point, Selection, StrandRecord } from '../model/types';
 import type { Mode, ModeContext, PointerInfo } from './Mode';
 
@@ -53,11 +53,12 @@ export const MoveMode: Mode = {
         layer: hit.layerName, handle: hit.handle,
         offset: { x: hp.x - p.world.x, y: hp.y - p.world.y },   // cursor-lock offset (no jump)
         // Seed the snapped-target early-out to the snapped CLICK position (OSS seeds
-        // last_snapped_pos = snap_to_grid(press pos), move_mode.py:1375). This is NOT the
-        // snapped handle: when the off-grid handle and the click sit in different grid
-        // cells, the first move (adjusted == handle) snaps the handle onto the grid — OSS
-        // does this, and seeding from the click (not the handle) preserves it.
-        lastSnap: snapMove(p.world, st.settings, st.view.zoom, p.ctrl),
+        // last_snapped_pos = canvas.snap_to_grid(press pos), move_mode.py:1378 — the
+        // plain settings-gated snap, NOT the zoom/Ctrl-gated move decision). This is
+        // NOT the snapped handle: when the off-grid handle and the click sit in
+        // different grid cells, the first move (adjusted == handle) snaps the handle
+        // onto the grid — OSS does this, and seeding from the click preserves it.
+        lastSnap: snapGrid(p.world, st.settings),
         prevSelection: st.selection,
       };
       st.setTransientSelection({ layerName: hit.layerName, handle: hit.handle });

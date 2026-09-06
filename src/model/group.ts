@@ -192,3 +192,43 @@ export function applyGroupRotateSnapshot(
     });
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* "Snap to grid" (Move Group dialog) — OSS snap_group_to_grid.          */
+/* ------------------------------------------------------------------ */
+
+// Port of strand_drawing_canvas.snap_group_to_grid (:1141-1196), the target of the
+// Move Group dialog's Snap-to-grid button (group_layers.py:4373). It rounds every
+// member strand's START and END onto the grid ABSOLUTELY — the strands themselves
+// land on grid intersections, whatever offset the dialog has applied so far — and it
+// does so regardless of either snap-to-grid setting (the desktop calls
+// snap_point_to_grid directly, not the gated canvas.snap_to_grid). Masks are skipped
+// (their erase windows stay put; OSS only force_shadow_update()s them). Control
+// points follow the OSS setters: a cp that coincided with the old start rides with it
+// (strand.py:437-445), the end setter moves none, and update_shape re-derives the
+// centre from the cp midpoint unless it is pinned (with the 0.5px auto-unpin).
+export function snapGroupToGrid(draft: EditorDocument, name: string, grid: number): void {
+  if (!(grid > 0)) return;
+  const round = (p: Point): Point => ({ x: Math.round(p.x / grid) * grid, y: Math.round(p.y / grid) * grid });
+  const at = (p: Point, q: Point) => Math.abs(p.x - q.x) < 1e-6 && Math.abs(p.y - q.y) < 1e-6;
+  const { regular } = resolveGroupMembers(draft, name);
+  for (const layer of regular) {
+    const s = draft.strands[layer];
+    if (!s) continue;
+    const oldStart = s.start;
+    const start = round(oldStart);
+    if (at(s.control_points[0], oldStart)) s.control_points[0] = { ...start };
+    if (at(s.control_points[1], oldStart)) s.control_points[1] = { ...start };
+    s.start = start;
+    s.end = round(s.end);
+    const mid = {
+      x: (s.control_points[0].x + s.control_points[1].x) / 2,
+      y: (s.control_points[0].y + s.control_points[1].y) / 2,
+    };
+    if (s.control_point_center_locked && s.control_point_center
+        && Math.hypot(s.control_point_center.x - mid.x, s.control_point_center.y - mid.y) < 0.5) {
+      s.control_point_center_locked = false;
+    }
+    if (!s.control_point_center_locked) s.control_point_center = mid;
+  }
+}

@@ -13,13 +13,56 @@ import { recomputeAutoShadowOverrides } from './autoShadow';
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 
-// Attach/create-mode grid snapping. Gated on snap_to_grid_attach_enabled (OSS
-// EnableSnapToGridAttach) — distinct from move-mode snap (snapMove, gated on
-// snap_to_grid_enabled). Both default true.
+// Grid rounding shared by every snap path (OSS strand_drawing_canvas._snap_point_to_grid).
+export function roundToGrid(p: Point, grid: number): Point {
+  return { x: Math.round(p.x / grid) * grid, y: Math.round(p.y / grid) * grid };
+}
+
+// Move-mode canvas.snap_to_grid (strand_drawing_canvas.py:5266): the plain settings
+// gate with NO zoom logic. move_mode uses it directly to seed last_snapped_pos on
+// press (:1378); the zoom/Ctrl decision lives in snapMove below.
+export function snapGrid(p: Point, settings: Settings): Point {
+  if (!settings.snap_to_grid_enabled || settings.grid_size <= 0) return p;
+  return roundToGrid(p, settings.grid_size);
+}
+
+// Attach/create-mode canvas.snap_to_grid_for_attach (strand_drawing_canvas.py:5272).
+// Gated on snap_to_grid_attach_enabled (OSS EnableSnapToGridAttach) — distinct from
+// move-mode snap (snapGrid / snapMove, gated on snap_to_grid_enabled). Both default true.
 export function snapPoint(p: Point, settings: Settings): Point {
   if (!settings.snap_to_grid_attach_enabled || settings.grid_size <= 0) return p;
-  const g = settings.grid_size;
-  return { x: Math.round(p.x / g) * g, y: Math.round(p.y / g) * g };
+  return roundToGrid(p, settings.grid_size);
+}
+
+// The endpoint of a strand being drawn or attached — a port of OSS
+// attach_mode._get_snapped_attachment_position (attach_mode.py:939-987), which every
+// attach-mode move/release goes through for BOTH a new main strand and a child. With
+// attach-snap ON it returns the snapped cursor, but never lets it collapse back onto
+// the strand's start: when the rounded cursor lands on the start it steps one grid
+// unit away instead — first along the dominant cursor axis, then the other axis, then
+// the diagonal, then +X — so even a bare click yields a one-grid-step strand (the
+// desktop creates whenever start != end, attach_mode.py:520). With attach-snap OFF the
+// raw cursor is returned untouched (no snap, no minimum length).
+export function snapAttachTarget(raw: Point, start: Point, settings: Settings): Point {
+  const snapped = snapPoint(raw, settings);
+  if (!settings.snap_to_grid_attach_enabled || settings.grid_size <= 0) return snapped;
+  const same = (a: Point, b: Point) => Math.abs(a.x - b.x) < 1e-6 && Math.abs(a.y - b.y) < 1e-6;
+  if (!same(snapped, start)) return snapped;
+  const grid = settings.grid_size;
+  let dx = raw.x - start.x, dy = raw.y - start.y;
+  // Cursor exactly on the start: default to +X.
+  if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) { dx = grid; dy = 0; }
+  const sx = dx >= 0 ? grid : -grid;
+  const sy = dy >= 0 ? grid : -grid;
+  const offsets: Point[] = Math.abs(dx) >= Math.abs(dy)
+    ? [{ x: sx, y: 0 }, { x: 0, y: sy }]
+    : [{ x: 0, y: sy }, { x: sx, y: 0 }];
+  offsets.push({ x: sx, y: sy });   // diagonal fallback
+  for (const o of offsets) {
+    const c = snapPoint({ x: start.x + o.x, y: start.y + o.y }, settings);
+    if (!same(c, start)) return c;
+  }
+  return snapPoint({ x: start.x + grid, y: start.y }, settings);   // final fallback: +X
 }
 
 // Move-mode grid snapping — a faithful port of OSS move_mode.mouseMoveEvent's
@@ -31,13 +74,13 @@ export function snapPoint(p: Point, settings: Settings): Point {
 // Ctrl forces full snap ONLY when snap is already enabled (it pushes the decision into
 // the full-snap branch at any zoom). When snap is DISABLED, Ctrl is a no-op: OSS's
 // `elif force_grid_snap` branch calls canvas.snap_to_grid, which early-returns the point
-// unchanged while snap_to_grid_enabled is False (strand_drawing_canvas.py:5177) — so
+// unchanged while snap_to_grid_enabled is False (strand_drawing_canvas.py:5266) — so
 // there is NO real "Ctrl override when off". `userSnap` excludes bias controls (none yet).
 export function snapMove(p: Point, settings: Settings, zoom: number, ctrl: boolean, isBias = false): Point {
   const g = settings.grid_size;
   const userSnap = settings.snap_to_grid_enabled && g > 0 && !isBias;
   if (zoom < 0.35 && !ctrl) return p;
-  if ((zoom >= 0.8 || ctrl) && userSnap) return { x: Math.round(p.x / g) * g, y: Math.round(p.y / g) * g };
+  if ((zoom >= 0.8 || ctrl) && userSnap) return roundToGrid(p, g);
   if (zoom >= 0.5 && userSnap) {
     const gx = Math.round(p.x / g) * g, gy = Math.round(p.y / g) * g;
     const thr = (g / 8) * zoom;
