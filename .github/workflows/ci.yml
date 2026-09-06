@@ -153,6 +153,15 @@ jobs:
       - name: Guards — collapsible group column
         run: node tools/group_rail_check.mjs
 
+      # Snap-to-grid settings (OSS settings_dialog General page): the MOVE
+      # checkbox gates move-mode drags (with the desktop's zoom/Ctrl decision), the
+      # ATTACH/CREATE checkbox gates a new strand's start AND end and a child's end
+      # (_get_snapped_attachment_position: snapped, never collapsed onto the start),
+      # neither setting leaks into the other mode, and the Move Group dialog's Snap
+      # button lands every member endpoint on the grid absolutely.
+      - name: Guards — snap-to-grid settings
+        run: node tools/snap_check.mjs
+
       - name: Editor smoke — built app boots cleanly
         run: node tools/ci_smoke.mjs editor dist-editor
 

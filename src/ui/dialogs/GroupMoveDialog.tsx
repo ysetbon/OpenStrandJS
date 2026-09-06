@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Modal } from '../Modal';
 import { useEditorStore, cloneDoc } from '../../store/editorStore';
-import { snapshotGroupDrag, applyGroupMoveSnapshot } from '../../model/group';
+import { snapshotGroupDrag, applyGroupMoveSnapshot, snapGroupToGrid } from '../../model/group';
 import { requestRender } from '../../renderer/renderScheduler';
 import { t } from '../i18n';
 
@@ -13,7 +13,9 @@ import { t } from '../i18n';
 //   * beginGesture + commit collapse the whole drag into ONE undo step.
 // X/Y sliders + px inputs (-600..600) drive the total directly; the grid-step
 // rows add steps*grid_size px to the total on Apply (then reset to 0), matching
-// the original. The Snap button rounds the current offset to whole grid steps.
+// the original. The Snap button is OSS snap_to_grid (group_layers.py:4373): it
+// rounds every member strand's endpoints onto the grid ABSOLUTELY (not the offset),
+// then accepts — the dialog closes with the snap applied, as one undo step.
 export function GroupMoveDialog(props: { groupName: string; onClose: () => void }): JSX.Element {
   const { groupName, onClose } = props;
   const lang = useEditorStore((s) => s.settings.language);
@@ -73,8 +75,11 @@ export function GroupMoveDialog(props: { groupName: string; onClose: () => void 
     onClose();
   };
 
-  // Snap the current offset to the nearest whole grid step on each axis.
-  const snap = () => preview(Math.round(dx / grid) * grid, Math.round(dy / grid) * grid);
+  // OSS: canvas.snap_group_to_grid(group) → move_finished.emit → accept().
+  const snap = () => {
+    useEditorStore.getState().mutateDoc((d) => snapGroupToGrid(d, groupName, grid));
+    apply();
+  };
 
   return (
     <Modal

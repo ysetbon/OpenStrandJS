@@ -1,27 +1,29 @@
-// Draw a new strand on empty space (press-drag-release at a FREE angle, grid-snapped
-// when snap-to-grid is enabled — matching OSS, which never 45-locks a mouse-drawn
-// first strand) OR attach a child by dragging out of a free parent endpoint's 120px
-// circle. The strand is created on pointer-up so a zero-length drag cancels cleanly.
+// Draw a new strand on empty space (press-drag-release at a FREE angle — OSS never
+// 45-locks a mouse-drawn first strand) OR attach a child by dragging out of a free
+// parent endpoint's 120px circle. The strand is created on pointer-up.
+//
+// Grid snapping follows OSS attach_mode.py exactly and is gated on the
+// "snap to grid for attach/create mode" setting (canvas.snap_to_grid_for_attach):
+//   * a NEW strand's START is the snapped press position (attach_mode.py:609);
+//   * a CHILD's start is the parent's endpoint itself, never snapped (:1144);
+//   * the END of either — every move AND the release — goes through
+//     _get_snapped_attachment_position (snapAttachTarget): snapped, and never
+//     collapsed back onto the start while snap is on, so a bare click still creates
+//     a one-grid-step strand, just like the desktop.
+// The move-mode setting ("snap to grid for move mode") plays no part here.
 
 import { useEditorStore } from '../store/editorStore';
-import { addNewStrand, attachChild, snapPoint } from '../store/actions';
+import { addNewStrand, attachChild, snapAttachTarget, snapPoint } from '../store/actions';
 import { screenToWorld } from '../interaction/viewTransform';
 import type { EditorDocument, HandleKind, Point, ViewState } from '../model/types';
 import type { Mode, ModeContext, PointerInfo } from './Mode';
 
 const ATTACH_R = 60;        // world px (120px-diameter circle around free endpoints)
-const MIN_LEN = 8;          // world px; shorter drags are cancelled
-const MIN_ATTACH_LEN = 40;  // world px; attached child clamped to >= this (OSS attached_strand.py min_length)
-
-// Push `end` out to `min` px along the cursor direction when the drag is shorter
-// than the minimum (but non-zero) — mirrors AttachedStrand.update (min_length).
-function clampMinLen(start: Point, end: Point, min: number): Point {
-  const dx = end.x - start.x, dy = end.y - start.y;
-  const len = Math.hypot(dx, dy);
-  if (len <= 0 || len >= min) return end;
-  const a = Math.atan2(dy, dx);
-  return { x: start.x + min * Math.cos(a), y: start.y + min * Math.sin(a) };
-}
+// Dead zone for an UNSNAPPED drag only. OSS creates a strand whenever start != end
+// (attach_mode.py:520) — with attach-snap on, snapAttachTarget guarantees exactly
+// that, so no threshold applies there. With attach-snap OFF the desktop would keep a
+// sub-pixel jitter as a strand; this 8px dead zone is the one deliberate deviation.
+const MIN_LEN = 8;          // world px
 
 // Constrain a world point to ~50px inside the visible canvas edges, matching OSS
 // attach_mode.py constrain_coordinates_to_visible_viewport (~874): zoom<1 allows
@@ -98,8 +100,10 @@ export const AttachMode: Mode = {
       // this gesture (is_drawing_new_strand). OSS attach_mode never creates a main
       // strand from a bare empty-space press — only child attachments happen there —
       // so without the arming flag an empty-space press starts no drag at all.
-      drag = { kind: 'new', start: p.world };
-      st.setPending({ kind: 'new', start: p.world, end: p.world });
+      // OSS: start_pos = snap_to_grid_for_attach(constrain(press)) (attach_mode.py:608-609).
+      const start = snapPoint(constrainToViewport(p.world, st.view), st.settings);
+      drag = { kind: 'new', start };
+      st.setPending({ kind: 'new', start, end: start });
     } else {
       // Empty space, no free endpoint, not armed: OSS does nothing here (no x_1).
       return;
@@ -125,10 +129,10 @@ export const AttachMode: Mode = {
   onPointerMove(p: PointerInfo, ctx: ModeContext) {
     const st = useEditorStore.getState();
     if (drag) {
+      // OSS mouseMoveEvent (attach_mode.py:703-714): constrain, then
+      // _get_snapped_attachment_position for new strands and children alike.
       const world = constrainToViewport(p.world, st.view);
-      const end = drag.kind === 'new'
-        ? snapPoint(world, st.settings)
-        : clampMinLen(drag.start, world, MIN_ATTACH_LEN);
+      const end = snapAttachTarget(world, drag.start, st.settings);
       st.setPending({ kind: drag.kind, start: drag.start, end, parent: drag.parent, side: drag.side });
       ctx.requestOverlay();
       return;
@@ -150,21 +154,20 @@ export const AttachMode: Mode = {
     if (!drag) return;
     const st = useEditorStore.getState();
     const d = drag;
+    // OSS mouseReleaseEvent (attach_mode.py:478-481): the final end is the same
+    // snapped target the last move used — free angle, never collapsed onto the start.
     const world = constrainToViewport(p.world, st.view);
-    const end = d.kind === 'new'
-      ? snapPoint(world, st.settings)        // free angle, grid-snapped when enabled
-      : clampMinLen(d.start, world, MIN_ATTACH_LEN);
+    const end = snapAttachTarget(world, d.start, st.settings);
     drag = null;
     st.setPending(null);
     st.setDragging(false);
 
-    // Cancel a too-short drag. For 'attach' measure the RAW cursor distance (clampMinLen
-    // would otherwise stretch it to MIN_ATTACH_LEN); for 'new' measure the SNAPPED end so
-    // a grid-snap that collapses the endpoint back onto the start cancels too.
-    const dragLen = d.kind === 'new'
-      ? Math.hypot(end.x - d.start.x, end.y - d.start.y)
-      : Math.hypot(p.world.x - d.start.x, p.world.y - d.start.y);
-    if (dragLen < MIN_LEN) {
+    // OSS creates whenever start != end (attach_mode.py:520). With attach-snap on the
+    // end can't coincide with the start, so a click creates a one-grid-step strand;
+    // with it off, apply the small dead zone instead of keeping sub-pixel jitter.
+    const dragLen = Math.hypot(end.x - d.start.x, end.y - d.start.y);
+    const snapOn = st.settings.snap_to_grid_attach_enabled && st.settings.grid_size > 0;
+    if (snapOn ? dragLen <= 0 : dragLen < MIN_LEN) {
       st.commit();               // nothing created -> commit() discards the no-op gesture
       ctx.requestOverlay();
       return;
