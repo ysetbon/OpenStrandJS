@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Modal } from '../Modal';
 import { useEditorStore, cloneDoc } from '../../store/editorStore';
-import { snapshotAngleAdjust, applyAngleAdjustSnapshot } from '../../store/actions';
+import { snapshotAngleAdjust, applyAngleAdjustSnapshot, clearAllLocks } from '../../store/actions';
 import { requestRender } from '../../renderer/renderScheduler';
 import { t } from '../i18n';
 
@@ -63,14 +63,27 @@ export function AngleAdjustDialog(props: { layerName: string; onClose: () => voi
     st.setAngleAdjust({ layerName, spanDeg: a - snap.initialAngle });
   };
 
+  // OK — OSS confirm_adjustment (:572-598): save one undo state, then
+  // layer_panel.deselect_all() (:583-584), then unpress the button (Toolbar's
+  // onClose restores the previous mode). deselect_all is the panel's own
+  // "Deselect All" button, quirk included: in lock mode it clears every lock
+  // (its own undo step) and leaves the selection alone (layer_panel.py:3408-3449).
   const apply = () => {
     const st = useEditorStore.getState();
     st.setAngleAdjust(null);
     st.commit();          // the previewed state is already live -> one undo step
+    if (st.doc.lock_mode) st.commitEdit(clearAllLocks, { action: 'layer.clear_locks', source: 'panel' });
+    else st.deselectAll();
     requestRender();
     onClose();
   };
 
+  // Cancel (Escape / title-bar X) — OSS cancel_adjustment (:600-628) nulls
+  // canvas.selected_strand but leaves strand.is_selected and the layer button
+  // checked, so on screen the strand STAYS selected; selection is one thing
+  // here, so it simply stays selected. (Only the dialog's own Escape may get
+  // here: Modal swallows the key so InteractionHost's Escape-clears-selection
+  // never runs on top of it, and InteractionHost ignores keys under a modal.)
   const cancel = () => {
     const st = useEditorStore.getState();
     st.setAngleAdjust(null);
@@ -80,12 +93,18 @@ export function AngleAdjustDialog(props: { layerName: string; onClose: () => voi
     onClose();
   };
 
+  // A modal QDialog (dialog.exec_(), :250) closes only through OK, Escape or its
+  // title-bar X; a click outside it is swallowed. So no backdrop dismiss — that
+  // also let the press that closed the dialog land as a stray click on the layer
+  // panel or canvas underneath — and an explicit X for the reject path.
   return (
     <Modal
       title={t('adjust_angle_and_length', lang)}
       onClose={cancel}
       lang={lang}
       onEnter={apply}
+      dismissOnBackdrop={false}
+      closeButton
       footer={<button onClick={apply}>{t('ok', lang)}</button>}
     >
       <div className="gd-row">
