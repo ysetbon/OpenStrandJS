@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import { createGroup, createMask, reorderLayer } from '../store/actions';
 import { requestRender } from '../renderer/renderScheduler';
-import { isRTL } from './i18n';
+import { isRTL, t } from './i18n';
 import { ControlColumn } from './ControlColumn';
 import { ossIcon } from './icons';
 import { NumberedLayerButton } from './NumberedLayerButton';
@@ -88,7 +88,8 @@ export function LayerPanel() {
   // Group column collapse to the icon rail (OSS layer_panel.group_panel_collapsed).
   const groupPanelCollapsed = useEditorStore((s) => s.groupPanelCollapsed);
   const toggleGroupPanel = useEditorStore((s) => s.toggleGroupPanel);
-  const rtl = isRTL(useEditorStore((s) => s.settings.language));
+  const language = useEditorStore((s) => s.settings.language);
+  const rtl = isRTL(language);
   const theme = useEditorStore((s) => s.settings.theme);
 
   // OSS layer_panel masked_mode: holding Ctrl WHILE THE PANEL IS HOVERED enters the
@@ -317,7 +318,8 @@ export function LayerPanel() {
         * back toward the layer list to expand — mirrored in RTL. The chevron
         * is the theme's layer_panel_icons/group_toggle_<theme>.png (OSS
         * layer_panel._refresh_group_toggle_glyph): the PNG points left, and
-        * data-dir="right" flips it in CSS. No tooltip, as in OSS. */}
+        * data-dir="right" flips it in CSS. No tooltip, as in OSS; the image is
+        * decorative, so the button's accessible name is a localized aria-label. */}
       <div className={'lp-right' + (groupPanelCollapsed ? ' lp-right-collapsed' : '')}>
         <GroupPanel dialogs={GROUP_DIALOGS} />
         <div className="lp-group-toggle-row">
@@ -325,6 +327,7 @@ export function LayerPanel() {
             type="button"
             className="lp-group-toggle"
             data-dir={groupPanelCollapsed ? (rtl ? 'right' : 'left') : (rtl ? 'left' : 'right')}
+            aria-label={t(groupPanelCollapsed ? 'expand_group_panel' : 'collapse_group_panel', language)}
             aria-expanded={!groupPanelCollapsed}
             tabIndex={-1}
             onClick={toggleGroupPanel}

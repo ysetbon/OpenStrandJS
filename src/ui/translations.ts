@@ -68,6 +68,11 @@ export const STRINGS: Record<string, Entry> = {
   // The collapsed group column's create tile: the language's letter for "group"
   // (G in the six Latin-script languages, ק for קבוצה in Hebrew).
   create_group_tile: { en: 'G', fr: 'G', de: 'G', it: 'G', es: 'G', pt: 'G', he: 'ק' },
+  // Accessible name of the group column's collapse/expand chevron (it has no
+  // visible text and, as in OSS, no tooltip); the leading phrase of
+  // collapse_group_panel_desc in each language.
+  collapse_group_panel: { en: 'Collapse group panel', fr: 'Replier la colonne des groupes', de: 'Gruppenspalte einklappen', it: 'Comprimi la colonna dei gruppi', es: 'Plegar la columna de grupos', pt: 'Recolher a coluna de grupos', he: 'כיווץ עמודת הקבוצות' },
+  expand_group_panel: { en: 'Expand group panel', fr: 'Déplier la colonne des groupes', de: 'Gruppenspalte ausklappen', it: 'Espandi la colonna dei gruppi', es: 'Desplegar la columna de grupos', pt: 'Expandir a coluna de grupos', he: 'הרחבת עמודת הקבוצות' },
   move_group_strands: { en: 'Move Strands', fr: 'Déplacer Groupe', de: 'Gruppe verschieben', it: 'Sposta Gruppo', es: 'Mover Grupo', pt: 'Mover Grupo', he: 'הזז קבוצה' },
   rotate_group_strands: { en: 'Rotate Strands', fr: 'Tourner Groupe', de: 'Gruppe drehen', it: 'Ruota Gruppo', es: 'Rotar Grupo', pt: 'Rotacionar Grupo', he: 'סובב קבוצה' },
   edit_strand_angles: { en: 'Edit Strand Angles', fr: 'Modifier les angles des brins', de: 'Strangwinkel bearbeiten', it: 'Modifica Angoli Trefolo', es: 'Editar Ángulos del Cordón', pt: 'Editar Ângulos da Mecha', he: 'ערוך זוויות חוט' },
