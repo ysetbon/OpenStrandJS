@@ -4,6 +4,7 @@ import { createGroup, createMask, reorderLayer } from '../store/actions';
 import { requestRender } from '../renderer/renderScheduler';
 import { isRTL } from './i18n';
 import { ControlColumn } from './ControlColumn';
+import { ossIcon } from './icons';
 import { NumberedLayerButton } from './NumberedLayerButton';
 import { LayerControlStack } from './LayerControlStack';
 import {
@@ -88,6 +89,7 @@ export function LayerPanel() {
   const groupPanelCollapsed = useEditorStore((s) => s.groupPanelCollapsed);
   const toggleGroupPanel = useEditorStore((s) => s.toggleGroupPanel);
   const rtl = isRTL(useEditorStore((s) => s.settings.language));
+  const theme = useEditorStore((s) => s.settings.theme);
 
   // OSS layer_panel masked_mode: holding Ctrl WHILE THE PANEL IS HOVERED enters the
   // transient mask-create mode (every button flat gray, two clicks make a mask);
@@ -312,19 +314,27 @@ export function LayerPanel() {
         * rail once collapsed. In both states the collapse/expand chevron sits
         * pinned at the bottom so it never moves under the mouse; it points the
         * way the column will move — toward the outer window edge to collapse,
-        * back toward the layer list to expand — mirrored in RTL. No tooltip,
-        * as in OSS. */}
+        * back toward the layer list to expand — mirrored in RTL. The chevron
+        * is the theme's layer_panel_icons/group_toggle_<theme>.png (OSS
+        * layer_panel._refresh_group_toggle_glyph): the PNG points left, and
+        * data-dir="right" flips it in CSS. No tooltip, as in OSS. */}
       <div className={'lp-right' + (groupPanelCollapsed ? ' lp-right-collapsed' : '')}>
         <GroupPanel dialogs={GROUP_DIALOGS} />
         <div className="lp-group-toggle-row">
           <button
             type="button"
             className="lp-group-toggle"
+            data-dir={groupPanelCollapsed ? (rtl ? 'right' : 'left') : (rtl ? 'left' : 'right')}
             aria-expanded={!groupPanelCollapsed}
             tabIndex={-1}
             onClick={toggleGroupPanel}
           >
-            {groupPanelCollapsed ? (rtl ? '›' : '‹') : (rtl ? '‹' : '›')}
+            <img
+              className="lp-group-toggle-icon"
+              src={ossIcon(`group_toggle_${theme}`)}
+              alt=""
+              draggable={false}
+            />
           </button>
         </div>
       </div>

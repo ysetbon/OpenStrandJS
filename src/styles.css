@@ -110,8 +110,10 @@ body {
 .lp-right-collapsed .gp-panel { min-width: 0; }
 /* The collapse/expand chevron row pinned at the bottom of the group column in
  * both states (OSS group_toggle_row: contentsMargins(0, 4, 0, 6), the 30x22
- * QToolButton centred, styled from the group panel's theme colors: group_bg /
- * text, hover group_hover_bg, pressed menu_selected_bg + white). */
+ * QToolButton centred, styled from the group panel's theme colors: group_bg,
+ * hover group_hover_bg, pressed menu_selected_bg). The chevron itself is the
+ * theme's 16px group_toggle_<theme>.png (OSS GROUP_TOGGLE_ICON_SIZE); the
+ * PNG points left and is flipped for data-dir="right". */
 .lp-group-toggle-row {
   flex: 0 0 auto;
   display: flex; justify-content: center;
@@ -120,14 +122,21 @@ body {
 .lp-group-toggle {
   box-sizing: border-box;
   width: 30px; height: 22px;
-  padding: 0 0 2px;
-  font-size: 15px; font-weight: bold; line-height: 1;
+  padding: 0;
+  display: flex; align-items: center; justify-content: center;
   cursor: pointer;
   background: var(--group-bg); color: var(--text);
   border: none; border-radius: 3px;
 }
 .lp-group-toggle:hover { background: var(--group-hover-bg); }
 .lp-group-toggle:active { background: var(--menu-selected-bg); color: #FFFFFF; }
+.lp-group-toggle-icon {
+  width: 16px; height: 16px;
+  display: block;
+  pointer-events: none;
+  user-select: none;
+}
+.lp-group-toggle[data-dir="right"] .lp-group-toggle-icon { transform: scaleX(-1); }
 /* The 200ms collapse/expand animation (OSS QVariantAnimation, InOutCubic).
  * Only switched on around a toggle, so a splitter drag stays immediate. */
 .shell-group-anim .layer-panel,
