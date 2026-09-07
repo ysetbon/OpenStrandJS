@@ -48,7 +48,13 @@ try {
 
   const w = async (sel) => (await page.locator(sel).first().boundingBox())?.width ?? -1;
   const collapsed = () => page.evaluate(() => window.__store.getState().groupPanelCollapsed);
-  const chevron = () => page.locator('.lp-group-toggle').textContent();
+  // The chevron is the theme's group_toggle_<theme>.png, flipped via data-dir.
+  const chevron = () => page.locator('.lp-group-toggle').getAttribute('data-dir');
+  const chevronIcon = async () => path.basename(new URL(await page.locator('.lp-group-toggle-icon').getAttribute('src'), 'http://x/').pathname);
+  // The basename alone would pass with a broken asset or a wrong BASE_URL, so
+  // the PNG must also have actually loaded.
+  const chevronLoaded = () => page.evaluate(() => { const i = document.querySelector('.lp-group-toggle-icon'); return !!i && i.complete && i.naturalWidth > 0; });
+  const chevronLabel = () => page.locator('.lp-group-toggle').getAttribute('aria-label');
   const shot = (name) => page.screenshot({ path: `${OUT}/${name}.png` });
 
   // ---- default: expanded, full widths, chevron points to the outer edge
@@ -56,7 +62,11 @@ try {
   ok('no rail while expanded', (await page.locator('.gp-rail').count()) === 0);
   ok(`group column ${GROUP_FULL}px`, near(await w('.lp-right'), GROUP_FULL), String(await w('.lp-right')));
   ok(`layer panel ${PANEL_FULL}px`, near(await w('.layer-panel'), PANEL_FULL), String(await w('.layer-panel')));
-  ok('chevron reads › in LTR while expanded', (await chevron()) === '›', await chevron());
+  ok('chevron points right in LTR while expanded', (await chevron()) === 'right', await chevron());
+  ok('chevron is the default theme PNG', (await chevronIcon()) === 'group_toggle_default.png', await chevronIcon());
+  ok('default theme PNG loaded', await chevronLoaded());
+  ok('chevron has an accessible name (collapse)', (await chevronLabel()) === 'Collapse group panel', await chevronLabel());
+  ok('chevron has no text glyph', ((await page.locator('.lp-group-toggle').textContent()) || '').trim() === '');
   ok('chevron has no tooltip', (await page.locator('.lp-group-toggle').getAttribute('title')) === null);
   const canvasBefore = await w('.canvas-wrap');
   await shot('01_expanded');
@@ -74,7 +84,8 @@ try {
   ok('create tile 30x30', near(createBox.width, 30) && near(createBox.height, 30), JSON.stringify(createBox));
   ok('create tile reads G in English', (await page.locator('.gp-rail-create').textContent()) === 'G');
   ok('create tile has no tooltip', (await page.locator('.gp-rail-create').getAttribute('title')) === null);
-  ok('chevron reads ‹ while collapsed', (await chevron()) === '‹', await chevron());
+  ok('chevron points left while collapsed', (await chevron()) === 'left', await chevron());
+  ok('chevron has an accessible name (expand)', (await chevronLabel()) === 'Expand group panel', await chevronLabel());
   ok('persisted GroupPanelRail true', (await page.evaluate(() => localStorage.getItem('openstrandjs.groupPanelRail'))) === 'true');
   await shot('02_collapsed_empty');
 
@@ -154,14 +165,21 @@ try {
   // ---- Hebrew: the create tile reads ק and the chevron mirrors (OSS PR #19)
   await page.evaluate(() => window.__store.getState().setSettings({ language: 'he' }));
   await page.waitForTimeout(150);
-  ok('chevron reads ‹ in RTL while expanded', (await chevron()) === '‹', await chevron());
+  ok('chevron points left in RTL while expanded', (await chevron()) === 'left', await chevron());
   await page.evaluate(() => window.__store.getState().setGroupPanelCollapsed(true));
   await page.waitForTimeout(350);
   ok('create tile reads ק in Hebrew', (await page.locator('.gp-rail-create').textContent()) === 'ק', await page.locator('.gp-rail-create').textContent());
-  ok('chevron reads › in RTL while collapsed', (await chevron()) === '›', await chevron());
+  ok('chevron points right in RTL while collapsed', (await chevron()) === 'right', await chevron());
   await page.evaluate(() => window.__store.getState().setSettings({ theme: 'dark' }));
   await page.waitForTimeout(150);
+  ok('chevron swaps to the dark theme PNG', (await chevronIcon()) === 'group_toggle_dark.png', await chevronIcon());
+  ok('dark theme PNG loaded', await chevronLoaded());
+  ok('accessible name follows the language', (await chevronLabel()) === 'הרחבת עמודת הקבוצות', await chevronLabel());
   await shot('05_rtl_dark_collapsed');
+  await page.evaluate(() => window.__store.getState().setSettings({ theme: 'light' }));
+  await page.waitForTimeout(150);
+  ok('chevron swaps to the light theme PNG', (await chevronIcon()) === 'group_toggle_light.png', await chevronIcon());
+  ok('light theme PNG loaded', await chevronLoaded());
   await page.evaluate(() => window.__store.getState().setSettings({ language: 'en', theme: 'default' }));
   await page.waitForTimeout(150);
   ok('create tile back to G in English', (await page.locator('.gp-rail-create').textContent()) === 'G');
