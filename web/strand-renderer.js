@@ -2660,6 +2660,48 @@ window.computeShadowPairAreas = function (strands, meta, pairs) {
   }
 };
 
+// The FILL region of one mask (Qt get_mask_path(), exactly the region drawMasked
+// paints) handed back for the "Draw Names" label: OSS draw_strand_label centres a
+// mask's label on mask_path.boundingRect() and clips the text to that path
+// (strand_drawing_canvas.py draw_strand_label). Pure computation on a throwaway
+// project, like computeShadowPairAreas above, and nothing is kept. Geometry is
+// in WORLD units (identity P, S = 1) so the caller applies its own view
+// transform. Returns { pathData, bounds: {x, y, width, height} } or null when
+// the mask has no region (missing component, fully erased).
+window.maskLabelClip = function (maskName, strands, meta) {
+  CURVE = meta.curve_params || CURVE_DEFAULT;
+  SAMPLE_STEP = 1;
+  const hi = document.createElement('canvas');
+  hi.setAttribute('hidpi', 'off');
+  hi.width = 8; hi.height = 8;
+  const callerProject = paper.project;
+  paper.setup(hi);
+  const probeProject = paper.project;
+  try {
+    const P = (pt) => new paper.Point(pt.x, pt.y);
+    const enableThird = resolveEnableThird(strands, meta);
+    BIAS_ENABLED = !!(meta && meta.enable_curvature_bias_control);
+    applyPaintSettings(meta);
+    const byLayer = {};
+    for (const s of strands) byLayer[s.layer_name] = s;
+    const ms = byLayer[maskName];
+    if (!ms || ms.type !== 'MaskedStrand') return null;
+    for (const s of strands) {
+      if (s.type === 'MaskedStrand') continue;
+      s.has_circles = computeHasCircles(s, strands);
+    }
+    const region = buildMaskPath(ms, byLayer, P, enableThird, 1);
+    if (!region) return null;
+    const b = region.bounds;
+    const out = { pathData: region.pathData, bounds: { x: b.x, y: b.y, width: b.width, height: b.height } };
+    region.remove();
+    return out;
+  } finally {
+    probeProject.remove();
+    try { if (callerProject && callerProject !== probeProject) callerProject.activate(); } catch { /* gone */ }
+  }
+};
+
 // Extract the flat strands array from a fixture file (handles the
 // OpenStrandStudioHistory wrapper). Mirrors js_render.mjs / reference_render.py.
 window.extractStrands = function (data, step) {

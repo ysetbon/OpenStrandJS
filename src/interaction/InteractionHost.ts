@@ -384,6 +384,13 @@ export class InteractionHost {
     if (!ctrl && k === 'n') {
       e.preventDefault(); st.armNewStrand(); return;
     }
+    // '1' (no modifiers): toggle Draw Names, exactly like the layer panel button
+    // (OSS main_window.py keyPressEvent — Key_1 clicks draw_names_button, which
+    // is disabled during an Edit Mask session; the `editing` return above keeps
+    // that). Auto-repeat is ignored so a held key doesn't flicker the labels.
+    if (!e.repeat && e.key === '1' && !ctrl && !e.altKey && !e.shiftKey) {
+      e.preventDefault(); st.toggleDrawNames(); return;
+    }
   };
 
   private onKeyUp = (e: KeyboardEvent) => {

@@ -54,6 +54,12 @@ export function LayerControlStack() {
   const setSelection = useEditorStore((s) => s.setSelection);
   const deselectAll = useEditorStore((s) => s.deselectAll);
   const toggleDrawNames = useEditorStore((s) => s.toggleDrawNames);
+  // OSS disable_controls: Draw Names is greyed out for the length of an Edit
+  // Mask session (the '1' shortcut clicks the button, so it is blocked too).
+  // Same validated-target test as CanvasStage / InteractionHost.editTarget: a
+  // target whose mask no longer exists is not an active session.
+  const maskEditing = useEditorStore((s) =>
+    !!s.maskEditTarget && s.doc.strands[s.maskEditTarget]?.type === 'MaskedStrand');
 
   const [confirmAll, setConfirmAll] = useState(false);
 
@@ -112,7 +118,7 @@ export function LayerControlStack() {
 
   return (
     <div className="layer-control-stack">
-      <LCBtn v={DRAW} label={t('draw_names', lang)} onClick={toggleDrawNames} />
+      <LCBtn v={DRAW} label={t('draw_names', lang)} disabled={maskEditing} onClick={toggleDrawNames} />
       <LCBtn
         v={LOCK}
         label={lockMode ? t('exit_lock_mode', lang) : t('lock_layers', lang)}
