@@ -6,6 +6,9 @@ import './contextMenu.css';
 export interface MenuRowButton {
   label: string;
   onClick: () => void;
+  /** Which end the button toggles. The Circle row (noPad) puts its stretch
+   *  before the 'end' button, like OSS's circle_layout.addStretch(). */
+  side?: 'start' | 'end';
 }
 
 export interface MenuItem {
@@ -22,7 +25,8 @@ export interface MenuItem {
   /** Compound row (Line/Circle/Arrow/Dash): left label + N inline buttons. */
   rowLabel?: string;
   buttons?: MenuRowButton[];
-  /** Circle row label carries no padding in OSS. */
+  /** Circle row: label at natural width (contents margins only, no padding)
+   *  and a stretch before the End button, per OSS. */
   noPad?: boolean;
 }
 
@@ -37,6 +41,12 @@ function measureLabel(text: string): number {
   if (!measureCtx) return text.length * 7;
   return measureCtx.measureText(text).width;
 }
+
+/* A QMenu with a `min-width` in its stylesheet and at least one separator lays
+ * its column out at that minimum plus the QMenu::item padding (3px + 30px) and
+ * the menu's 2px side margins: 37px more than the number OSS computes. Every
+ * layer menu has a separator, so the measured minimum is always widened. */
+const QMENU_MIN_WIDTH_EXTRA = 37;
 
 function computeMenuWidth(items: MenuItem[]): number {
   let max = 150;
@@ -54,7 +64,7 @@ function computeMenuWidth(items: MenuItem[]): number {
       if (w > max) max = w;
     }
   }
-  return Math.min(max, 350);
+  return Math.min(max, 350) + QMENU_MIN_WIDTH_EXTRA;
 }
 
 export function ContextMenu(props: {
@@ -70,7 +80,7 @@ export function ContextMenu(props: {
   const lang = useEditorStore((s) => s.settings.language);
   const theme = useEditorStore((s) => s.settings.theme);
   const isRtl = lang === 'he';
-  const isDark = theme === 'dark';
+  const themeClass = theme === 'dark' ? 'ctx-theme-dark' : theme === 'light' ? 'ctx-theme-light' : 'ctx-theme-default';
 
   const minWidth = useMemo(() => computeMenuWidth(items), [items]);
 
@@ -119,7 +129,7 @@ export function ContextMenu(props: {
   return (
     <div
       ref={ref}
-      className={'ctx-menu' + (isDark ? ' ctx-theme-dark' : '')}
+      className={'ctx-menu ' + themeClass}
       style={{ left: pos.left, top: pos.top, minWidth }}
       role="menu"
       dir={isRtl ? 'rtl' : 'ltr'}
@@ -136,18 +146,21 @@ export function ContextMenu(props: {
             >
               <span className="ctx-compound-label">{item.rowLabel}</span>
               {item.buttons.map((b, j) => (
-                <button
-                  key={j}
-                  type="button"
-                  className="ctx-compound-btn"
-                  onClick={() => {
-                    b.onClick();
-                    onClose();
-                  }}
-                >
-                  {b.label}
-                </button>
+                <React.Fragment key={j}>
+                  {item.noPad && b.side === 'end' && <span className="ctx-spacer" />}
+                  <button
+                    type="button"
+                    className="ctx-compound-btn"
+                    onClick={() => {
+                      b.onClick();
+                      onClose();
+                    }}
+                  >
+                    {b.label}
+                  </button>
+                </React.Fragment>
               ))}
+              {item.noPad && !item.buttons.some((b) => b.side === 'end') && <span className="ctx-spacer" />}
             </div>
           );
         }

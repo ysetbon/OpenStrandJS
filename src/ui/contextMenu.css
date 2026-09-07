@@ -1,53 +1,99 @@
-/* OSS-faithful right-click menu (numbered_layer_button.py QMenu + HoverLabel).
- * Chrome colors are LITERAL OSS hex (light = default; dark via .ctx-theme-dark,
- * set from JS by settings.theme==='dark'). Font 8pt (~11px). The clamped
- * min-width [150,350] is supplied inline by ContextMenu.tsx. */
+/* OSS-faithful right-click menu (numbered_layer_button.py: QMenu + HoverLabel +
+ * the compound Line/Arrow/Dash/Circle rows), measured against the real Qt
+ * widgets rendered by OSS's own code (Windows widget style, app theme
+ * stylesheet applied, menu parented to a NumberedLayerButton).
+ *
+ * What sets the look in OSS:
+ *  - The app-wide `QWidget { font-size: 14px }` reaches every label and button
+ *    inside the menu, so the text is 14px (the QMenu's own 8pt rule only styles
+ *    native items, and this menu has none).
+ *  - The menu's frame and the band behind the rows/separators show the app
+ *    window color (#ECECEC default, #FFFFFF light, #2C2C2C dark); the frame is
+ *    1px in the default theme and 3px in light and dark.
+ *  - A plain item is a HoverLabel: 35px tall, its own #F0F0F0/#333333 surface,
+ *    padding 5px 25px 5px 5px plus Qt's half-'x' label indent, and on hover it
+ *    swaps to #333333/#F0F0F0 edge to edge.
+ *  - A compound row keeps the window color; its buttons inherit the layer
+ *    button's `font-weight: bold` and the app's `padding: 8px 16px;
+ *    border-radius: 4px`, so the hover fill is the whole 33px rounded button.
+ *    The row label takes all spare width; buttons keep their natural width.
+ *  - The Circle row is the exception: its label keeps its natural width and a
+ *    stretch sits before the End button.
+ *  - Separators are Windows-style etched lines (dark line over light line) in a
+ *    9px band, inset 2px left / 3px right.
+ * The clamped min-width [150,350] from the 8pt text measure (OSS
+ * calculate_menu_width) is supplied inline by ContextMenu.tsx; the real width
+ * is the content's, exactly as the QMenu sizes to its widest widget row. */
 
 .ctx-menu {
+  --ctx-window: #ECECEC;
+  --ctx-item-bg: #F0F0F0;
+  --ctx-item-fg: #000000;
+  --ctx-hover-bg: #333333;
+  --ctx-hover-fg: #FFFFFF;
+  --ctx-sep-dark: #9D9D9D;
+  --ctx-sep-light: #FFFFFF;
+  --ctx-disabled: #888888;
+  --ctx-frame: 1px;
+
   position: fixed;
   z-index: 2000;
+  box-sizing: content-box;
+  width: max-content;
   min-width: 150px;
-  max-width: 350px;
-  padding: 4px;
-  background: #F0F0F0;
-  color: #000;
-  border: 1px solid #CCCCCC;
+  padding: 0;
+  margin: 0;
+  background: var(--ctx-window);
+  border: var(--ctx-frame) solid var(--ctx-window);
+  color: var(--ctx-item-fg);
   border-radius: 0;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28);
-  font-size: 11px;
-  line-height: 1.2;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 17px;
   user-select: none;
 }
 
-.ctx-theme-dark.ctx-menu {
-  background: #333333;
-  color: #fff;
-  border: 1px solid #555555;
+.ctx-theme-light.ctx-menu {
+  --ctx-window: #FFFFFF;
+  --ctx-sep-dark: #AAAAAA;
+  --ctx-sep-light: #FFFFFF;
+  --ctx-frame: 3px;
 }
 
+.ctx-theme-dark.ctx-menu {
+  --ctx-window: #2C2C2C;
+  --ctx-item-bg: #333333;
+  --ctx-item-fg: #FFFFFF;
+  --ctx-hover-bg: #F0F0F0;
+  --ctx-hover-fg: #000000;
+  --ctx-sep-dark: #1D1D1D;
+  --ctx-sep-light: #333333;
+  --ctx-disabled: #777777;
+  --ctx-frame: 3px;
+}
+
+/* ---- plain item (HoverLabel) ---- */
 .ctx-item {
   display: flex;
   align-items: center;
+  box-sizing: border-box;
   min-height: 35px;
-  padding: 5px 25px 5px 5px;
+  padding: 5px 25px 5px 8px;
+  background: var(--ctx-item-bg);
+  color: var(--ctx-item-fg);
   border-radius: 0;
   cursor: pointer;
   white-space: nowrap;
-  color: inherit;
 }
 
 [dir='rtl'] .ctx-item {
-  padding: 5px 5px 5px 25px;
+  padding: 5px 8px 5px 25px;
 }
 
 .ctx-item:hover {
-  background: #333333;
-  color: #fff;
-}
-
-.ctx-theme-dark .ctx-item:hover {
-  background: #F0F0F0;
-  color: #000;
+  background: var(--ctx-hover-bg);
+  color: var(--ctx-hover-fg);
 }
 
 .ctx-label {
@@ -56,61 +102,107 @@
 
 .ctx-disabled,
 .ctx-disabled:hover {
-  color: #888;
-  background: transparent;
+  color: var(--ctx-disabled);
+  background: var(--ctx-item-bg);
   cursor: default;
 }
 
-.ctx-theme-dark .ctx-disabled,
-.ctx-theme-dark .ctx-disabled:hover {
-  color: #777;
+/* ---- separator: Windows etched line in a 9px band on the window color ---- */
+.ctx-sep {
+  box-sizing: border-box;
+  height: 9px;
+  margin: 0;
+  padding: 3px 3px 4px 2px;
   background: transparent;
 }
 
-.ctx-sep {
+.ctx-sep::before,
+.ctx-sep::after {
+  content: '';
+  display: block;
   height: 1px;
-  margin: 4px 0;
-  background: #CCCCCC;
 }
 
-.ctx-theme-dark .ctx-sep {
-  background: #555555;
+.ctx-sep::before {
+  background: var(--ctx-sep-dark);
 }
 
-/* Compound row (Line / Circle / Arrow / Dash): label + inline Start/End buttons. */
+.ctx-sep::after {
+  background: var(--ctx-sep-light);
+}
+
+/* ---- compound row (Line / Arrow / Dash / Circle): label + flat buttons ---- */
 .ctx-compound {
   display: flex;
   align-items: center;
+  box-sizing: border-box;
   gap: 6px;
-  padding: 1px 5px;
   min-height: 35px;
+  padding: 1px 5px;
+  color: var(--ctx-item-fg);
+  white-space: nowrap;
+}
+
+/* Spare row width is shared the way QBoxLayout shares it among items with no
+ * stretch factor: the narrowest item grows first, until it catches up with the
+ * next one, then they grow together. Flexbox resolves to exactly that when
+ * every item starts from the same border-box basis and keeps min-width:auto
+ * (Line row: the label absorbs everything; an End-only Line row: label and
+ * button end up equal). 32px is a button's horizontal padding, the smallest
+ * basis a button can have. */
+.ctx-compound-label,
+.ctx-compound-btn {
+  flex: 1 1 32px;
+  box-sizing: border-box;
 }
 
 .ctx-compound-label {
-  flex: 1 1 auto;
-  padding: 2px;
+  /* QLabel padding 2px, plus Qt's half-'x' text indent: the text sits 3px
+   * further in and the label's natural width grows by 8px. */
+  padding: 2px 7px 2px 5px;
+}
+
+[dir='rtl'] .ctx-compound-label {
+  padding: 2px 5px 2px 7px;
+}
+
+/* Circle row: the label has 5px 1px contents margins and no stylesheet padding
+ * (so no indent either); a stretch before the End button takes all spare
+ * width, so label and buttons stay at their natural size. */
+.ctx-compound-nopad .ctx-compound-label,
+.ctx-compound-nopad .ctx-compound-btn {
+  flex: 0 0 auto;
 }
 
 .ctx-compound-nopad .ctx-compound-label {
-  padding: 0;
+  padding: 1px 5px;
+}
+
+.ctx-spacer {
+  flex: 1 1 0;
 }
 
 .ctx-compound-btn {
+  box-sizing: border-box;
+  min-height: 33px;
+  padding: 8px 16px;
   background: transparent;
   border: none;
+  border-radius: 4px;
   color: inherit;
+  font: inherit;
+  font-weight: 700;
   text-align: right;
   cursor: pointer;
-  padding: 2px 4px;
-  font-size: inherit;
 }
 
 .ctx-compound-btn:hover {
-  background: #333333;
-  color: #fff;
+  background: var(--ctx-hover-bg);
+  color: var(--ctx-hover-fg);
 }
 
-.ctx-theme-dark .ctx-compound-btn:hover {
-  background: #F0F0F0;
-  color: #000;
+.ctx-compound-btn:focus-visible,
+.ctx-item:focus-visible {
+  outline: 2px solid var(--ctx-hover-bg);
+  outline-offset: -2px;
 }
