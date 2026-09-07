@@ -55,6 +55,21 @@ try {
   // the PNG must also have actually loaded.
   const chevronLoaded = () => page.evaluate(() => { const i = document.querySelector('.lp-group-toggle-icon'); return !!i && i.complete && i.naturalWidth > 0; });
   const chevronLabel = () => page.locator('.lp-group-toggle').getAttribute('aria-label');
+  // Pressed color: force :active through CDP and read the computed background;
+  // it must be the Create Group button's pressed color (--create-group-pressed).
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('DOM.enable'); await cdp.send('CSS.enable');
+  const pressedBg = async (sel) => {
+    const { root } = await cdp.send('DOM.getDocument');
+    const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: sel });
+    await cdp.send('CSS.forcePseudoState', { nodeId, forcedPseudoClasses: ['active'] });
+    const bg = await page.evaluate((s) => getComputedStyle(document.querySelector(s)).backgroundColor, sel);
+    await cdp.send('CSS.forcePseudoState', { nodeId, forcedPseudoClasses: [] });
+    return bg;
+  };
+  const token = (name) => page.evaluate((n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim(), name);
+  const hex2rgb = (h) => { const n = parseInt(h.slice(1), 16); return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`; };
+  const chevronBox = async () => { const b = await page.locator('.lp-group-toggle-icon').boundingBox(); return [b.width, b.height]; };
   const shot = (name) => page.screenshot({ path: `${OUT}/${name}.png` });
 
   // ---- default: expanded, full widths, chevron points to the outer edge
@@ -67,6 +82,8 @@ try {
   ok('default theme PNG loaded', await chevronLoaded());
   ok('chevron has an accessible name (collapse)', (await chevronLabel()) === 'Collapse group panel', await chevronLabel());
   ok('chevron has no text glyph', ((await page.locator('.lp-group-toggle').textContent()) || '').trim() === '');
+  ok('chevron icon is 13px (20% under 16)', JSON.stringify(await chevronBox()) === '[13,13]', JSON.stringify(await chevronBox()));
+  ok('chevron presses in the Create Group pressed color (default)', (await pressedBg('.lp-group-toggle')) === hex2rgb(await token('--create-group-pressed')), await pressedBg('.lp-group-toggle'));
   ok('chevron has no tooltip', (await page.locator('.lp-group-toggle').getAttribute('title')) === null);
   const canvasBefore = await w('.canvas-wrap');
   await shot('01_expanded');
@@ -156,7 +173,6 @@ try {
     const rs = getComputedStyle(document.documentElement);
     return el ? [getComputedStyle(el).backgroundColor, rs.getPropertyValue('--menu-selected-bg').trim()] : [];
   });
-  const hex2rgb = (h) => { const n = parseInt(h.slice(1), 16); return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`; };
   ok('flash paints the tree selection colors', flashBg.length === 2 && flashBg[0] === hex2rgb(flashBg[1]), JSON.stringify(flashBg));
   await shot('04_flash');
   await page.waitForTimeout(1000);
@@ -174,12 +190,15 @@ try {
   await page.waitForTimeout(150);
   ok('chevron swaps to the dark theme PNG', (await chevronIcon()) === 'group_toggle_dark.png', await chevronIcon());
   ok('dark theme PNG loaded', await chevronLoaded());
+  ok('chevron presses in the Create Group pressed color (dark)', (await pressedBg('.lp-group-toggle')) === hex2rgb(await token('--create-group-pressed')), await pressedBg('.lp-group-toggle'));
+  ok('rail tile presses in the Create Group pressed color (dark)', (await pressedBg('.gp-rail-tile')) === hex2rgb(await token('--create-group-pressed')), await pressedBg('.gp-rail-tile'));
   ok('accessible name follows the language', (await chevronLabel()) === 'הרחבת עמודת הקבוצות', await chevronLabel());
   await shot('05_rtl_dark_collapsed');
   await page.evaluate(() => window.__store.getState().setSettings({ theme: 'light' }));
   await page.waitForTimeout(150);
   ok('chevron swaps to the light theme PNG', (await chevronIcon()) === 'group_toggle_light.png', await chevronIcon());
   ok('light theme PNG loaded', await chevronLoaded());
+  ok('chevron presses in the Create Group pressed color (light)', (await pressedBg('.lp-group-toggle')) === hex2rgb(await token('--create-group-pressed')), await pressedBg('.lp-group-toggle'));
   await page.evaluate(() => window.__store.getState().setSettings({ language: 'en', theme: 'default' }));
   await page.waitForTimeout(150);
   ok('create tile back to G in English', (await page.locator('.gp-rail-create').textContent()) === 'G');
