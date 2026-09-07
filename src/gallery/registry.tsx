@@ -46,11 +46,13 @@ export interface EntryContext {
   close: () => void;
 }
 
-// Representative layer context menu, in the OSS NumberedLayerButton order for a
-// plain strand (numbered_layer_button.py:show_context_menu): shadow items, the
-// color/width block, the start-edge fold, then the compound Line/Arrow rows,
-// Full Arrow, the Dash row and the Circle row last. Content is representative
-// (a disabled item is added at the end) — the point is the menu chrome.
+/**
+ * Representative layer context menu, in the OSS NumberedLayerButton order for a
+ * plain strand (numbered_layer_button.py:show_context_menu): shadow items, the
+ * color/width block, the start-edge fold, then the compound Line/Arrow rows,
+ * Full Arrow, the Dash row and the Circle row last. Content is representative
+ * (a disabled item is added at the end) — the point is the menu chrome.
+ */
 const layerMenuItems = (): MenuItem[] => [
   { label: 'Hide Layer', onClick: () => {} },
   { label: 'Shadow Only', onClick: () => {} },
