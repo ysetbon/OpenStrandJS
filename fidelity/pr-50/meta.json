@@ -4,8 +4,8 @@
   "pr": 50,
   "branch": "claude/group-toggle-themes-j8ivm2",
   "title": "Draw the group column chevron from the themed group_toggle PNGs",
-  "sha": "2fcbd3ff96",
-  "updated": "2026-09-07T07:09:32.172Z",
+  "sha": "e680b8561d",
+  "updated": "2026-09-07T07:16:09.062Z",
   "summary": {
     "fixtures": 3,
     "perfect": 3,
