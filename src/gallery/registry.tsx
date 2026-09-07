@@ -46,21 +46,38 @@ export interface EntryContext {
   close: () => void;
 }
 
-// Representative layer context menu (OSS NumberedLayerButton menu): plain items,
-// a separator, a disabled item, and the compound Line/Circle rows the menu CSS
-// styles specially. Content is representative — the point is the menu chrome.
+/**
+ * Representative layer context menu, in the OSS NumberedLayerButton order for a
+ * plain strand (numbered_layer_button.py:show_context_menu): shadow items, the
+ * color/width block, the start-edge fold, then the compound Line/Arrow rows,
+ * Full Arrow, the Dash row and the Circle row last. Content is representative
+ * (a disabled item is added at the end) — the point is the menu chrome.
+ */
 const layerMenuItems = (): MenuItem[] => [
-  { label: 'Duplicate', onClick: () => {} },
-  { label: 'Reset', onClick: () => {} },
-  { label: '', rowLabel: 'Line', buttons: [{ label: 'Start', onClick: () => {} }, { label: 'End', onClick: () => {} }] },
-  { label: '', rowLabel: 'Circle', noPad: true, buttons: [{ label: 'Start', onClick: () => {} }, { label: 'End', onClick: () => {} }] },
-  { label: '', rowLabel: 'Arrow', buttons: [{ label: 'Start', onClick: () => {} }, { label: 'End', onClick: () => {} }, { label: 'Full', onClick: () => {} }] },
-  { separator: true, label: '' },
+  { label: 'Hide Layer', onClick: () => {} },
   { label: 'Shadow Only', onClick: () => {} },
   { label: 'Hide Shadow', onClick: () => {} },
-  { label: 'Edit Shadow…', onClick: () => {} },
+  { label: 'Edit Shadows', onClick: () => {} },
   { separator: true, label: '' },
-  { label: 'Delete', onClick: () => {} },
+  { label: 'Change Color', onClick: () => {} },
+  { label: 'Change Color (This Layer Only)', onClick: () => {} },
+  { label: 'Change Stroke Color', onClick: () => {} },
+  { label: 'Change Stroke Color (This Layer Only)', onClick: () => {} },
+  { label: 'Change Width', onClick: () => {} },
+  { label: 'Change Width (This Layer Only)', onClick: () => {} },
+  { separator: true, label: '' },
+  { label: 'Unfold Start Edge', onClick: () => {} },
+  { separator: true, label: '' },
+  { label: '', rowLabel: 'Line', buttons: [{ label: 'Hide Start Line', onClick: () => {} }, { label: 'Hide End Line', onClick: () => {} }] },
+  { separator: true, label: '' },
+  { label: '', rowLabel: 'Arrow', buttons: [{ label: 'Show Start Arrow', onClick: () => {} }, { label: 'Show End Arrow', onClick: () => {} }] },
+  { separator: true, label: '' },
+  { label: 'Show Full Arrow', onClick: () => {} },
+  { separator: true, label: '' },
+  { label: '', rowLabel: 'Dash', buttons: [{ label: 'Show Start Dash', onClick: () => {} }, { label: 'Show End Dash', onClick: () => {} }] },
+  { separator: true, label: '' },
+  { label: '', rowLabel: 'Circle', noPad: true, buttons: [{ label: 'Hide Start Circle', onClick: () => {} }, { label: 'Show End Circle', onClick: () => {} }] },
+  { separator: true, label: '' },
   { label: 'Locked (unavailable)', disabled: true },
 ];
 

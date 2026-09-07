@@ -422,10 +422,97 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
       }
     }
 
-    // Closing-knot END edge (numbered_layer_button.py:1410-1453). The END-edge twin
-    // of the start item above, but gated differently: it appears only once the end
-    // carries a CLOSED connection, and OSS precedes it with a separator. For an
-    // AttachedStrand either slot counts, because its free end is not always index 1.
+    // ---- Line group (start/end side-line visibility) ----
+    // OSS compound row: a "Line" label + inline Start/End buttons
+    // (numbered_layer_button.py:941-1007), preceded by a separator. The start
+    // toggle is skipped for an AttachedStrand (its start is the attachment point).
+    const startLine = strand?.extra?.start_line_visible;
+    const endLine = strand?.extra?.end_line_visible;
+    const hasStartLine = startLine !== undefined && !isAttached;
+    const hasEndLine = endLine !== undefined;
+    if (hasStartLine || hasEndLine) {
+      const buttons: MenuRowButton[] = [];
+      if (hasStartLine) buttons.push({
+        label: startLine === false ? t('show_start_line', lang) : t('hide_start_line', lang),
+        onClick: () => commitEdit((d) => toggleLineVisible(d, name, 'start'),
+          { action: 'strand.line_visible', source: 'menu', targets: [name], detail: 'start' }),
+      });
+      if (hasEndLine) buttons.push({
+        label: endLine === false ? t('show_end_line', lang) : t('hide_end_line', lang),
+        onClick: () => commitEdit((d) => toggleLineVisible(d, name, 'end'),
+          { action: 'strand.line_visible', source: 'menu', targets: [name], detail: 'end' }),
+      });
+      items.push({ label: '', separator: true });
+      items.push({ label: '', rowLabel: t('line', lang), buttons });
+    }
+
+    // ---- Arrow group: Start/End arrow toggles, then Full Arrow ----
+    // OSS order (numbered_layer_button.py:1009-1090): separator, "Arrow" compound
+    // row, separator, the Full Arrow toggle as its own plain item, and — only
+    // while the full arrow is visible — a separator plus the customization
+    // panel (numbered_layer_button.py:1093). The panel is a dialog here.
+    {
+      const startArrow = strand?.extra?.start_arrow_visible === true;
+      const endArrow = strand?.extra?.end_arrow_visible === true;
+      const fullArrow = strand?.extra?.full_arrow_visible === true;
+      items.push({ label: '', separator: true });
+      items.push({
+        label: '',
+        rowLabel: t('arrow', lang),
+        buttons: [
+          {
+            label: startArrow ? t('hide_start_arrow', lang) : t('show_start_arrow', lang),
+            onClick: () => commitEdit((d) => toggleArrowVisible(d, name, 'start'),
+              { action: 'strand.arrow', source: 'menu', targets: [name], detail: 'start' }),
+          },
+          {
+            label: endArrow ? t('hide_end_arrow', lang) : t('show_end_arrow', lang),
+            onClick: () => commitEdit((d) => toggleArrowVisible(d, name, 'end'),
+              { action: 'strand.arrow', source: 'menu', targets: [name], detail: 'end' }),
+          },
+        ],
+      });
+      items.push({ label: '', separator: true });
+      items.push({
+        label: fullArrow ? t('hide_full_arrow', lang) : t('show_full_arrow', lang),
+        onClick: () => commitEdit((d) => toggleArrowVisible(d, name, 'full'),
+          { action: 'strand.arrow', source: 'menu', targets: [name], detail: 'full' }),
+      });
+      if (fullArrow) {
+        items.push({ label: '', separator: true });
+        items.push({ label: t('arrow_customization', lang), onClick: () => setArrowDialog(true) });
+      }
+    }
+
+    // ---- Close the Knot (exactly one free end) ----
+    // numbered_layer_button.py:1372-1408: separator + item, right after the arrow
+    // section. Free ends count only has_circles, never attachment status.
+    const hc = strand?.has_circles ?? [false, false];
+    let freeCount = 0;
+    let freeEndType: 'start' | 'end' = 'end';
+    if (isAttached) {
+      // start is always attached; the end is free iff it has no circle.
+      if (!hc[1]) { freeCount = 1; freeEndType = 'end'; }
+    } else {
+      if (!hc[0]) { freeCount += 1; freeEndType = 'start'; }
+      if (!hc[1]) { if (freeCount === 0) freeEndType = 'end'; freeCount += 1; }
+    }
+    if (freeCount === 1) {
+      items.push(
+        { label: '', separator: true },
+        {
+          label: t('close_the_knot', lang),
+          onClick: () => commitEdit((d) => closeKnot(d, name, freeEndType),
+            { action: 'strand.close_knot', source: 'menu', targets: [name], detail: freeEndType }),
+        },
+      );
+    }
+
+    // ---- Closing-knot END edge (numbered_layer_button.py:1410-1453) ----
+    // The END-edge twin of the start fold/unfold item, gated differently: it
+    // appears only once the end carries a CLOSED connection, after Close the
+    // Knot, and OSS precedes it with a separator. For an AttachedStrand either
+    // slot counts, because its free end is not always index 1.
     {
       const closed = strand?.extra?.closed_connections as [boolean, boolean] | undefined;
       const hasClosedEnding = !!closed && (isAttached ? (closed[1] || closed[0]) : closed[1]);
@@ -448,37 +535,11 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
       }
     }
 
-    // ---- Line group (start/end side-line visibility) ----
-    // OSS renders this as one compound row: a "Line" label + inline Start/End
-    // buttons (numbered_layer_button.py:820+). Rendered via ContextMenu's
-    // compound-row item (rowLabel + buttons).
-    // TODO(oss-fidelity): line flags only initialized on masked strands today;
-    // renderer parity unverified.
-    const startLine = strand?.extra?.start_line_visible;
-    const endLine = strand?.extra?.end_line_visible;
-    const hasStartLine = startLine !== undefined && !isAttached;
-    const hasEndLine = endLine !== undefined;
-    if (hasStartLine || hasEndLine) {
-      const buttons: MenuRowButton[] = [];
-      if (hasStartLine) buttons.push({
-        label: startLine === false ? t('show_start_line', lang) : t('hide_start_line', lang),
-        onClick: () => commitEdit((d) => toggleLineVisible(d, name, 'start'),
-          { action: 'strand.line_visible', source: 'menu', targets: [name], detail: 'start' }),
-      });
-      if (hasEndLine) buttons.push({
-        label: endLine === false ? t('show_end_line', lang) : t('hide_end_line', lang),
-        onClick: () => commitEdit((d) => toggleLineVisible(d, name, 'end'),
-          { action: 'strand.line_visible', source: 'menu', targets: [name], detail: 'end' }),
-      });
-      items.push({ label: '', separator: true });
-      items.push({ label: '', rowLabel: t('line', lang), buttons });
-    }
-
     // ---- Extension group (dashed start/end extension lines) ----
-    // OSS compound row: an "extension" label + inline Start/End toggles
-    // (numbered_layer_button.py:1457-1490). Unlike the Line group above there is no
-    // gate: start/end_extension_visible are initialized on EVERY Strand
-    // (strand.py:94-95), so the row always shows for a regular or attached layer.
+    // OSS compound row: a "Dash" label + inline Start/End toggles
+    // (numbered_layer_button.py:1457-1490). No gate: start/end_extension_visible
+    // are initialized on EVERY Strand (strand.py:94-95), so the row always shows
+    // for a regular or attached layer.
     {
       const startExt = strand?.extra?.start_extension_visible === true;
       const endExt = strand?.extra?.end_extension_visible === true;
@@ -501,16 +562,14 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
       });
     }
 
-    // ---- Circle group (start/end circle visibility) ----
-    // OSS compound row: "Circle" label (no padding) + inline Start/End buttons.
-    // Gating: a child attached at side 0 -> start; side 1 -> end. AttachedStrand
-    // always allows its start toggle.
-    // TODO(oss-fidelity): child-scan gating approximated; renderer parity unverified.
+    // ---- Circle group (start/end circle visibility) — always last ----
+    // OSS compound row (numbered_layer_button.py:1511-1582): "Circle" label (no
+    // padding) + inline Start/End buttons. Gating: a child attached at side 0 ->
+    // start; side 1 -> end. AttachedStrand always allows its start toggle.
     const sides = childSides();
     const showStart = isAttached || sides.start;
     const showEnd = sides.end;
     if (showStart || showEnd) {
-      const hc = strand?.has_circles ?? [false, false];
       const buttons: MenuRowButton[] = [];
       if (showStart) buttons.push({
         label: hc[0] ? t('hide_start_circle', lang) : t('show_start_circle', lang),
@@ -524,67 +583,6 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
       });
       items.push({ label: '', separator: true });
       items.push({ label: '', rowLabel: t('circle', lang), buttons, noPad: true });
-    }
-
-    // ---- Arrow group (1.109 §7): Start/End arrow toggles + Full Arrow ----
-    // Compound row like Line/Circle; the renderer draws all three arrow kinds
-    // (pixel-verified vs the Qt oracle). Color/transparency/texture/sizes
-    // customization submenu is the remaining §7 tail.
-    {
-      const startArrow = strand?.extra?.start_arrow_visible === true;
-      const endArrow = strand?.extra?.end_arrow_visible === true;
-      const fullArrow = strand?.extra?.full_arrow_visible === true;
-      items.push({ label: '', separator: true });
-      items.push({
-        label: '',
-        rowLabel: t('arrow', lang),
-        buttons: [
-          {
-            label: startArrow ? t('hide_start_arrow', lang) : t('show_start_arrow', lang),
-            onClick: () => commitEdit((d) => toggleArrowVisible(d, name, 'start'),
-              { action: 'strand.arrow', source: 'menu', targets: [name], detail: 'start' }),
-          },
-          {
-            label: endArrow ? t('hide_end_arrow', lang) : t('show_end_arrow', lang),
-            onClick: () => commitEdit((d) => toggleArrowVisible(d, name, 'end'),
-              { action: 'strand.arrow', source: 'menu', targets: [name], detail: 'end' }),
-          },
-        ],
-      });
-      items.push({
-        label: fullArrow ? t('hide_full_arrow', lang) : t('show_full_arrow', lang),
-        onClick: () => commitEdit((d) => toggleArrowVisible(d, name, 'full'),
-          { action: 'strand.arrow', source: 'menu', targets: [name], detail: 'full' }),
-      });
-      // OSS shows the customization panel ONLY while the full arrow is visible
-      // (numbered_layer_button.py:1093), because these settings drive that arrow
-      // alone. Same gate here; the panel itself is a dialog (see the file header).
-      if (fullArrow) {
-        items.push({ label: '', separator: true });
-        items.push({ label: t('arrow_customization', lang), onClick: () => setArrowDialog(true) });
-      }
-    }
-
-    // ---- Close the Knot (exactly one free end) ----
-    const hc = strand?.has_circles ?? [false, false];
-    let freeCount = 0;
-    let freeEndType: 'start' | 'end' = 'end';
-    if (isAttached) {
-      // start is always attached; the end is free iff it has no circle.
-      if (!hc[1]) { freeCount = 1; freeEndType = 'end'; }
-    } else {
-      if (!hc[0]) { freeCount += 1; freeEndType = 'start'; }
-      if (!hc[1]) { if (freeCount === 0) freeEndType = 'end'; freeCount += 1; }
-    }
-    if (freeCount === 1) {
-      items.push(
-        { label: '', separator: true },
-        {
-          label: t('close_the_knot', lang),
-          onClick: () => commitEdit((d) => closeKnot(d, name, freeEndType),
-            { action: 'strand.close_knot', source: 'menu', targets: [name], detail: freeEndType }),
-        },
-      );
     }
 
     return items;
