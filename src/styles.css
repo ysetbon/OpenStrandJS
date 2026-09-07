@@ -111,9 +111,12 @@ body {
 /* The collapse/expand chevron row pinned at the bottom of the group column in
  * both states (OSS group_toggle_row: contentsMargins(0, 4, 0, 6), the 30x22
  * QToolButton centred, styled from the group panel's theme colors: group_bg,
- * hover group_hover_bg, pressed menu_selected_bg). The chevron itself is the
- * theme's 16px group_toggle_<theme>.png (OSS GROUP_TOGGLE_ICON_SIZE); the
- * PNG points left and is flipped for data-dir="right". */
+ * hover group_hover_bg). Pressed uses the Create Group button's pressed color
+ * (--create-group-pressed, OSS pressed_bg) so the chevron presses like the
+ * button above it; menu_selected_bg flashed near-white in dark. The chevron
+ * itself is the theme's 13px group_toggle_<theme>.png (OSS
+ * GROUP_TOGGLE_ICON_SIZE, 16px made 20% smaller); the PNG points left and is
+ * flipped for data-dir="right". */
 .lp-group-toggle-row {
   flex: 0 0 auto;
   display: flex; justify-content: center;
@@ -129,9 +132,9 @@ body {
   border: none; border-radius: 3px;
 }
 .lp-group-toggle:hover { background: var(--group-hover-bg); }
-.lp-group-toggle:active { background: var(--menu-selected-bg); color: #FFFFFF; }
+.lp-group-toggle:active { background: var(--create-group-pressed); }
 .lp-group-toggle-icon {
-  width: 16px; height: 16px;
+  width: 13px; height: 13px;
   display: block;
   pointer-events: none;
   user-select: none;

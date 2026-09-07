@@ -3,7 +3,8 @@
  * contentsMargins(0, 6, 0, 0), spacing 6, AlignHCenter|AlignTop; the create
  * tile is 30x30 and borrows the Create Group button's theme (the
  * --create-group-* tokens), the group tiles are 30x24 in the group panel's
- * theme colors (group_bg / group_hover_bg / menu_selected_bg / text). */
+ * theme colors (group_bg / group_hover_bg / text), pressed in the Create Group
+ * button's pressed color (--create-group-pressed, OSS pressed_bg). */
 
 .gp-rail {
   flex: 1 1 auto;
@@ -74,4 +75,4 @@
   border-radius: 3px;
 }
 .gp-rail-tile:hover { background: var(--group-hover-bg); }
-.gp-rail-tile:active { background: var(--menu-selected-bg); color: #FFFFFF; }
+.gp-rail-tile:active { background: var(--create-group-pressed); }
