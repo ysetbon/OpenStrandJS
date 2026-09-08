@@ -644,7 +644,10 @@ function collectSideLines(s, centerline, P, S) {
     line.strokeCap = 'butt';
     return line;
   };
-  if (s.start_line_visible && !hc[0]) {
+  // An AttachedStrand's start is its attachment cap: OSS never draws a start
+  // side line there, even with the circle hidden (attached_strand.py:600 only
+  // ever draws the END line; strand.py:2766 draws both for a plain Strand).
+  if (s.type !== 'AttachedStrand' && s.start_line_visible && !hc[0]) {
     const a = tangentAngle(centerline, 0), c = P(s.start);
     // start shift is opposite the tangent (angle + pi)
     out.push(bar({ x: c.x + shift * Math.cos(a + Math.PI), y: c.y + shift * Math.sin(a + Math.PI) }, a));
@@ -2691,6 +2694,47 @@ window.maskLabelClip = function (maskName, strands, meta) {
       s.has_circles = computeHasCircles(s, strands);
     }
     const region = buildMaskPath(ms, byLayer, P, enableThird, 1);
+    if (!region) return null;
+    const b = region.bounds;
+    const out = { pathData: region.pathData, bounds: { x: b.x, y: b.y, width: b.width, height: b.height } };
+    region.remove();
+    return out;
+  } finally {
+    probeProject.remove();
+    try { if (callerProject && callerProject !== probeProject) callerProject.activate(); } catch { /* gone */ }
+  }
+};
+
+// The SELECTION footprint of one mask (Qt MaskedStrand.get_selection_path():
+// get_mask_path_stroke() UNITED with get_mask_path(), masked_strand.py:281-287 —
+// the stroke layer plus the fill layer, minus the deletion rectangles) as SVG
+// path data in WORLD units. It is what OSS hovers, highlights and hit-tests a
+// mask against, and the editor's overlay / hitTest use it for exactly that.
+// Same throwaway-project pattern as maskLabelClip; nothing is kept. Returns
+// { pathData, bounds } or null when the mask has no region.
+window.maskSelectionPath = function (maskName, strands, meta) {
+  CURVE = meta.curve_params || CURVE_DEFAULT;
+  SAMPLE_STEP = 1;
+  const hi = document.createElement('canvas');
+  hi.setAttribute('hidpi', 'off');
+  hi.width = 8; hi.height = 8;
+  const callerProject = paper.project;
+  paper.setup(hi);
+  const probeProject = paper.project;
+  try {
+    const P = (pt) => new paper.Point(pt.x, pt.y);
+    const enableThird = resolveEnableThird(strands, meta);
+    BIAS_ENABLED = !!(meta && meta.enable_curvature_bias_control);
+    applyPaintSettings(meta);
+    const byLayer = {};
+    for (const s of strands) byLayer[s.layer_name] = s;
+    const ms = byLayer[maskName];
+    if (!ms || ms.type !== 'MaskedStrand') return null;
+    for (const s of strands) {
+      if (s.type === 'MaskedStrand') continue;
+      s.has_circles = computeHasCircles(s, strands);
+    }
+    const region = buildMaskVisualPath(ms, byLayer, P, enableThird, 1);
     if (!region) return null;
     const b = region.bounds;
     const out = { pathData: region.pathData, bounds: { x: b.x, y: b.y, width: b.width, height: b.height } };

@@ -21,6 +21,8 @@ import {
 import { worldToScreen } from '../interaction/viewTransform';
 import { strandHandles } from '../interaction/hitTest';
 import { geometryParams, sampleCenterline } from '../interaction/hitGeometry';
+import { strandFootprint } from '../interaction/selectionFootprint';
+import { maskFootprint } from '../interaction/maskFootprint';
 import { biasControlsVisible, biasPositions, readBias, NEUTRAL_BIAS } from '../model/biasControl';
 import { drawStrandLabels } from './strandLabels';
 
@@ -429,49 +431,94 @@ function drawPending(ctx: CanvasRenderingContext2D, st: OverlayState): void {
 
 // ---------------------------------------------------------------------------
 
-// Mask-mode body highlight (OSS MaskMode.draw, mask_mode.py:237-312): OSS strokes
-// get_path() into a body-band polygon (width + 2*stroke_width, FLAT caps + MITER
-// joins) and draws it ONCE with brush=`fill` + pen=`outline` — i.e. the band is
-// FILLED with the (semi-transparent) colour and its PERIMETER is stroked with a 2px
-// border. We must do the same: fill an offset-outline polygon (so the translucent
-// yellow/red composites over the STRAND showing through #c, NOT over an opaque
-// band) and stroke only its edge. Drawing a solid band under the fill would make
-// the translucent colour composite over black and come out far too dark.
-// Used for the HOVER hint (yellow@170 fill + solid black 2px border) and the
-// PICKED/selection highlight (red@128 fill + black@128 border).
-const MASK_HL_BORDER = 2;                            // OSS pen width 2 (world px ×zoom)
-function maskBodyHighlight(
-  ctx: CanvasRenderingContext2D, st: OverlayState, layer: string,
-  fill: string, outline: string,
-): void {
-  const s = st.doc.strands[layer];
-  if (!s || s.type === 'MaskedStrand') return;
-  const world = sampleCenterline(s, geometryParams(st.settings));
-  if (world.length < 2) return;
-  const pts = world.map((wp) => worldToScreen(wp, st.view));
-  const half = (s.width + s.stroke_width * 2) * st.view.zoom / 2;   // body half-width
-  // Offset the centerline by ±half along the local normal to get the two long
-  // edges; closing left-forward + right-back yields the band polygon with FLAT
-  // (squared) caps at both ends (matching Qt FlatCap).
-  const left: Point[] = [], right: Point[] = [];
-  for (let i = 0; i < pts.length; i++) {
-    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
-    let dx = b.x - a.x, dy = b.y - a.y;
-    const L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L;
-    const nx = -dy, ny = dx;                                  // unit normal
-    left.push({ x: pts[i].x + nx * half, y: pts[i].y + ny * half });
-    right.push({ x: pts[i].x - nx * half, y: pts[i].y - ny * half });
+// Hover / pick highlight of a strand's SELECTION FOOTPRINT — OSS
+// selection_utils.draw_selection_overlay, as called by select_mode.draw and
+// mask_mode.draw: the footprint (strand.get_selection_path: flat-capped body ∪
+// end circles / side-line bars / attached inner caps; for a mask the drawn
+// stroke ∪ fill region) is FILLED with the translucent colour, and then ONLY
+// the outside of its silhouette gets a border of `borderW` — OSS strokes the
+// footprint 2*borderW wide and subtracts the footprint itself
+// (selection_outline_path), so overlapping components never show seams inside
+// the fill. Reproduced here 1:1: fill the union (nonzero), stroke every
+// component outline 2*borderW on a scratch layer, erase the union from that
+// layer (destination-out) and composite what is left — the exterior ring.
+// The fill composites over the strand showing through #c, exactly like Qt.
+// Used for the yellow HOVER hint (select + mask mode, 2px black border) and the
+// red PICKED highlight (mask mode, highlight_color@128 + black@128 border,
+// stroke_width*2 wide — mask_mode.py:272-312).
+let ringCanvas: HTMLCanvasElement | null = null;
+function ringLayer(w: number, h: number): CanvasRenderingContext2D | null {
+  if (!ringCanvas) ringCanvas = document.createElement('canvas');
+  if (ringCanvas.width !== w) ringCanvas.width = w;
+  if (ringCanvas.height !== h) ringCanvas.height = h;
+  const c = ringCanvas.getContext('2d');
+  if (c) { c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, w, h); }
+  return c;
+}
+
+function polysPath(polys: Point[][], view: ViewState): Path2D {
+  const path = new Path2D();
+  for (const poly of polys) {
+    poly.forEach((wp, i) => {
+      const p = worldToScreen(wp, view);
+      if (i === 0) path.moveTo(p.x, p.y); else path.lineTo(p.x, p.y);
+    });
+    path.closePath();
   }
+  return path;
+}
+
+function drawSelectionOverlay(
+  ctx: CanvasRenderingContext2D, st: OverlayState, fillPath: Path2D, outlinePath: Path2D,
+  fill: string, border: string, borderW: number,
+): void {
+  const z = st.view.zoom;
   ctx.save();
-  ctx.beginPath();
-  left.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
-  for (let i = right.length - 1; i >= 0; i--) ctx.lineTo(right[i].x, right[i].y);
-  ctx.closePath();
-  ctx.fillStyle = fill; ctx.fill();
-  ctx.lineJoin = 'miter';
-  ctx.lineWidth = MASK_HL_BORDER * st.view.zoom; ctx.strokeStyle = outline; ctx.stroke();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = fill;
+  ctx.fill(fillPath, 'nonzero');
+  const ring = borderW > 0 ? ringLayer(ctx.canvas.width, ctx.canvas.height) : null;
+  if (ring) {
+    ring.lineWidth = borderW * 2 * z;
+    ring.lineJoin = 'miter';
+    ring.miterLimit = 4;           // Qt's default miter limit of 2 line widths
+    ring.lineCap = 'butt';
+    ring.strokeStyle = border;
+    ring.stroke(outlinePath);
+    ring.globalCompositeOperation = 'destination-out';
+    ring.fillStyle = '#000';
+    ring.fill(fillPath, 'nonzero');
+    ring.globalCompositeOperation = 'source-over';
+    ctx.drawImage(ringCanvas as HTMLCanvasElement, 0, 0);
+  }
   ctx.restore();
 }
+
+// Highlight one layer's footprint: a regular/attached strand's polygons, or a
+// mask's exact drawn region. Hidden strands draw nothing.
+function footprintHighlight(
+  ctx: CanvasRenderingContext2D, st: OverlayState, layer: string,
+  fill: string, border: string, borderW: number,
+): void {
+  const s = st.doc.strands[layer];
+  if (!s || s.is_hidden) return;
+  if (s.type === 'MaskedStrand') {
+    const fp = maskFootprint(s, st.doc, st.settings);
+    if (!fp) return;
+    const v = st.view;
+    const path = new Path2D();
+    path.addPath(fp.path, new DOMMatrix([v.zoom, 0, 0, v.zoom, v.panX, v.panY]));
+    drawSelectionOverlay(ctx, st, path, path, fill, border, borderW);
+    return;
+  }
+  const fp = strandFootprint(s, st.doc, st.settings);
+  if (!fp.fill.length) return;
+  drawSelectionOverlay(ctx, st, polysPath(fp.fill, st.view), polysPath(fp.outline, st.view), fill, border, borderW);
+}
+
+// OSS hover border: QColor(Qt.black), border_width=2 (select_mode.py:128,
+// mask_mode.py:249).
+const HOVER_BORDER = 2;
 
 // OSS highlight colors (mask_mode.py): hover = yellow QColor(255,230,160,170) fill
 // + solid black border; picked = highlight_color (red) @128 fill + black @128 border.
@@ -548,13 +595,17 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, st: OverlayState): vo
   // hover highlight only — mask mode's identical-looking pick/hover highlight is
   // NOT gated in OSS, so it stays unconditional here too.
   if (mode === 'select' && st.hover.layerName && st.settings.show_hover_highlights) {
-    maskBodyHighlight(ctx, st, st.hover.layerName, MASK_HOVER_FILL, MASK_HOVER_OUTLINE);
+    footprintHighlight(ctx, st, st.hover.layerName, MASK_HOVER_FILL, MASK_HOVER_OUTLINE, HOVER_BORDER);
   } else if (mode === 'mask') {
     const hov = st.hover.layerName;
     if (hov && !st.maskPending.includes(hov)) {
-      maskBodyHighlight(ctx, st, hov, MASK_HOVER_FILL, MASK_HOVER_OUTLINE);
+      footprintHighlight(ctx, st, hov, MASK_HOVER_FILL, MASK_HOVER_OUTLINE, HOVER_BORDER);
     }
-    for (const layer of st.maskPending) maskBodyHighlight(ctx, st, layer, maskPickFill(st), MASK_PICK_OUTLINE);
+    // Picked strands: border_width = strand.stroke_width * 2 (mask_mode.py:270).
+    for (const layer of st.maskPending) {
+      const s = doc.strands[layer];
+      if (s) footprintHighlight(ctx, st, layer, maskPickFill(st), MASK_PICK_OUTLINE, s.stroke_width * 2);
+    }
   }
 
   // Mask-EDIT eraser rectangle (OSS mask_edit_mode paint, strand_drawing_canvas.py

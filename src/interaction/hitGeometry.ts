@@ -102,6 +102,38 @@ export function sampleCenterline(
   return pts;
 }
 
+// Tangent ANGLES (radians) at the two ends, a port of strand.py
+// calculate_cubic_tangent(0.0001) / (0.9999) with the same fallbacks: the cubic
+// derivative of the first / last profile segment, else that segment's chord,
+// else end - start. The start angle points INTO the body, the end angle OUT of
+// it (both follow increasing t), which is exactly how draw() / update_side_line
+// orient the cap circles and side-line bars. Used by the selection footprint.
+export function endTangentAngles(s: StrandRecord, curve: Curve, enableBias = !!curve.enable_curvature_bias_control): [number, number] {
+  const enableThird = s.control_point_center != null;
+  const prof = buildProfile(s, curve, enableThird, enableBias);
+  const chord = sub(s.end, s.start);
+  const angleOf = (v: Point, fb: Point): number => {
+    const t = Math.abs(v.x) + Math.abs(v.y) === 0 ? fb : v;
+    return Math.atan2(t.y, t.x);
+  };
+  if (prof.mode === 'line') return [angleOf(chord, chord), angleOf(chord, chord)];
+  const deriv = (c: Cubic, u: number): Point => {
+    const a = 3 * (1 - u) * (1 - u), b = 6 * (1 - u) * u, d = 3 * u * u;
+    const v = {
+      x: a * (c.cp1.x - c.p0.x) + b * (c.cp2.x - c.cp1.x) + d * (c.p3.x - c.cp2.x),
+      y: a * (c.cp1.y - c.p0.y) + b * (c.cp2.y - c.cp1.y) + d * (c.p3.y - c.cp2.y),
+    };
+    return Math.abs(v.x) + Math.abs(v.y) === 0 ? sub(c.p3, c.p0) : v;
+  };
+  const segs = prof.segments;
+  const n = segs.length;
+  // OSS maps global t onto equal per-segment spans, so 0.0001 -> local 0.0001*n
+  // on the first segment and 0.9999 -> local 1 - 0.0001*n on the last.
+  const tStart = deriv(segs[0], 0.0001 * n);
+  const tEnd = deriv(segs[n - 1], 1 - 0.0001 * n);
+  return [angleOf(tStart, chord), angleOf(tEnd, chord)];
+}
+
 // Segment-segment intersection test (orientation method, CLRS). Returns true for
 // a proper X crossing AND for the boundary case where an endpoint lies on the
 // other segment. The touch case matters because the sampled centerlines place a
