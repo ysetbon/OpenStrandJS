@@ -105,6 +105,13 @@ export function Toolbar() {
     return res.saved;
   }
 
+  // OSS save_canvas_as_image. A cancelled dialog resolves false and is not an
+  // error; a render/encode failure rejects and is reported like a failed load.
+  async function onImage() {
+    try { await exportPng(); }
+    catch (err) { console.error('Failed to export image:', err); alert('Could not export the image — see console.'); }
+  }
+
   // OSS load_project: a dirty active tab is prompted first; Save must succeed
   // (a cancelled save keeps the current tab and aborts the load).
   function onLoad() {
@@ -158,7 +165,7 @@ export function Toolbar() {
     if (b.toggle === 'tabs') { toggleTabs(); return; }
     if (b.action === 'save') { void onSave(); return; }
     if (b.action === 'load') { onLoad(); return; }
-    if (b.action === 'image') { exportPng(); return; }
+    if (b.action === 'image') { void onImage(); return; }
   };
 
   return (

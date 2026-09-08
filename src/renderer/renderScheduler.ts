@@ -9,6 +9,7 @@ import {
   callRenderPanFrame, callEndPan,
 } from './rendererBridge';
 import { buildMeta, toRenderArray } from './toRenderArray';
+import type { ModeName, Selection, Settings } from '../model/types';
 
 // Pending work for the coalescing rAF: 0 = idle, 1 = overlay-only, 2 = full
 // render (+ overlay). requestRender UPGRADES a frame already scheduled as
@@ -185,6 +186,17 @@ export function requestRender(): void {
   schedule(2);
 }
 
+// The layer whose body is painted with the selection highlight when nothing is
+// being dragged. OSS _suppress_highlight_in_view (strand.py:1970-1980): in view
+// mode the "hide the selection highlight" setting skips PAINTING the highlight
+// without clearing the selection, so it reappears on leaving view mode. Shared
+// with the PNG export, which OSS paints through the same strand.draw.
+export function restingHighlightLayer(
+  mode: ModeName, settings: Settings, selection: Selection,
+): string | null {
+  return mode === 'view' && settings.view_hide_highlight ? null : selection.layerName;
+}
+
 // One full document render (renderFixture / drag fast-path). Overlay sync is the
 // caller's job — schedule() always runs syncOverlay after this.
 function renderNow(): void {
@@ -197,10 +209,7 @@ function renderNow(): void {
     // so a moving junction reddens on both sides like OSS — not just the
     // grabbed strand. At rest only the selected strand is highlighted.
     const highlightSet = dragging && dragMoving.length ? new Set(dragMoving) : undefined;
-    // OSS _suppress_highlight_in_view (strand.py:1970-1980): in view mode the
-    // "hide the selection highlight" setting skips PAINTING the highlight
-    // without clearing the selection, so it reappears on leaving view mode.
-    const highlightLayer = mode === 'view' && settings.view_hide_highlight ? null : selection.layerName;
+    const highlightLayer = restingHighlightLayer(mode, settings, selection);
     const arr = toRenderArray(doc, highlightLayer, highlightSet);
     if (dragging && dragMoving.length) {
       // DRAG FAST-PATH (mirrors the original's draw-only-affected-strand path).

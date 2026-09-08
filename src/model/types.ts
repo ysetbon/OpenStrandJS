@@ -371,6 +371,12 @@ export interface RenderMeta {
   // theme = #2C2C2C); ABSENT => 'white', so the fidelity oracle stays byte-identical.
   // grid_color is the CSS color for grid lines (OSS theme-independent #C8C8C8 /
   // #B4B4B4); ABSENT => the legacy faint black. Both only apply on the live editor.
+  // canvas_bg 'transparent' paints NO backdrop at all (PNG export: OSS
+  // save_canvas_as_image fills its QImage with Qt.transparent).
   canvas_bg?: string;
   grid_color?: string;
+  // Grid line width in output px (before the supersample downscale). ABSENT => 1px
+  // (the live editor). The PNG export passes OSS draw_grid's pen width (1, or 1.5
+  // below 50% zoom) scaled by its painter transform, since Qt's pen is not cosmetic.
+  grid_line_width?: number;
 }
