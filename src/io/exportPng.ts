@@ -103,14 +103,18 @@ export function renderExportCanvas(scale = EXPORT_SCALE): HTMLCanvasElement | nu
   return out;
 }
 
+// Resolves true when a file was written, false when the user cancelled the
+// dialog or the write failed (logged by writePngFile). A render or encode
+// failure — no #c to paint into, a canvas the browser refused to encode —
+// throws, so the caller can tell the user rather than silently saving nothing.
 export async function exportPng(scale = EXPORT_SCALE): Promise<boolean> {
   // OSS: the Save dialog comes first; cancelling it paints nothing.
   const pick = await pickPngFile();
   if (pick.kind === 'cancelled') return false;
   const out = renderExportCanvas(scale);
-  if (!out) return false;
+  if (!out) throw new Error('PNG export: no canvas to render into');
   const blob = await new Promise<Blob | null>((resolve) => out.toBlob(resolve, 'image/png'));
-  if (!blob) return false;
+  if (!blob) throw new Error(`PNG export: the browser could not encode a ${out.width}x${out.height} canvas`);
   return writePngFile(pick, blob, 'openstrand_export.png');
 }
 
