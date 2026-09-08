@@ -21,10 +21,28 @@ import type { RenderMeta } from '../model/types';
 // OSS: `scale_factor = 4.0  # Create image 4x larger for maximum quality/crispness`.
 export const EXPORT_SCALE = 4;
 
-// The export meta + dimensions (shared by the export and tests). Never null: an
-// empty document still exports the (transparent) view, as OSS does.
-export function exportMeta(scale = EXPORT_SCALE): { meta: RenderMeta; w: number; h: number } {
+// Browser canvas budget. A Qt QImage takes the 4x of any widget, but a browser
+// canvas past its limit silently draws NOTHING and the PNG comes out blank. The
+// tightest current limit is Safari's (8192 px a side, 64M px in area, since
+// Safari 18; Chrome and Firefox allow more), so the scale is lowered only when 4x
+// would cross it — which no ordinary desktop view does (1920x1080 -> 33M px).
+export const MAX_EXPORT_SIDE = 8192;
+export const MAX_EXPORT_PIXELS = 8192 * 8192;
+
+// The largest scale <= `scale` whose image fits the budget.
+export function effectiveExportScale(scale: number, view: { width: number; height: number }): number {
+  const w = Math.max(1, view.width), h = Math.max(1, view.height);
+  return Math.min(scale, MAX_EXPORT_SIDE / w, MAX_EXPORT_SIDE / h, Math.sqrt(MAX_EXPORT_PIXELS / (w * h)));
+}
+
+// The export meta + dimensions (shared by the export and tests), and the scale
+// actually applied. Never null: an empty document still exports the
+// (transparent) view, as OSS does.
+export function exportMeta(
+  scale = EXPORT_SCALE,
+): { meta: RenderMeta; w: number; h: number; scale: number } {
   const { doc, settings, view } = useEditorStore.getState();
+  scale = effectiveExportScale(scale, view);
   // QSize * scale_factor: the widget size rounded, not the content bounds.
   const w = Math.max(1, Math.round(view.width * scale));
   const h = Math.max(1, Math.round(view.height * scale));
@@ -50,7 +68,7 @@ export function exportMeta(scale = EXPORT_SCALE): { meta: RenderMeta; w: number;
     // already the zoom-dependent OSS value from buildMeta.
     grid_line_width: (view.zoom < 0.5 ? 1.5 : 1) * scale * view.zoom,
   };
-  return { meta, w, h };
+  return { meta, w, h, scale };
 }
 
 // Paint the export frame and return it as its own canvas (W x H, transparent
@@ -74,10 +92,11 @@ export function renderExportCanvas(scale = EXPORT_SCALE): HTMLCanvasElement | nu
   if (!ctx) return null;
   ctx.drawImage(c, 0, 0);
   // `if self.canvas.should_draw_names: draw_strand_label(...)` for every strand,
-  // last, under the same transform: the 4x-scaled world->px map of the meta.
+  // last, under the same transform: the scaled world->px map of the meta (the
+  // scale actually applied, should the budget above have lowered it).
   if (drawNames) {
     drawStrandLabels(ctx, doc, settings, {
-      zoom: view.zoom * scale, panX: e.meta.x_offset, panY: e.meta.y_offset,
+      zoom: view.zoom * e.scale, panX: e.meta.x_offset, panY: e.meta.y_offset,
     });
   }
   requestRender(); // restore the live viewport render
