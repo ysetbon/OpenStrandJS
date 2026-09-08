@@ -1,0 +1,130 @@
+[
+ {
+  "key": "plain_sidelines",
+  "title": "Lone strand, side lines at both flat ends",
+  "what": "start_line_visible + end_line_visible (default). Footprint = flat-capped body + the two 4px side-line bars just past each end.",
+  "hover": "1_1",
+  "mode": "select",
+  "group": "Plain strands"
+ },
+ {
+  "key": "plain_curved",
+  "title": "Lone curved strand, side lines",
+  "what": "Same flags on a curved centreline: the side-line bars follow the end tangents.",
+  "hover": "1_1",
+  "mode": "select",
+  "group": "Plain strands"
+ },
+ {
+  "key": "plain_no_sidelines",
+  "title": "Lone strand, side lines hidden",
+  "what": "start_line_visible = end_line_visible = false. Footprint is exactly the flat-capped body: nothing beyond the ends.",
+  "hover": "1_1",
+  "mode": "select",
+  "group": "Plain strands"
+ },
+ {
+  "key": "plain_start_line_only",
+  "title": "Lone strand, only the start side line",
+  "what": "end_line_visible = false. One end has the bar, the other is a bare flat cap.",
+  "hover": "1_1",
+  "mode": "select",
+  "group": "Plain strands"
+ },
+ {
+  "key": "plain_wide_stroke",
+  "title": "Lone strand, stroke_width 12",
+  "what": "A thick stroke makes the side-line bar (stroke_width thick) and the flat end obvious.",
+  "hover": "1_1",
+  "mode": "select",
+  "group": "Plain strands"
+ },
+ {
+  "key": "parent_end_circle",
+  "title": "Parent strand: junction circle at its end",
+  "what": "A child attaches at the end -> OSS draws a cap circle there (radius (w+2sw)/2). Footprint = body + start side line + full end circle.",
+  "hover": "1_1",
+  "mode": "select",
+  "group": "Attached strands & circles"
+ },
+ {
+  "key": "child_folded_start",
+  "title": "Attached child: folded start circle + end side line",
+  "what": "has_circles[0] with an opaque circle stroke -> full start circle in the footprint; free end keeps its side line (attached starts never get a start side line).",
+  "hover": "1_2",
+  "mode": "select",
+  "group": "Attached strands & circles"
+ },
+ {
+  "key": "child_unfolded_start",
+  "title": "Attached child: UNFOLDED start (transparent circle stroke)",
+  "what": "start_circle_stroke_color.a = 0 -> no outer circle, but the inner fill circle (radius w/2) is drawn and belongs to the footprint.",
+  "hover": "1_2",
+  "mode": "select",
+  "group": "Attached strands & circles"
+ },
+ {
+  "key": "parent_transparent_end_circle",
+  "title": "Parent: junction circle with transparent stroke",
+  "what": "has_circles[1] but end_circle_stroke_color.a = 0 -> OSS draws no circle AND no side line (a circle \"occupies\" the end). Footprint = flat body only at that end.",
+  "hover": "1_1",
+  "mode": "select",
+  "group": "Attached strands & circles"
+ },
+ {
+  "key": "child_start_circle_hidden",
+  "title": "Attached child: start circle hidden via layer menu",
+  "what": "manual_circle_visibility[0] = false -> no start circle; an attached start never draws a side line either, so that end is a bare flat cap.",
+  "hover": "1_2",
+  "mode": "select",
+  "group": "Attached strands & circles"
+ },
+ {
+  "key": "child_both_circles",
+  "title": "Middle of a chain: circles at both ends",
+  "what": "Start = its own attachment circle, end = junction circle for the grandchild. Both full circles join the footprint.",
+  "hover": "1_2",
+  "mode": "select",
+  "group": "Attached strands & circles"
+ },
+ {
+  "key": "child_end_circle_no_child",
+  "title": "Attached child: end circle forced on, nothing attached",
+  "what": "has_circles[1] via manual override with no junction: draw() only adds the INNER end fill (radius w/2, no stroke ring). OSS puts exactly that inner circle in the footprint.",
+  "hover": "1_2",
+  "mode": "select",
+  "group": "Attached strands & circles"
+ },
+ {
+  "key": "closed_connection",
+  "title": "Closed knot: closed_connections circles",
+  "what": "The child loops back onto the parent start; closed_connections marks both ends. Parent footprint = body + closing circle at start + junction circle at end.",
+  "hover": "1_1",
+  "mode": "select",
+  "group": "Attached strands & circles"
+ },
+ {
+  "key": "mask_select_hover",
+  "title": "MaskedStrand hovered in SELECT mode",
+  "what": "OSS highlights the drawn mask (stroke layer \u222a fill layer). OSSJS draws nothing for a hovered mask.",
+  "hover": "1_1_2_1",
+  "mode": "select",
+  "group": "Masks & mask mode"
+ },
+ {
+  "key": "mask_mode_hover_parent",
+  "title": "MASK mode: hover the parent of a junction",
+  "what": "Mask mode uses the identical footprint (body + circle + side line). Same gap as select mode.",
+  "hover": "1_1",
+  "mode": "mask",
+  "group": "Masks & mask mode"
+ },
+ {
+  "key": "mask_mode_hover_unfolded",
+  "title": "MASK mode: hover an unfolded child",
+  "what": "Inner start fill circle must be part of the yellow area and of the clickable area.",
+  "hover": "1_2",
+  "mode": "mask",
+  "group": "Masks & mask mode"
+ }
+]
