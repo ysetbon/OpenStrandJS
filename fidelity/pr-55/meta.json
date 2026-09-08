@@ -4,8 +4,8 @@
   "pr": 55,
   "branch": "claude/ossjs-image-button-3mp6xs",
   "title": "Make the Image button export the current view like OSS save_canvas_as_image",
-  "sha": "b1897d4c13",
-  "updated": "2026-09-08T20:26:06.979Z",
+  "sha": "4e5532861d",
+  "updated": "2026-09-08T20:33:56.068Z",
   "summary": {
     "fixtures": 3,
     "perfect": 3,
