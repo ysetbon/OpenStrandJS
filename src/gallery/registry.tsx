@@ -23,7 +23,7 @@ import { StrandShadowEditorDialog } from '../ui/dialogs/StrandShadowEditorDialog
 import { MaskGridDialog } from '../ui/dialogs/MaskGridDialog';
 import { DefaultWidthDialog } from '../ui/settings/DefaultWidthDialog';
 import { ContextMenu } from '../ui/ContextMenu';
-import type { MenuItem } from '../ui/ContextMenu';
+import type { MenuItem, MenuRowButton } from '../ui/ContextMenu';
 import type { Language } from '../model/types';
 
 export interface GalleryEntry {
@@ -46,39 +46,58 @@ export interface EntryContext {
   close: () => void;
 }
 
+const noop = () => {};
+const sep = (): MenuItem => ({ separator: true, label: '' });
+const item = (label: string): MenuItem => ({ label, onClick: noop });
+const row = (rowLabel: string, buttons: MenuRowButton[], noPad = false): MenuItem => ({ label: '', rowLabel, buttons, noPad });
+const btn = (label: string, side?: 'start' | 'end'): MenuRowButton => ({ label, side, onClick: noop });
+
+/** The four shadow items every layer kind starts with, then the color/width block. */
+const layerMenuHead = (): MenuItem[] => [
+  item('Hide Layer'), item('Shadow Only'), item('Hide Shadow'), item('Edit Shadows'),
+];
+const layerMenuColors = (): MenuItem[] => [
+  item('Change Color'), item('Change Color (This Layer Only)'),
+  item('Change Stroke Color'), item('Change Stroke Color (This Layer Only)'),
+  item('Change Width'), item('Change Width (This Layer Only)'),
+];
+
 /**
- * Representative layer context menu, in the OSS NumberedLayerButton order for a
- * plain strand (numbered_layer_button.py:show_context_menu): shadow items, the
- * color/width block, the start-edge fold, then the compound Line/Arrow rows,
- * Full Arrow, the Dash row and the Circle row last. Content is representative
- * (a disabled item is added at the end) — the point is the menu chrome.
+ * Layer context menu for a plain strand, in the OSS NumberedLayerButton order
+ * (numbered_layer_button.py:show_context_menu): shadow items, the color/width
+ * block, the start-edge fold, then the compound Line/Arrow rows, Full Arrow and
+ * the Dash row. Both ends free, no children, so no Close the Knot and no Circle
+ * row — exactly what a freshly drawn strand shows.
  */
 const layerMenuItems = (): MenuItem[] => [
-  { label: 'Hide Layer', onClick: () => {} },
-  { label: 'Shadow Only', onClick: () => {} },
-  { label: 'Hide Shadow', onClick: () => {} },
-  { label: 'Edit Shadows', onClick: () => {} },
-  { separator: true, label: '' },
-  { label: 'Change Color', onClick: () => {} },
-  { label: 'Change Color (This Layer Only)', onClick: () => {} },
-  { label: 'Change Stroke Color', onClick: () => {} },
-  { label: 'Change Stroke Color (This Layer Only)', onClick: () => {} },
-  { label: 'Change Width', onClick: () => {} },
-  { label: 'Change Width (This Layer Only)', onClick: () => {} },
-  { separator: true, label: '' },
-  { label: 'Unfold Start Edge', onClick: () => {} },
-  { separator: true, label: '' },
-  { label: '', rowLabel: 'Line', buttons: [{ label: 'Hide Start Line', onClick: () => {} }, { label: 'Hide End Line', onClick: () => {} }] },
-  { separator: true, label: '' },
-  { label: '', rowLabel: 'Arrow', buttons: [{ label: 'Show Start Arrow', onClick: () => {} }, { label: 'Show End Arrow', onClick: () => {} }] },
-  { separator: true, label: '' },
-  { label: 'Show Full Arrow', onClick: () => {} },
-  { separator: true, label: '' },
-  { label: '', rowLabel: 'Dash', buttons: [{ label: 'Show Start Dash', onClick: () => {} }, { label: 'Show End Dash', onClick: () => {} }] },
-  { separator: true, label: '' },
-  { label: '', rowLabel: 'Circle', noPad: true, buttons: [{ label: 'Hide Start Circle', onClick: () => {} }, { label: 'Show End Circle', onClick: () => {} }] },
-  { separator: true, label: '' },
-  { label: 'Locked (unavailable)', disabled: true },
+  ...layerMenuHead(), sep(), ...layerMenuColors(), sep(),
+  item('Unfold Start Edge'),
+  sep(), row('Line', [btn('Hide Start Line', 'start'), btn('Hide End Line', 'end')]),
+  sep(), row('Arrow', [btn('Show Start Arrow', 'start'), btn('Show End Arrow', 'end')]),
+  sep(), item('Show Full Arrow'),
+  sep(), row('Dash', [btn('Show Start Dash', 'start'), btn('Show End Dash', 'end')]),
+];
+
+/**
+ * Same menu for an attached strand: the Line row has no Start toggle (its start
+ * is the attachment point), its free end makes Close the Knot appear after the
+ * arrow section, and the Circle row (label at natural width, stretch before the
+ * End slot) shows the always-allowed Start toggle.
+ */
+const attachedMenuItems = (): MenuItem[] => [
+  ...layerMenuHead(), sep(), ...layerMenuColors(), sep(),
+  item('Unfold Start Edge'),
+  sep(), row('Line', [btn('Hide End Line', 'end')]),
+  sep(), row('Arrow', [btn('Show Start Arrow', 'start'), btn('Show End Arrow', 'end')]),
+  sep(), item('Show Full Arrow'),
+  sep(), item('Close the Knot'),
+  sep(), row('Dash', [btn('Show Start Dash', 'start'), btn('Show End Dash', 'end')]),
+  sep(), row('Circle', [btn('Hide Start Circle', 'start')], true),
+];
+
+/** Masked layer: the shadow items, then Edit Mask / Reset Mask. */
+const maskMenuItems = (): MenuItem[] => [
+  ...layerMenuHead(), sep(), item('Edit Mask'), item('Reset Mask'),
 ];
 
 const groupMenuItems = (group: string): MenuItem[] => [
@@ -130,8 +149,12 @@ export const ENTRIES: GalleryEntry[] = [
     overlay: ({ lang, close }) => <DefaultWidthDialog lang={lang} onClose={close} /> },
 
   // ---- context menus ----
-  { id: 'menu-layer', title: 'Layer context menu', category: 'menu', note: 'representative items',
+  { id: 'menu-layer', title: 'Layer context menu (plain strand)', category: 'menu', note: 'fresh strand: both ends free',
     overlay: ({ close }) => <ContextMenu items={layerMenuItems()} x={420} y={140} onClose={close} /> },
+  { id: 'menu-layer-attached', title: 'Layer context menu (attached strand)', category: 'menu', note: 'End-only Line row · Close the Knot · Circle row',
+    overlay: ({ close }) => <ContextMenu items={attachedMenuItems()} x={420} y={140} onClose={close} /> },
+  { id: 'menu-layer-mask', title: 'Layer context menu (masked layer)', category: 'menu', note: 'Edit Mask / Reset Mask',
+    overlay: ({ close }) => <ContextMenu items={maskMenuItems()} x={420} y={140} onClose={close} /> },
   { id: 'menu-group', title: 'Group context menu', category: 'menu', note: 'representative items',
     overlay: ({ seed, close }) => <ContextMenu items={groupMenuItems(seed.group)} x={420} y={140} onClose={close} /> },
 ];

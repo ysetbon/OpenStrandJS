@@ -572,11 +572,13 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
     if (showStart || showEnd) {
       const buttons: MenuRowButton[] = [];
       if (showStart) buttons.push({
+        side: 'start',
         label: hc[0] ? t('hide_start_circle', lang) : t('show_start_circle', lang),
         onClick: () => commitEdit((d) => toggleCircleVisible(d, name, 0),
           { action: 'strand.circle_visible', source: 'menu', targets: [name], detail: 'start' }),
       });
       if (showEnd) buttons.push({
+        side: 'end',
         label: hc[1] ? t('hide_end_circle', lang) : t('show_end_circle', lang),
         onClick: () => commitEdit((d) => toggleCircleVisible(d, name, 1),
           { action: 'strand.circle_visible', source: 'menu', targets: [name], detail: 'end' }),
