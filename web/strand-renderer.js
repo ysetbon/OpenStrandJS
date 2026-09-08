@@ -1951,18 +1951,26 @@ function drawMasked(ms, byLayer, P, enableThird, S, shadowOnly) {
 // strokeWidth ss => 1px after the ss downscale. LIVE EDITOR ONLY: computeGridLines
 // returns null when meta.show_grid is unset (the oracle never sets it).
 function paintBackdrop(meta, W, H, ss, S, ox, oy) {
-  const bg = new paper.Path.Rectangle(new paper.Point(0, 0), new paper.Size(W * ss, H * ss));
-  bg.fillColor = meta.canvas_bg || 'white'; // themed live editor (OSS dark #2C2C2C); oracle leaves it white
+  // canvas_bg 'transparent' (PNG export only): paint NO backdrop, so the frame
+  // keeps the clear offscreen it started on, the way OSS save_canvas_as_image
+  // fills its QImage with Qt.transparent before painting (main_window.py).
+  if (meta.canvas_bg !== 'transparent') {
+    const bg = new paper.Path.Rectangle(new paper.Point(0, 0), new paper.Size(W * ss, H * ss));
+    bg.fillColor = meta.canvas_bg || 'white'; // themed live editor (OSS dark #2C2C2C); oracle leaves it white
+  }
   const grid = computeGridLines(meta, S, ox * ss, oy * ss, W * ss, H * ss);
   if (!grid) return;
   const gridColor = meta.grid_color || toColor({ r: 0, g: 0, b: 0, a: 20 }); // OSS #C8C8C8/#B4B4B4; legacy faint fallback
+  // Line width in OUTPUT px (before the ss downscale). Absent => 1px, the live
+  // editor's grid. The PNG export passes OSS's pen width under its painter scale.
+  const gridWidth = (meta.grid_line_width || 1) * ss;
   for (const x of grid.xs) {
     const ln = new paper.Path.Line(new paper.Point(x, 0), new paper.Point(x, H * ss));
-    ln.strokeColor = gridColor; ln.strokeWidth = ss;
+    ln.strokeColor = gridColor; ln.strokeWidth = gridWidth;
   }
   for (const y of grid.ys) {
     const ln = new paper.Path.Line(new paper.Point(0, y), new paper.Point(W * ss, y));
-    ln.strokeColor = gridColor; ln.strokeWidth = ss;
+    ln.strokeColor = gridColor; ln.strokeWidth = gridWidth;
   }
 }
 

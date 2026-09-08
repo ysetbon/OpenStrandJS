@@ -158,7 +158,7 @@ export function Toolbar() {
     if (b.toggle === 'tabs') { toggleTabs(); return; }
     if (b.action === 'save') { void onSave(); return; }
     if (b.action === 'load') { onLoad(); return; }
-    if (b.action === 'image') { exportPng(); return; }
+    if (b.action === 'image') { void exportPng(); return; }
   };
 
   return (

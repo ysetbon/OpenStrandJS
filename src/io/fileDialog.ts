@@ -64,3 +64,58 @@ export async function saveProjectFile(suggestedName: string, data: unknown): Pro
   downloadJSON(name, data);
   return { saved: true, filename: name };
 }
+
+// Save a PNG the way OSS save_canvas_as_image does: a Save dialog with a
+// "PNG Files (*.png)" filter and NO preset name (QFileDialog.getSaveFileName is
+// called with an empty path), where cancelling saves nothing. Where the browser
+// offers a real Save dialog (File System Access API: Chrome/Edge) that is what the
+// user gets; elsewhere the only option is a download, which cannot be cancelled
+// once triggered, so it counts as saved.
+//
+// Split in two because OSS opens the dialog BEFORE it paints: pickPngFile must run
+// inside the click (browsers require a user gesture to open the picker), the
+// render then happens while the handle is held, and the bytes are written last.
+type PngFileHandle = {
+  name: string;
+  createWritable: () => Promise<{ write: (d: Blob) => Promise<void>; close: () => Promise<void> }>;
+};
+type PngPick = { kind: 'handle'; handle: PngFileHandle } | { kind: 'download' } | { kind: 'cancelled' };
+
+export async function pickPngFile(): Promise<PngPick> {
+  const picker = (window as unknown as {
+    showSaveFilePicker?: (opts: unknown) => Promise<PngFileHandle>;
+  }).showSaveFilePicker;
+  if (typeof picker !== 'function') return { kind: 'download' };
+  try {
+    // Chrome appends the accepted extension when the typed name lacks one, which
+    // is OSS's `if not filename.lower().endswith('.png'): filename += '.png'`.
+    const handle = await picker.call(window, {
+      types: [{ description: 'PNG Files', accept: { 'image/png': ['.png'] } }],
+    });
+    return { kind: 'handle', handle };
+  } catch (err) {
+    // AbortError = the user cancelled the dialog. Anything else (a denied
+    // permission) is also "not saved".
+    if (!(err instanceof DOMException && err.name === 'AbortError')) console.error('Save failed:', err);
+    return { kind: 'cancelled' };
+  }
+}
+
+export async function writePngFile(pick: PngPick, blob: Blob, fallbackName: string): Promise<boolean> {
+  if (pick.kind === 'cancelled') return false;
+  if (pick.kind === 'download') {
+    const url = URL.createObjectURL(blob);
+    downloadDataURL(fallbackName, url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return true;
+  }
+  try {
+    const w = await pick.handle.createWritable();
+    await w.write(blob);
+    await w.close();
+    return true;
+  } catch (err) {
+    console.error('Save failed:', err);
+    return false;
+  }
+}
