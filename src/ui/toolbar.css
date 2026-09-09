@@ -69,6 +69,8 @@
 }
 .tb-state:hover { background: #FFC200; }
 .tb-state:active { background: #FFB700; }
+/* Checkable in OSS: pressed while the State dialog is open. */
+.tb-state.checked { background: #FFB700; box-shadow: inset 0 0 0 2px #000; }
 
 /* Settings gear: 32px circular flat icon button. */
 .tb-gear {

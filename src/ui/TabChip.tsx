@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
-import { serializeProject } from '../io/saveLoad';
+import { serializeHistory } from '../io/saveLoad';
 import { saveProjectFile } from '../io/fileDialog';
 import { UnsavedChangesDialog } from './UnsavedChangesDialog';
 
@@ -42,8 +42,14 @@ export function TabChip(props: {
     const s = useEditorStore.getState();
     const tab = s.tabs.find((tb) => tb.id === id);
     if (!tab) { setConfirmOpen(false); return; }
-    const doc = id === s.activeTabId ? s.doc : (tab.doc ?? s.doc);
-    const res = await saveProjectFile(tab.filePath ?? 'openstrand_project.json', serializeProject(doc));
+    const opts = { enable_curvature_bias_control: s.settings.enable_curvature_bias_control };
+    // The live tab saves its whole undo/redo history like OSS save_project; a
+    // background tab holds only its document (its history was dropped on the
+    // switch), so it saves the one-step history a snapshot would produce.
+    const payload = id === s.activeTabId
+      ? serializeHistory(s.past, { doc: s.doc, meta: s.presentMeta }, s.future, opts)
+      : serializeHistory([], { doc: tab.doc ?? s.doc, meta: null }, [], opts);
+    const res = await saveProjectFile(tab.filePath ?? 'openstrand_project.json', payload);
     if (!res.saved) return;
     markTabSaved(id, res.filename);
     setConfirmOpen(false);

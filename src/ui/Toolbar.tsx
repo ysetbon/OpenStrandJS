@@ -6,7 +6,7 @@ import { LayerStateDialog } from './LayerStateDialog';
 import { AngleAdjustDialog } from './dialogs/AngleAdjustDialog';
 import { t } from './i18n';
 import { ossIcon } from './icons';
-import { loadProject, serializeProject } from '../io/saveLoad';
+import { loadProjectFile, serializeHistory } from '../io/saveLoad';
 import { saveProjectFile } from '../io/fileDialog';
 import { exportPng } from '../io/exportPng';
 import { fitPan } from '../interaction/viewTransform';
@@ -73,11 +73,17 @@ export function Toolbar() {
   // (main_window.previous_mode, :1254 / :2088-2097).
   const prevMode = useRef<ModeName | null>(null);
 
+  // OSS load_project: a history file restores the whole undo/redo stack around
+  // its current step (undo_redo_manager.import_history); a bare snapshot loads
+  // with fresh history. The bias setting shapes what the loader keeps, as it
+  // does on the desktop canvas.
   function applyDoc(json: unknown) {
-    const doc = loadProject(json);
     const st = useEditorStore.getState();
-    st.loadDocument(doc);
-    const { panX, panY } = fitPan(doc, st.view);
+    const loaded = loadProjectFile(json, {
+      enable_curvature_bias_control: st.settings.enable_curvature_bias_control,
+    });
+    st.loadDocumentWithHistory(loaded);
+    const { panX, panY } = fitPan(loaded.doc, st.view);
     st.setView({ panX, panY });
   }
 
@@ -95,12 +101,17 @@ export function Toolbar() {
     e.target.value = '';
   }
 
-  // OSS save_project: returns true only when a file was actually written; the
-  // active tab is then clean and titled after the file (mark_active_saved).
+  // OSS save_project: exports the full undo/redo history (export_history) —
+  // every step as a project state with its undo_metadata — and returns true
+  // only when a file was actually written; the active tab is then clean and
+  // titled after the file (mark_active_saved).
   async function onSave(): Promise<boolean> {
     const st = useEditorStore.getState();
     const active = st.tabs.find((tb) => tb.id === st.activeTabId);
-    const res = await saveProjectFile(active?.filePath ?? 'openstrand_project.json', serializeProject(st.doc));
+    const payload = serializeHistory(st.past, { doc: st.doc, meta: st.presentMeta }, st.future, {
+      enable_curvature_bias_control: st.settings.enable_curvature_bias_control,
+    });
+    const res = await saveProjectFile(active?.filePath ?? 'openstrand_project.json', payload);
     if (res.saved) useEditorStore.getState().markTabSaved(st.activeTabId, res.filename);
     return res.saved;
   }
@@ -184,7 +195,8 @@ export function Toolbar() {
 
       <span className="tb-spacer" />
 
-      <button className="tb-state" onClick={() => setStateOpen(true)} title={t('layer_state', lang)}>{t('layer_state', lang)}</button>
+      {/* OSS layer_state_button is checkable: pressed while its dialog is open. */}
+      <button className={`tb-state${stateOpen ? ' checked' : ''}`} onClick={() => setStateOpen(true)} title={t('layer_state', lang)}>{t('layer_state', lang)}</button>
       {/* OSS settings button uses settings_icon.png (main_window.py:296+ — the
           ⚙ character is only its missing-file fallback). */}
       <button className="tb-gear" onClick={() => setSettingsOpen(true)} title={t('settings', lang)}>

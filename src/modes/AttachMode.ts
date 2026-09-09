@@ -190,6 +190,8 @@ export const AttachMode: Mode = {
       ? { action: 'attach.new', source: 'mode', targets: newName ? [newName] : [] }
       : { action: 'attach.child', source: 'mode', targets: newName ? [newName] : [], detail: `on ${d.parent}` });
     if (newName) st.setSelection({ layerName: newName, handle: null });
+    // OSS canvas.newest_strand (strand_drawing_canvas.py:3876 / :4912).
+    st.setNewestStrand(newName);
     ctx.requestRender();
   },
 

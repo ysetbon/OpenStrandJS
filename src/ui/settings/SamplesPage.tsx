@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useEditorStore } from '../../store/editorStore';
-import { loadProject } from '../../io/saveLoad';
+import { loadProjectFile } from '../../io/saveLoad';
 import { t } from '../i18n';
 import { SAMPLES, sampleUrl } from './assets';
 import type { PageProps } from './types';
@@ -17,8 +17,12 @@ export function SamplesPage({ lang, onClose }: PageProps) {
       const res = await fetch(sampleUrl(file));
       if (!res.ok) throw new Error(String(res.status));
       const json = await res.json();
-      const doc = loadProject(json);
-      useEditorStore.getState().loadDocument(doc);
+      // OSS load_project on the bundled sample: a history file, so the whole
+      // undo/redo stack comes along (import_history).
+      const st = useEditorStore.getState();
+      st.loadDocumentWithHistory(loadProjectFile(json, {
+        enable_curvature_bias_control: st.settings.enable_curvature_bias_control,
+      }));
       onClose();
     } catch {
       setError(file);

@@ -99,10 +99,18 @@ export interface EditorDocument {
   shadow_enabled: boolean;
   show_control_points: boolean;
   shadow_overrides: ShadowOverrides;
+  // OSS canvas.strand_colors / layer_panel.set_colors: the canonical fill color
+  // of each set, keyed by the set number as a STRING (the JSON key). Kept apart
+  // from the individual strand colors because a layer-only override must not
+  // change what a future attachment inherits (save_load_manager.py:314-360). A
+  // set is added when it is created, updated when its whole-set color changes,
+  // and dropped when its last strand goes; save/load re-canonicalize it exactly
+  // like serialize_project_state / _restore_canonical_set_colors.
+  strand_colors: Record<string, RGBA>;
   // Every PROJECT-level key the desktop writes that we don't model explicitly
-  // (strand_colors, and anything a future OSS release adds). Same passthrough
-  // contract as StrandRecord.extra: preserved verbatim so a load -> save
-  // round-trip re-opens identically in `python main.py`.
+  // (anything a future OSS release adds). Same passthrough contract as
+  // StrandRecord.extra: preserved verbatim so a load -> save round-trip
+  // re-opens identically in `python main.py`.
   extra: Record<string, unknown>;
 }
 

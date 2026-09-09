@@ -89,16 +89,42 @@ export function biasFromPointer(s: StrandRecord, kind: BiasKind, world: Point): 
   return Math.max(0, Math.min(len, proj)) / len;
 }
 
-// Serialized form with positions refreshed from the current geometry (what OSS
-// writes after update_positions_from_biases).
+// Serialized form. OSS stores the square positions on the CurvatureBiasControl
+// and refreshes them only at specific moments (update_positions_from_biases: on
+// load, on a bias drag, and whenever a main control point moves while the
+// squares are drawn), so a saved position is whatever the last refresh left.
+// The stored pair is therefore written as it stands; positions are derived
+// from the geometry only when none were ever stored.
 export function serializedBias(s: StrandRecord): BiasControlData {
   const b = readBias(s);
-  const p = biasPositions(s);
+  const bc = readBiasData(s);
+  const stored = bc && bc.triangle_position && bc.circle_position
+    ? { triangle: bc.triangle_position, circle: bc.circle_position } : null;
+  const p = stored ?? biasPositions(s);
   return {
     triangle_bias: b.triangle,
     circle_bias: b.circle,
     triangle_position: p ? { x: p.triangle.x, y: p.triangle.y } : null,
     circle_position: p ? { x: p.circle.x, y: p.circle.y } : null,
+  };
+}
+
+// update_positions_from_biases: recompute the stored square positions from the
+// current centre and control points. Installs a fresh bias_control object so an
+// in-flight gesture's cloned undo baseline can't alias it. A strand without a
+// bias control (the setting off, a mask) is left alone.
+export function refreshBiasPositions(s: StrandRecord): void {
+  if (!readBiasData(s)) return;
+  const b = readBias(s);
+  const p = biasPositions(s);
+  s.extra = {
+    ...s.extra,
+    bias_control: {
+      triangle_bias: b.triangle,
+      circle_bias: b.circle,
+      triangle_position: p ? { x: p.triangle.x, y: p.triangle.y } : null,
+      circle_position: p ? { x: p.circle.x, y: p.circle.y } : null,
+    },
   };
 }
 
@@ -112,7 +138,7 @@ export function setBias(s: StrandRecord, kind: BiasKind, value: number): void {
     ...s.extra,
     bias_control: { triangle_bias: b.triangle, circle_bias: b.circle },
   };
-  s.extra.bias_control = serializedBias(s);
+  refreshBiasPositions(s);   // a bias drag always re-places both squares
 }
 
 export function setBiases(s: StrandRecord, triangle: number, circle: number): void {
