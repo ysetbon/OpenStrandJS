@@ -153,11 +153,18 @@ body {
 .lp-left > .lp-splitter-handle { flex: 0 0 10px; height: 10px; width: 100%; background: transparent; cursor: col-resize; }
 /* Scrollable layer list of NumberedLayerButtons. Bottom-aligned + centered, 2px
    gap, no padding (OSS scroll_layout: AlignHCenter|AlignBottom, spacing 2,
-   margins 0). position:relative anchors the absolute drop-line overlay. */
+   margins 0). position:relative anchors the absolute drop-line overlay.
+   The bottom alignment comes from an auto top margin on the first row, NOT
+   from justify-content:flex-end: in a scroll container, flex-end overflows
+   past the START edge, and a browser never makes that side scrollable, so
+   once the buttons outgrew the list the topmost ones were pushed above it
+   with no scrollbar to reach them. An auto margin collapses to zero as soon
+   as there is no spare height, the overflow goes past the bottom edge, and
+   the list scrolls with a scrollbar like OSS's QScrollArea does. */
 .lp-list {
   position: relative;
   overflow-y: auto; flex: 1 1 auto; min-height: 0;
-  display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
   gap: 2px; padding: 0;
   /* A thin scrollbar (about 10px in Chromium, a little more in Firefox) in
    * place of the classic 17px one, which was a sixth of the list column for a
@@ -177,6 +184,9 @@ body {
 }
 /* Each list item hugs the 132px button width and centers (OSS NumberedLayerButton). */
 .lp-item { position: relative; display: flex; flex-direction: column; align-items: center; width: 132px; align-self: center; }
+/* The bottom alignment (see .lp-list): the topmost row soaks up the spare
+   height above the stack while there is any. */
+.lp-item:first-child { margin-top: auto; }
 /* Blue insertion line at the drop target — full-width absolute overlay,
    QColor(0,120,215), 2px, square (no radius). top driven by inline style. */
 .lp-drop-line {
