@@ -180,12 +180,14 @@ jobs:
       - name: Editor smoke — built app boots cleanly
         run: node tools/ci_smoke.mjs editor dist-editor
 
-      - name: Upload rendered fixtures
+      - name: Upload rendered fixtures and guard screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ci-smoke-renders
-          path: artifacts/ci_smoke/
+          path: |
+            artifacts/ci_smoke/
+            artifacts/layer_list_scroll/
           if-no-files-found: ignore
           retention-days: 14
 

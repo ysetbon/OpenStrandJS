@@ -21,7 +21,12 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.resolve(root, process.argv[2] || 'artifacts/layer_list_scroll');
 mkdirSync(OUT, { recursive: true });
 const PORT = 5199;
-const dev = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], { cwd: root, stdio: 'pipe' });
+// The dev server gets its own process group so stopDev can take the real vite
+// process down along with the npx wrapper: signalling only the wrapper leaves
+// vite bound to the strict port and the next local run failing to start.
+const dev = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], { cwd: root, stdio: 'pipe', detached: true });
+dev.on('error', (e) => { console.log('FAIL  dev server did not start  ' + e.message); process.exit(1); });
+const stopDev = () => { try { process.kill(-dev.pid, 'SIGTERM'); } catch { dev.kill(); } };
 await new Promise((r) => { dev.stdout.on('data', (d) => { if (String(d).includes(String(PORT))) r(); }); setTimeout(r, 8000); });
 let fails = 0;
 const ok = (n, c, x = '') => { console.log((c ? 'PASS  ' : 'FAIL  ') + n + (c ? '' : '  ' + x)); if (!c) fails++; };
@@ -57,8 +62,9 @@ const ADD_STRANDS = (n) => {
 
 // Headless Chromium passes --hide-scrollbars by default, which would hide the
 // very gutter this guards; launch without it so the scrollbar is really laid out.
-const browser = await chromium.launch({ ignoreDefaultArgs: ['--hide-scrollbars'], ...(process.env.OSS_CHROMIUM ? { executablePath: process.env.OSS_CHROMIUM } : {}) });
+let browser;
 try {
+  browser = await chromium.launch({ ignoreDefaultArgs: ['--hide-scrollbars'], ...(process.env.OSS_CHROMIUM ? { executablePath: process.env.OSS_CHROMIUM } : {}) });
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
   page.on('pageerror', (e) => console.log('PAGEERROR', e.message));
   await page.goto(`http://localhost:${PORT}/`);
@@ -188,8 +194,8 @@ try {
   ok('few layers again: bottom-aligned', near(m.lastBottom, m.listBottom, 2), JSON.stringify(m));
   await shot('05_few_layers_again');
 } finally {
-  await browser.close();
-  dev.kill();
+  await browser?.close();
+  stopDev();
 }
 console.log(fails ? `\n${fails} FAILED` : '\nALL PASS');
 process.exit(fails ? 1 : 0);
