@@ -26,16 +26,22 @@ const esb = spawnSync(join(root, 'node_modules', '.bin', 'esbuild'), [
 if (esb.status !== 0) process.exit(esb.status ?? 1);
 const io = await import(pathToFileURL(bundle).href);
 
+// This checks the WRAPPER mechanics (steps, current step, metadata, stack
+// order), so the curvature-bias setting is held OFF: with it on, OSS's loader
+// re-derives an unlocked centre (update_shape) after placing the bias squares
+// from the centre as loaded, so a second load of the saved file legitimately
+// re-places the squares — the same two-load drift the desktop shows.
+const OPTS = { enable_curvature_bias_control: false };
 // Compare documents by what they SAVE as: the first load of an older file
 // leaves defaults implicit in `extra`, the second (of the freshly written
 // wrapper) has them explicit — the same drawing either way.
-const strip = (doc) => JSON.parse(JSON.stringify(io.serializeProject(doc)));
+const strip = (doc) => JSON.parse(JSON.stringify(io.serializeProject(doc, OPTS)));
 let failures = 0;
 for (const file of files) {
   try {
     const raw = JSON.parse(readFileSync(resolve(file), 'utf8'));
-    const a = io.loadProjectFile(raw);
-    const wrapper = io.serializeHistory(a.past, { doc: a.doc, meta: a.presentMeta }, a.future);
+    const a = io.loadProjectFile(raw, OPTS);
+    const wrapper = io.serializeHistory(a.past, { doc: a.doc, meta: a.presentMeta }, a.future, OPTS);
 
     // export_history shape and key order.
     assert.deepEqual(Object.keys(wrapper), ['type', 'version', 'current_step', 'max_step', 'states']);
@@ -56,13 +62,24 @@ for (const file of files) {
       assert.deepEqual(keys, expectedKeys);
     });
     if (raw.type === 'OpenStrandStudioHistory') {
-      const srcStates = raw.states.filter((s) => s && typeof s.step === 'number' && s.data != null);
-      assert.equal(wrapper.states.length, srcStates.length, 'every source step is kept');
-      assert.equal(wrapper.current_step, Math.min(raw.current_step, srcStates.length));
+      const srcStates = raw.states
+        .filter((s) => s && typeof s.step === 'number' && s.data != null)
+        .sort((x, y) => x.step - y.step);
+      const srcCurrent = Math.min(
+        Number.isInteger(raw.current_step) ? raw.current_step : srcStates.length, srcStates.length);
+      // serializeHistory drops LEADING empty states (no strands, no groups) that
+      // precede the current one — OSS never records those — so compare against
+      // the source trimmed the same way.
+      const isEmpty = (d) => !(d.strands?.length) && !Object.keys(d.groups ?? {}).length;
+      let leading = 0;
+      while (leading < srcCurrent - 1 && isEmpty(srcStates[leading].data)) leading++;
+      const kept = srcStates.length === 1 && isEmpty(srcStates[0].data) ? 0 : srcStates.length - leading;
+      assert.equal(wrapper.states.length, kept, 'every non-leading-empty source step is kept');
+      assert.equal(wrapper.current_step, kept === 0 ? 0 : srcCurrent - leading);
     }
 
     // Second pass through the loader reproduces the stack exactly.
-    const b = io.loadProjectFile(JSON.parse(JSON.stringify(wrapper)));
+    const b = io.loadProjectFile(JSON.parse(JSON.stringify(wrapper)), OPTS);
     assert.equal(b.past.length, a.past.length);
     assert.equal(b.future.length, a.future.length);
     assert.deepEqual(strip(b.doc), strip(a.doc));
@@ -75,7 +92,7 @@ for (const file of files) {
     a.future.forEach((e, i) => sameMeta(b.future[i].meta, e.meta));
 
     // And a third serialization is byte-identical to the second.
-    const again = io.serializeHistory(b.past, { doc: b.doc, meta: b.presentMeta }, b.future);
+    const again = io.serializeHistory(b.past, { doc: b.doc, meta: b.presentMeta }, b.future, OPTS);
     const norm = (w) => JSON.stringify(w, (k, v) => (k === 'at' ? undefined : v));
     assert.equal(norm(again), norm(wrapper));
 

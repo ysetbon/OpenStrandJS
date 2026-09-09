@@ -91,6 +91,15 @@ for (const file of args) {
   // Steps 1..max_step in stack order: past (oldest first), present, future reversed.
   const stack = [...loaded.past, { doc: loaded.doc, meta: loaded.presentMeta }, ...[...loaded.future].reverse()];
   const currentStep = loaded.past.length + 1;
+  // The oracle is addressed by SOURCE step number while the JS stack is
+  // positional, so --all-steps needs the file's steps to be exactly 1..n (what
+  // export_history writes); anything else is reported rather than mis-paired.
+  if (allSteps && raw.type === 'OpenStrandStudioHistory') {
+    const srcSteps = (raw.states ?? []).filter((s) => s && typeof s.step === 'number' && s.data != null)
+      .map((s) => s.step).sort((a, b) => a - b);
+    const contiguous = srcSteps.length === stack.length && srcSteps.every((st, i) => st === i + 1);
+    if (!contiguous) { failures++; console.log(`FAIL ${file}: steps are not 1..n (${srcSteps.join(',')}); --all-steps cannot pair them`); continue; }
+  }
   const steps = allSteps && raw.type === 'OpenStrandStudioHistory'
     ? stack.map((_, i) => i + 1) : [null];
   for (const step of steps) {

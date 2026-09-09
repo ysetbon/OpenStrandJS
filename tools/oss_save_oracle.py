@@ -73,9 +73,19 @@ def main():
     with open(in_json) as f:
         data = json.load(f)
     if data.get("type") == "OpenStrandStudioHistory":
-        states = sorted(data.get("states", []), key=lambda s: s["step"])
-        target = step if step is not None else min(data.get("current_step", len(states)), len(states))
-        state = next((s["data"] for s in states if s["step"] == target), states[-1]["data"])
+        states = sorted(
+            (s for s in data.get("states", []) if isinstance(s, dict)
+             and isinstance(s.get("step"), int) and s.get("data") is not None),
+            key=lambda s: s["step"])
+        if not states:
+            sys.exit("oracle: history file has no states")
+        if step is None:
+            # import_history_payload: min(saved current_step, steps recreated),
+            # taken by source step number.
+            step = min(data.get("current_step", len(states)), len(states))
+        state = next((s["data"] for s in states if s["step"] == step), None)
+        if state is None:
+            sys.exit("oracle: step %s not in file (steps %s)" % (step, [s["step"] for s in states]))
     else:
         state = data
 

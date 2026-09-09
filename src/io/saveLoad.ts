@@ -61,9 +61,12 @@ const MODELED_PROJECT_KEYS = new Set([
 
 const UNDO_METADATA_KEY = 'undo_metadata';
 
-// Settings that change what OSS's loader/serializer produce. Both are read off
-// the canvas there (canvas.enable_curvature_bias_control), so callers thread the
-// live setting through; leaving it out behaves like the setting being on.
+// Settings that change what OSS's loader/serializer produce. They are read off
+// the canvas there (canvas.enable_curvature_bias_control), so the editor threads
+// the live setting through. Leaving it out is for tools that do not model the
+// setting: the loader then keeps a strand's saved bias data untouched (neither
+// the ON-path restore/update_shape nor the OFF-path drop runs) and the
+// serializer writes the stored squares as they stand.
 export interface SaveLoadOptions {
   enable_curvature_bias_control?: boolean;
 }
@@ -320,6 +323,8 @@ function loadStrand(raw: any, opts?: SaveLoadOptions): StrandRecord {
   // strands): with the setting ON the biases are restored (neutral when absent)
   // and a bias that deviates from neutral counts as the triangle having moved;
   // with it OFF the strand's bias control is dropped. A mask never restores one.
+  // An omitted setting (a tool that does not model it) leaves the file's bias
+  // data exactly as saved: nothing restored, nothing dropped, no update_shape.
   const biasOn = opts?.enable_curvature_bias_control;
   if (!masked && biasOn === false) {
     delete extra.bias_control;

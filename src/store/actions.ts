@@ -5,7 +5,7 @@
 
 import type { EditorDocument, GroupRecord, HandleKind, KnotConnection, Point, RGBA, Settings, ShadowOverride, StrandRecord } from '../model/types';
 import { biasFromPointer, refreshBiasPositions, setBias } from '../model/biasControl';
-import { gestureConnTable, connectedMovers } from '../interaction/connections';
+import { gestureConnTable, connectedMovers, movingStrandSet } from '../interaction/connections';
 import { DEFAULT_STRAND_COLOR, makeAttachedStrand, makeStrand } from '../model/factory';
 import { formatLayerName, maskComponents, nextFreeSet, nextIndexInSet, parseLayerName } from '../model/layerName';
 import { resolveGroupMembers } from '../model/group';
@@ -13,6 +13,7 @@ import { strandsCross, strandBodiesOverlap, maskCentroid } from '../interaction/
 import { recomputeAutoShadowOverrides } from './autoShadow';
 import {
   getDefaultShadowVisibility,
+  getDefaultSubtractedLayers,
   getShadowVisibility as lsmShadowVisibility,
   getSubtractedLayers as lsmSubtractedLayers,
 } from './layerStateManager';
@@ -109,8 +110,12 @@ export function moveHandle(
   curve?: Settings['curve_params'],
 ): void {
   moveHandleImpl(draft, layerName, handle, pos, curve);
-  const moved = draft.strands[layerName];
-  if (moved) refreshBiasPositions(moved);
+  // Every strand the drag carried (welded/attached peers included), not only
+  // the grabbed one — a peer's endpoint and its following control point moved.
+  for (const name of movingStrandSet(draft, layerName, handle)) {
+    const moved = draft.strands[name];
+    if (moved) refreshBiasPositions(moved);
+  }
 }
 
 function moveHandleImpl(
@@ -466,6 +471,9 @@ export function setStrandAngleLength(
     const t = draft.strands[n];
     if (t && t.type === 'AttachedStrand' && t.attached_to === layerName) refresh(t);
   }
+  // applyHandles(t) re-imposed the rotated handles AFTER moveHandle placed the
+  // bias squares, so place them once more against the final geometry.
+  if (t) refreshBiasPositions(t);
 }
 
 // ------------------------------------------------- angle-adjust dialog geometry
@@ -1523,10 +1531,18 @@ export function setShadowOverride(
   receiving: string,
   override: ShadowOverride,
 ): void {
+  // "Default" is the PAIR's default (layer_state_manager.get_default_shadow_
+  // visibility / get_default_subtracted_layers): a mask casting onto its first
+  // component defaults to hidden, and onto its second to subtracting the first,
+  // so an explicit `visibility: true` or `subtracted_layers: []` there is a real
+  // override and must be kept.
+  const defVis = getDefaultShadowVisibility(draft, casting, receiving);
+  const defSub = getDefaultSubtractedLayers(draft, casting, receiving);
+  const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((v, i) => v === b[i]);
   const isEmpty =
-    (override.visibility === undefined || override.visibility === true) &&
+    (override.visibility === undefined || override.visibility === defVis) &&
     (override.allow_full_shadow === undefined || override.allow_full_shadow === false) &&
-    (override.subtracted_layers === undefined || override.subtracted_layers.length === 0) &&
+    (override.subtracted_layers === undefined || sameList(override.subtracted_layers, defSub)) &&
     override.auto !== true && override.pinned !== true;
   if (isEmpty) {
     removeShadowOverride(draft, casting, receiving);
