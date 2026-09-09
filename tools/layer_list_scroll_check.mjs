@@ -12,7 +12,7 @@
 // Usage: node tools/layer_list_scroll_check.mjs [outDir]
 //        OSS_CHROMIUM=/path/to/chrome node tools/layer_list_scroll_check.mjs
 import { chromium } from 'playwright';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -21,12 +21,18 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.resolve(root, process.argv[2] || 'artifacts/layer_list_scroll');
 mkdirSync(OUT, { recursive: true });
 const PORT = 5199;
-// The dev server gets its own process group so stopDev can take the real vite
-// process down along with the npx wrapper: signalling only the wrapper leaves
-// vite bound to the strict port and the next local run failing to start.
-const dev = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], { cwd: root, stdio: 'pipe', detached: true });
+// stopDev must take the real vite process down along with the npx wrapper:
+// signalling only the wrapper leaves vite bound to the strict port and the
+// next local run failing to start. On POSIX the server gets its own process
+// group and the group is signalled; Windows has no process groups (and
+// `detached` would open a console window there), so taskkill /T fells the tree.
+const win = process.platform === 'win32';
+const dev = spawn('npx', ['vite', '--port', String(PORT), '--strictPort'], { cwd: root, stdio: 'pipe', detached: !win });
 dev.on('error', (e) => { console.log('FAIL  dev server did not start  ' + e.message); process.exit(1); });
-const stopDev = () => { try { process.kill(-dev.pid, 'SIGTERM'); } catch { dev.kill(); } };
+const stopDev = () => {
+  if (win) { spawnSync('taskkill', ['/pid', String(dev.pid), '/T', '/F'], { stdio: 'ignore' }); return; }
+  try { process.kill(-dev.pid, 'SIGTERM'); } catch { dev.kill(); }
+};
 await new Promise((r) => { dev.stdout.on('data', (d) => { if (String(d).includes(String(PORT))) r(); }); setTimeout(r, 8000); });
 let fails = 0;
 const ok = (n, c, x = '') => { console.log((c ? 'PASS  ' : 'FAIL  ') + n + (c ? '' : '  ' + x)); if (!c) fails++; };
