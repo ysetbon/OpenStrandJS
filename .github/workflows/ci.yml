@@ -160,6 +160,14 @@ jobs:
       - name: Guards — collapsible group column
         run: node tools/group_rail_check.mjs
 
+      # Layer list scrolling (OSS layer_panel.scroll_area, an AlignBottom
+      # QScrollArea): few layers sit at the bottom; once they outgrow the list
+      # it scrolls with a scrollbar and the topmost button stays reachable, the
+      # buttons keep their width beside the scrollbar, the drop line lands on
+      # row edges while scrolled, and the scrollbar goes away with the layers.
+      - name: Guards — layer list scrolls
+        run: node tools/layer_list_scroll_check.mjs
+
       # Snap-to-grid settings (OSS settings_dialog General page): the MOVE
       # checkbox gates move-mode drags (with the desktop's zoom/Ctrl decision), the
       # ATTACH/CREATE checkbox gates a new strand's start AND end and a child's end
