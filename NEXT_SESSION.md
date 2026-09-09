@@ -71,8 +71,17 @@ in priority order.** Known examples straight from the user:
   must be surfaced there (this has bitten twice).
 - Undo dedup (`visualEqual.ts`) must learn any NEW visual field you add, or edits to
   it create no undo step (bit us for locks and arrows).
-- Unknown strand JSON keys ride the `extra` passthrough bag — round-trip is safe by
-  construction; check `MODELED_KEYS` when promoting a field.
+- Save/load is an exact port of `save_load_manager.py` + the `OpenStrandStudioHistory`
+  wrapper (`src/io/saveLoad.ts`): every OSS key is written in OSS order with OSS
+  defaults, keys OSS does not know are NOT written (OSS drops them too), and Save
+  exports the whole undo/redo stack. Prove any change with the Qt oracle:
+  `OSS_ROOT=../OpenStrandStudio npm run saveload:check -- --bias on <file.json>` diffs
+  what OSS would save (tools/oss_save_oracle.py) against the JS serializer key by key,
+  including the "State" dialog text; `npm run history:check <file.json>` round-trips
+  the history wrapper. Check `MODELED_KEYS` when promoting a field.
+- `src/store/layerStateManager.ts` is the port of `layer_state_manager.py` (the dict
+  behind the State dialog + the shadow-override defaults); `doc.strand_colors` is
+  OSS `canvas.strand_colors` and must be maintained by any new set-creating action.
 - Run js_render/diff strictly serially; kill stale vite instances (ports 5173/5199);
   hard-reload after edits. `mxn_lh_1x1` fixture note in git history no longer applies
   — it renders and diffs clean now.

@@ -4,13 +4,19 @@
 // JSON-serializable for future snapshot history.
 
 import type { EditorDocument, GroupRecord, HandleKind, KnotConnection, Point, RGBA, Settings, ShadowOverride, StrandRecord } from '../model/types';
-import { biasFromPointer, setBias } from '../model/biasControl';
-import { gestureConnTable, connectedMovers } from '../interaction/connections';
-import { makeAttachedStrand, makeStrand } from '../model/factory';
+import { biasFromPointer, refreshBiasPositions, setBias } from '../model/biasControl';
+import { gestureConnTable, connectedMovers, movingStrandSet } from '../interaction/connections';
+import { DEFAULT_STRAND_COLOR, makeAttachedStrand, makeStrand } from '../model/factory';
 import { formatLayerName, maskComponents, nextFreeSet, nextIndexInSet, parseLayerName } from '../model/layerName';
 import { resolveGroupMembers } from '../model/group';
 import { strandsCross, strandBodiesOverlap, maskCentroid } from '../interaction/hitGeometry';
 import { recomputeAutoShadowOverrides } from './autoShadow';
+import {
+  getDefaultShadowVisibility,
+  getDefaultSubtractedLayers,
+  getShadowVisibility as lsmShadowVisibility,
+  getSubtractedLayers as lsmSubtractedLayers,
+} from './layerStateManager';
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 
@@ -93,7 +99,26 @@ export function snapMove(p: Point, settings: Settings, zoom: number, ctrl: boole
 
 // Move a handle to a new world position. Endpoints drag their welded peers (and
 // each strand's associated control point) rigidly; control points move alone.
+// Afterwards the strand's curvature-bias squares are re-placed from the new
+// centre/control points (CurvatureBiasControl.get_bias_control_positions does
+// this whenever a main control point moved).
 export function moveHandle(
+  draft: EditorDocument,
+  layerName: string,
+  handle: HandleKind,
+  pos: Point,
+  curve?: Settings['curve_params'],
+): void {
+  moveHandleImpl(draft, layerName, handle, pos, curve);
+  // Every strand the drag carried (welded/attached peers included), not only
+  // the grabbed one — a peer's endpoint and its following control point moved.
+  for (const name of movingStrandSet(draft, layerName, handle)) {
+    const moved = draft.strands[name];
+    if (moved) refreshBiasPositions(moved);
+  }
+}
+
+function moveHandleImpl(
   draft: EditorDocument,
   layerName: string,
   handle: HandleKind,
@@ -432,6 +457,23 @@ export function setStrandAngleLength(
     t.control_point2_activated = wasActivated;
     applyHandles(t);
   }
+  // angle_adjust_mode.adjust_attached_strand: the attached strands the edit
+  // reshaped re-read their angle/length from geometry (the only time OSS
+  // refreshes the two saved values outside a load).
+  const refresh = (t: StrandRecord) => {
+    if (t.type !== 'AttachedStrand') return;
+    const dx = t.end.x - t.start.x, dy = t.end.y - t.start.y;
+    t.extra.length = Math.hypot(dx, dy);
+    t.extra.angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+  };
+  refresh(s);
+  for (const n of draft.order) {
+    const t = draft.strands[n];
+    if (t && t.type === 'AttachedStrand' && t.attached_to === layerName) refresh(t);
+  }
+  // applyHandles(t) re-imposed the rotated handles AFTER moveHandle placed the
+  // bias squares, so place them once more against the final geometry.
+  if (t) refreshBiasPositions(t);
 }
 
 // ------------------------------------------------- angle-adjust dialog geometry
@@ -731,7 +773,14 @@ export function addNewStrand(
 ): string {
   const set = nextFreeSet(draft);
   const layer_name = `${set}_1`;
-  const s = makeStrand({ layer_name, set_number: set, start, end, is_first_strand: true, ...defaults });
+  // OSS canvas.strand_colors: a set that is not in the map yet takes the default
+  // strand color, and the new strand is painted with the MAP's color
+  // (strand_drawing_canvas.py:3865-3870) — so a recorded set color wins over
+  // the default when the set number comes back.
+  if (!draft.strand_colors) draft.strand_colors = {};
+  const key = String(set);
+  if (!draft.strand_colors[key]) draft.strand_colors[key] = clone(defaults?.color ?? DEFAULT_STRAND_COLOR);
+  const s = makeStrand({ layer_name, set_number: set, start, end, ...defaults, color: draft.strand_colors[key] });
   draft.strands[layer_name] = s;
   draft.order.push(layer_name);
   return layer_name;
@@ -835,6 +884,9 @@ export function deleteStrand(draft: EditorDocument, name: string): void {
   draft.order = draft.order.filter((n) => !toRemove.has(n));
   draft.locked_layers = draft.locked_layers.filter((n) => !toRemove.has(n));
   if (draft.selected_strand_name && toRemove.has(draft.selected_strand_name)) draft.selected_strand_name = null;
+  // A set whose last strand went is removed from the canonical color map
+  // (update_set_numbers_after_main_strand_deletion: `del self.strand_colors[set]`).
+  pruneSetColors(draft);
   // Masks / layers changed: refresh the auto shadow overrides (also prunes
   // entries referencing the deleted layers) — OSS delete paths do the same.
   recomputeAutoShadowOverrides(draft);
@@ -847,6 +899,19 @@ export function deleteAllStrands(draft: EditorDocument): void {
   draft.selected_strand_name = null;
   // No strands -> every override references a deleted layer; drop them all.
   draft.shadow_overrides = {};
+  // clear_set_color_state: both copies of the per-set color map go too.
+  draft.strand_colors = {};
+}
+
+// Drop strand_colors entries for sets that no longer have a non-masked strand.
+export function pruneSetColors(draft: EditorDocument): void {
+  if (!draft.strand_colors) { draft.strand_colors = {}; return; }
+  const active = new Set<string>();
+  for (const n of draft.order) {
+    const t = draft.strands[n];
+    if (t && t.type !== 'MaskedStrand') active.add(String(t.set_number));
+  }
+  for (const k of Object.keys(draft.strand_colors)) if (!active.has(k)) delete draft.strand_colors[k];
 }
 
 // Move order[from] to position `to` (both are indices into doc.order = z-order).
@@ -894,6 +959,12 @@ export function setColor(
     for (const k of Object.keys(draft.strands)) {
       const t = draft.strands[k];
       if (t.type !== 'MaskedStrand' && t.set_number === s.set_number) apply(t);
+    }
+    // on_color_changed -> set_colors[set] = color; canvas.update_color_for_set ->
+    // strand_colors[set] = color. A layer-only override leaves the map alone.
+    if (kind === 'fill') {
+      if (!draft.strand_colors) draft.strand_colors = {};
+      draft.strand_colors[String(s.set_number)] = { ...color };
     }
   } else {
     apply(s);
@@ -1460,10 +1531,18 @@ export function setShadowOverride(
   receiving: string,
   override: ShadowOverride,
 ): void {
+  // "Default" is the PAIR's default (layer_state_manager.get_default_shadow_
+  // visibility / get_default_subtracted_layers): a mask casting onto its first
+  // component defaults to hidden, and onto its second to subtracting the first,
+  // so an explicit `visibility: true` or `subtracted_layers: []` there is a real
+  // override and must be kept.
+  const defVis = getDefaultShadowVisibility(draft, casting, receiving);
+  const defSub = getDefaultSubtractedLayers(draft, casting, receiving);
+  const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((v, i) => v === b[i]);
   const isEmpty =
-    (override.visibility === undefined || override.visibility === true) &&
+    (override.visibility === undefined || override.visibility === defVis) &&
     (override.allow_full_shadow === undefined || override.allow_full_shadow === false) &&
-    (override.subtracted_layers === undefined || override.subtracted_layers.length === 0) &&
+    (override.subtracted_layers === undefined || sameList(override.subtracted_layers, defSub)) &&
     override.auto !== true && override.pinned !== true;
   if (isEmpty) {
     removeShadowOverride(draft, casting, receiving);
@@ -1480,10 +1559,11 @@ export function removeShadowOverride(draft: EditorDocument, casting: string, rec
   if (Object.keys(byRecv).length === 0) delete draft.shadow_overrides[casting];
 }
 
-// Effective visibility: override.visibility if present, else default true.
+// Effective visibility: override.visibility if present, else the OSS default
+// (layer_state_manager.get_default_shadow_visibility: a mask does not cast onto
+// its own first component unless told to).
 export function getShadowVisibility(draft: EditorDocument, casting: string, receiving: string): boolean {
-  const ov = getShadowOverride(draft, casting, receiving);
-  return ov?.visibility ?? true;
+  return lsmShadowVisibility(draft, casting, receiving);
 }
 
 export function setShadowVisibility(
@@ -1528,23 +1608,25 @@ export function setAllowFullShadow(
   });
 }
 
+// layer_state_manager.get_subtracted_layers: the override's list, else the OSS
+// default (a mask's second-component receiver subtracts the first component).
 export function getSubtractedLayers(draft: EditorDocument, casting: string, receiving: string): string[] {
-  return getShadowOverride(draft, casting, receiving)?.subtracted_layers ?? [];
+  return lsmSubtractedLayers(draft, casting, receiving);
 }
 
+// layer_state_manager.set_subtracted_layers: a pair with no override yet is
+// seeded with its DEFAULT visibility and allow_full_shadow=False.
 export function setSubtractedLayers(
   draft: EditorDocument,
   casting: string,
   receiving: string,
   layers: string[],
 ): void {
-  const cur = getShadowOverride(draft, casting, receiving) ?? {};
-  setShadowOverride(draft, casting, receiving, {
-    visibility: cur.visibility ?? true,
-    allow_full_shadow: cur.allow_full_shadow ?? false,
-    ...cur,
-    subtracted_layers: layers,
-  });
+  const cur = getShadowOverride(draft, casting, receiving) ?? {
+    visibility: getDefaultShadowVisibility(draft, casting, receiving),
+    allow_full_shadow: false,
+  };
+  setShadowOverride(draft, casting, receiving, { ...cur, subtracted_layers: layers ?? [] });
 }
 
 type CurveParams = Settings['curve_params'];
@@ -1748,9 +1830,12 @@ export function createMask(
     knot_connections: {},
     deletion_rectangles: [],
     using_absolute_coords: false,
+    // MaskedStrand.__init__ -> calculate_center_point: both centres are the
+    // 50x50-grid centroid of the fresh intersection (no deletion rects yet).
+    base_center_point: maskCentroid(a, b, curve ?? DEFAULT_CURVE),
+    edited_center_point: maskCentroid(a, b, curve ?? DEFAULT_CURVE),
     extra: {
       is_start_side: true,
-      manual_circle_visibility: [null, null],
       start_line_visible: true,
       end_line_visible: true,
       start_extension_visible: false,
@@ -1758,7 +1843,9 @@ export function createMask(
       start_arrow_visible: false,
       end_arrow_visible: false,
       full_arrow_visible: false,
-      closed_connections: [false, false],
+      // No closed_connections / manual_circle_visibility of its own: a fresh
+      // MaskedStrand reads those through __getattr__ from its first component
+      // (masked_strand.py:1061), which is what serializeStrand reproduces.
     },
   };
   draft.strands[layer_name] = mask;

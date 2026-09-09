@@ -215,17 +215,32 @@ console.log('--- save / load round-trip');
 {
   const doc = mkDoc([mk()]);
   bias.setBias(doc.strands['1_1'], 'triangle', 0.3);
-  // Move cp1 afterwards so the stored positions go stale; save must refresh them.
-  doc.strands['1_1'].control_points[0] = P(100, 100);
+  // Move cp1 afterwards through the editor's handle path. OSS stores the square
+  // positions on the CurvatureBiasControl and re-places them when a main control
+  // point moves (get_bias_control_positions), so the saved pair follows the move.
+  moveHandle(doc, '1_1', 'control_point1', P(100, 100));
   const json = serializeProject(doc);
   const st = json.strands[0];
   ok('bias_control is written', st.bias_control && near(st.bias_control.triangle_bias, 0.3) && near(st.bias_control.circle_bias, 0.5));
-  ok('positions are refreshed from the current geometry on save',
+  ok('positions follow a handle move (update_positions_from_biases on the new geometry)',
     near(st.bias_control.triangle_position.x, 300 + (100 - 300) * 0.3) && near(st.bias_control.triangle_position.y, 100));
   const back = loadProject(clone(json));
   ok('load keeps the biases', near(bias.readBias(back.strands['1_1']).triangle, 0.3));
+  // Every strand on an OSS canvas owns a bias control (strand.py:423-430 creates
+  // one whenever the canvas is assigned), so serialize_strand always writes the
+  // key — neutral with no positions for a strand nothing ever biased.
   const plain = serializeProject(mkDoc([mk()]));
-  ok('a strand that never had a bias control writes none', plain.strands[0].bias_control === undefined);
+  ok('a strand that never had a bias control still writes the neutral OSS record',
+    plain.strands[0].bias_control && near(plain.strands[0].bias_control.triangle_bias, 0.5)
+    && near(plain.strands[0].bias_control.circle_bias, 0.5));
+  ok('...with no positions until something places the squares',
+    plain.strands[0].bias_control.triangle_position === null && plain.strands[0].bias_control.circle_position === null);
+  // With the setting OFF the loader drops the biases (deserialize_strand:624-626)
+  // and the canvas recreates a blank control, so the save writes neutral.
+  const off = serializeProject(loadProject(clone(json), { enable_curvature_bias_control: false }),
+    { enable_curvature_bias_control: false });
+  ok('the setting off writes the neutral record regardless of the saved biases',
+    near(off.strands[0].bias_control.triangle_bias, 0.5) && off.strands[0].bias_control.triangle_position === null);
 }
 
 console.log('--- copy / paste (Control Points property)');

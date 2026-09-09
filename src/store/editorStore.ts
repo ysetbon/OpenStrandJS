@@ -43,6 +43,7 @@ export function emptyDocument(): EditorDocument {
     shadow_enabled: true,
     show_control_points: true,
     shadow_overrides: {},
+    strand_colors: {},
     extra: {},
   };
 }
@@ -274,6 +275,11 @@ export interface EditorState {
   toggleGroupPanel: () => void;
 
   loadDocument: (doc: EditorDocument) => void;
+  // OSS load_project on a history file (undo_redo_manager.import_history): the
+  // document AND the whole undo/redo stack around it are restored together.
+  loadDocumentWithHistory: (loaded: {
+    doc: EditorDocument; past: HistoryEntry[]; future: HistoryEntry[]; presentMeta: HistoryMeta | null;
+  }) => void;
   setDoc: (doc: EditorDocument) => void;
   mutateDoc: (fn: (draft: EditorDocument) => void) => void;
   mutateDocLive: (fn: (doc: EditorDocument) => void) => void;
@@ -311,6 +317,13 @@ export interface EditorState {
   exitMaskCreate: () => void;
   setFirstMaskedLayer: (name: string | null) => void;
   setAngleAdjust: (a: EditorState['angleAdjust']) => void;
+
+  // OSS canvas.newest_strand: the strand most recently CREATED (new strand or
+  // attachment). Cleared when that strand is deleted, when the canvas is reset
+  // for a new/blank tab, and when a document is loaded. Read by the
+  // LayerStateManager (layer_state['newest_strand']); never saved, not undoable.
+  newestStrand: string | null;
+  setNewestStrand: (name: string | null) => void;
 
   // chrome UI flags (OSS main window). Not part of the document / undo history.
   panMode: boolean;            // hand tool: left-drag pans the canvas
@@ -405,6 +418,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   presentMeta: null,
   pendingMeta: null,
   historyLog: [],
+  newestStrand: null,
   tabs: [{ id: 1, name: '', untitledIndex: 1 }],
   activeTabId: 1,
   nextTabId: 2,
@@ -423,6 +437,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       past: [], future: [], gestureBase: null, presentMeta: null, pendingMeta: null, selection: { layerName: null, handle: null },
       historyLog: appendLog(s.historyLog, 'reset', buildMeta({ action: 'system.new', source: 'system' }, null)),
       docRevision: s.docRevision + 1,
+      newestStrand: null,
     };
   }),
 
@@ -438,6 +453,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       past: [], future: [], gestureBase: null, presentMeta: null, pendingMeta: null,
       selection: { layerName: doc.selected_strand_name ?? null, handle: null },
       docRevision: s.docRevision + 1,
+      newestStrand: null,
     };
   }),
 
@@ -455,7 +471,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return {
         tabs: [{ id: nid, name: '', untitledIndex: untitledCounter }], activeTabId: nid, nextTabId: nid + 1, untitledCounter,
         doc: emptyDocument(), view: { ...s.view }, past: [], future: [], gestureBase: null, presentMeta: null, pendingMeta: null,
-        selection: { layerName: null, handle: null }, docRevision: s.docRevision + 1,
+        selection: { layerName: null, handle: null }, docRevision: s.docRevision + 1, newestStrand: null,
       };
     }
     if (id !== s.activeTabId) return { tabs: remaining };
@@ -465,7 +481,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       tabs: remaining, activeTabId: target.id,
       doc, view: target.view ?? { ...s.view }, past: [], future: [], gestureBase: null, presentMeta: null, pendingMeta: null,
       selection: { layerName: doc.selected_strand_name ?? null, handle: null },
-      docRevision: s.docRevision + 1,
+      docRevision: s.docRevision + 1, newestStrand: null,
     };
   }),
 
@@ -490,7 +506,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       doc: copyDoc, view: src.view ? { ...src.view } : { ...DEFAULT_VIEW, width: s.view.width, height: s.view.height },
       past: [], future: [], gestureBase: null, presentMeta: null, pendingMeta: null,
       selection: { layerName: copyDoc.selected_strand_name ?? null, handle: null },
-      docRevision: s.docRevision + 1,
+      docRevision: s.docRevision + 1, newestStrand: null,
     };
   }),
 
@@ -528,17 +544,24 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   }),
   toggleGroupPanel: () => get().setGroupPanelCollapsed(!get().groupPanelCollapsed),
 
-  loadDocument: (doc) => set((s) => ({
+  loadDocument: (doc) => get().loadDocumentWithHistory({ doc, past: [], future: [], presentMeta: null }),
+
+  loadDocumentWithHistory: ({ doc, past, future, presentMeta }) => set((s) => ({
     doc,
     selection: { layerName: doc.selected_strand_name, handle: null },
     docRevision: s.docRevision + 1,
-    past: [], future: [], gestureBase: null, presentMeta: null, pendingMeta: null,    // a fresh load starts new history
+    // A snapshot load starts fresh history (clear_history(save_current=True));
+    // a history file brings its own stack (import_history_payload).
+    past: [...past], future: [...future], gestureBase: null, presentMeta, pendingMeta: null,
     historyLog: appendLog(s.historyLog, 'load', buildMeta({ action: 'system.load', source: 'system' }, null)),
     // Any in-flight mask edit/create session belongs to the old document — drop it.
     maskEditTarget: null, maskCreateMode: false, firstMaskedLayer: null, eraser: null,
     // Preview pairs name layers in the OLD document — they mean nothing here.
     visibleShadowPaths: [],
+    newestStrand: null,
   })),
+
+  setNewestStrand: (name) => set((s) => (s.newestStrand === name ? {} : { newestStrand: name })),
 
   setDoc: (doc) => set((s) => ({ doc, docRevision: s.docRevision + 1 })),
 

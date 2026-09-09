@@ -51,7 +51,9 @@ export function makeStrand(o: MakeStrandOpts): StrandRecord {
     control_point2_shown: false,
     control_point2_activated: false,
     extra: {
-      is_first_strand: o.is_first_strand ?? true,
+      // OSS never assigns is_first_strand anywhere; serialize_strand's
+      // getattr(strand, 'is_first_strand', False) therefore always writes False.
+      is_first_strand: o.is_first_strand ?? false,
       is_start_side: true,
       start_line_visible: true,
       end_line_visible: true,
@@ -61,7 +63,9 @@ export function makeStrand(o: MakeStrandOpts): StrandRecord {
       end_arrow_visible: false,
       full_arrow_visible: false,
       closed_connections: [false, false],
-      manual_circle_visibility: [null, null],
+      // manual_circle_visibility is NOT preset: OSS only creates the attribute
+      // when a layer-menu choice sets it, and serialize_strand writes it only
+      // `if hasattr(strand, 'manual_circle_visibility')`.
     },
   };
 }
@@ -78,5 +82,10 @@ export function makeAttachedStrand(o: MakeStrandOpts & {
   s.attachment_side = o.attachment_side;
   s.has_circles = [true, false];
   delete (s.extra as Record<string, unknown>).is_first_strand;
+  // AttachedStrand.__init__ (attached_strand.py:34-35): angle = 0, length = 0.
+  // Neither follows a drag; they are refreshed only by the angle-adjust dialog
+  // (update_angle_length_from_geometry) and are otherwise saved as they stand.
+  s.extra.angle = 0;
+  s.extra.length = 0;
   return s;
 }
