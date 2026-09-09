@@ -90,22 +90,21 @@ export function biasFromPointer(s: StrandRecord, kind: BiasKind, world: Point): 
 }
 
 // Serialized form. OSS stores the square positions on the CurvatureBiasControl
-// and refreshes them only at specific moments (update_positions_from_biases: on
-// load, on a bias drag, and whenever a main control point moves while the
-// squares are drawn), so a saved position is whatever the last refresh left.
-// The stored pair is therefore written as it stands; positions are derived
-// from the geometry only when none were ever stored.
+// (None until something places them) and refreshes them only at specific
+// moments (update_positions_from_biases: on load, on a bias drag, and whenever
+// a main control point moves while the squares are drawn), so a saved position
+// is whatever the last refresh left — and a strand whose squares were never
+// placed writes null. The stored pair is therefore written as it stands.
 export function serializedBias(s: StrandRecord): BiasControlData {
   const b = readBias(s);
   const bc = readBiasData(s);
   const stored = bc && bc.triangle_position && bc.circle_position
     ? { triangle: bc.triangle_position, circle: bc.circle_position } : null;
-  const p = stored ?? biasPositions(s);
   return {
     triangle_bias: b.triangle,
     circle_bias: b.circle,
-    triangle_position: p ? { x: p.triangle.x, y: p.triangle.y } : null,
-    circle_position: p ? { x: p.circle.x, y: p.circle.y } : null,
+    triangle_position: stored ? { x: stored.triangle.x, y: stored.triangle.y } : null,
+    circle_position: stored ? { x: stored.circle.x, y: stored.circle.y } : null,
   };
 }
 

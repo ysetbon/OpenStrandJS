@@ -290,10 +290,14 @@ function loadStrand(raw: any, opts?: SaveLoadOptions): StrandRecord {
     // deserialize sets using_absolute_coords, and load_strands_from_data clears
     // it again once the strands are on the canvas (:1087-1089).
     rec.using_absolute_coords = false;
-    // has_circles is a property that always reads [False, False]. The centres
-    // are settled by loadProjectState once the components exist (see there).
+    // has_circles is a property that always reads [False, False]. The centre
+    // caches stay empty: in this editor base/edited_center_point are the
+    // baseline the mask-tracking drift measures from and are re-seeded at the
+    // start of every gesture (seedMaskCenters); what OSS writes for a mask that
+    // has not been touched since it was loaded is settled in serializeStrand.
     rec.base_center_point = null;
     rec.edited_center_point = null;
+    rec.control_point_center = null;
     rec.has_circles = [false, false];
     rec.control_points = [start, end];
     rec.control_point_center_locked = false;
@@ -409,19 +413,7 @@ function loadProjectState(proj: any, opts?: SaveLoadOptions): EditorDocument {
     if (!name) continue;
     const comp = maskComponents(name);
     if (!comp || !created[comp.first] || !created[comp.second]) continue;
-    const rec = loadStrand(raw, opts);
-    // The file's control_point_center is copied into base/edited_center_point
-    // (:963-966), but apply_loaded_strands then runs force_complete_update with
-    // skip_center_recalculation still set (:1290-1292), which overwrites both
-    // with the Strand-level control_point_center — and for a mask that is the
-    // FIRST component's start, set by Strand.__init__ and never recomputed
-    // (MaskedStrand.update_shape leaves it alone). That is what the next save
-    // writes as the mask's control_point_center.
-    const first = created[comp.first];
-    rec.base_center_point = { x: first.start.x, y: first.start.y };
-    rec.edited_center_point = { x: first.start.x, y: first.start.y };
-    rec.control_point_center = { x: first.start.x, y: first.start.y };
-    created[name] = rec;
+    created[name] = loadStrand(raw, opts);
   }
 
   const strands: Record<string, StrandRecord> = {};
@@ -655,6 +647,12 @@ function maskDelegated(s: StrandRecord, doc: EditorDocument | undefined, key: st
   return undefined;
 }
 
+function maskFirstStart(s: StrandRecord, doc: EditorDocument | undefined): Point | null {
+  const comp = maskComponents(s.layer_name);
+  const first = comp && doc ? doc.strands[comp.first] : undefined;
+  return first ? first.start : null;
+}
+
 function serializeStrand(
   s: StrandRecord, index: number, opts?: SaveLoadOptions, doc?: EditorDocument,
 ): Record<string, unknown> {
@@ -729,8 +727,16 @@ function serializeStrand(
 
   // MaskedStrands have no control points; the desktop writes [null, null].
   out.control_points = masked ? [null, null] : [pt(s.control_points[0]), pt(s.control_points[1])];
+  // A mask writes its edited centre (the region centroid, recomputed whenever
+  // a component is edited — base when nothing is erased). A mask untouched
+  // since it was LOADED writes the FIRST component's start instead: the file's
+  // centre is copied into base/edited (:963-966), but apply_loaded_strands then
+  // runs force_complete_update with skip_center_recalculation still set
+  // (:1290-1292), which overwrites both with the Strand-level
+  // control_point_center — Strand.__init__ set that to the first component's
+  // start and MaskedStrand.update_shape never recomputes it.
   out.control_point_center = masked
-    ? pt(s.edited_center_point ?? s.base_center_point ?? s.control_point_center)
+    ? pt(s.edited_center_point ?? s.base_center_point ?? maskFirstStart(s, doc) ?? s.control_point_center)
     : pt(s.control_point_center);
   out.control_point_center_locked = masked ? false : !!s.control_point_center_locked;
   // Every strand on a canvas owns a bias control (strand.py:423-430 creates one
