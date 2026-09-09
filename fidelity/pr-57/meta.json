@@ -4,8 +4,8 @@
   "pr": 57,
   "branch": "claude/ossjs-layer-panel-scroll-46ta37",
   "title": "Make the layer list scroll once the buttons outgrow it",
-  "sha": "f6ac0f17fa",
-  "updated": "2026-09-09T18:38:59.073Z",
+  "sha": "55fd2d590d",
+  "updated": "2026-09-09T18:45:15.553Z",
   "summary": {
     "fixtures": 3,
     "perfect": 3,
