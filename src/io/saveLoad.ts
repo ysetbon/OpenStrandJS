@@ -16,7 +16,7 @@
 // What OSS writes per strand (serialize_strand), in this order:
 //   type index start end width color stroke_color stroke_width
 //   width_in_grid_units elliptical_end_caps has_circles layer_name set_number
-//   is_first_strand is_start_side start_line_visible end_line_visible is_hidden
+//   is_first_strand is_start_side start_line_visible end_line_visible end_styles is_hidden
 //   start_extension_visible end_extension_visible start_arrow_visible
 //   end_arrow_visible full_arrow_visible shadow_only hide_shadow
 //   closed_connections arrow_color arrow_transparency arrow_texture
@@ -36,6 +36,7 @@ import type {
 import { readBiasData, readBias, refreshBiasPositions, serializedBias, NEUTRAL_BIAS, BIAS_EPS } from '../model/biasControl';
 import { resolveGroupMembers } from '../model/group';
 import { maskComponents } from '../model/layerName';
+import { deserializeEndStyles, serializeEndStyles } from '../model/endStyle';
 import type { HistoryMeta } from '../store/historyMeta';
 
 // Keys consumed into typed StrandRecord fields — everything else goes to `extra`.
@@ -43,7 +44,7 @@ const MODELED_KEYS = new Set([
   'type', 'index', 'layer_name', 'set_number', 'start', 'end',
   'control_points', 'control_point_center', 'control_point_center_locked',
   'width', 'stroke_width', 'color', 'stroke_color', 'has_circles',
-  'is_hidden', 'shadow_only', 'hide_shadow', 'circle_stroke_color',
+  'is_hidden', 'shadow_only', 'hide_shadow', 'end_styles', 'circle_stroke_color',
   'knot_connections', 'attached_to', 'attachment_side',
   'deletion_rectangles', 'using_absolute_coords',
   'triangle_has_moved', 'control_point2_shown', 'control_point2_activated',
@@ -271,6 +272,8 @@ function loadStrand(raw: any, opts?: SaveLoadOptions): StrandRecord {
     is_hidden: !!raw.is_hidden,
     shadow_only: !!raw.shadow_only,
     hide_shadow: !!raw.hide_shadow,
+    // 1.111: deserialize_end_styles — anything but a 2-list of records is [None, None].
+    end_styles: deserializeEndStyles(raw.end_styles),
     circle_stroke_color: raw.circle_stroke_color != null ? asColor(raw.circle_stroke_color, BLACK) : null,
     knot_connections: knot,
     triangle_has_moved,
@@ -689,6 +692,9 @@ function serializeStrand(
   out.is_start_side = ex.is_start_side ?? true;
   out.start_line_visible = ex.start_line_visible ?? true;
   out.end_line_visible = ex.end_line_visible ?? true;
+  // 1.111 stylized free ends (None per end = classic look), written right after
+  // the side-line flags like serialize_strand does.
+  out.end_styles = serializeEndStyles(s.end_styles);
   out.is_hidden = !!s.is_hidden;
   out.start_extension_visible = ex.start_extension_visible ?? false;
   out.end_extension_visible = ex.end_extension_visible ?? false;

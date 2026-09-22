@@ -1,6 +1,6 @@
 // Public i18n API for the chrome. The string table lives in `translations.ts`
-// (auto-extracted from OpenStrand Studio's translations.py — 7 languages incl.
-// Hebrew RTL). This module is the stable import site: components import { t, tt,
+// (synced from OpenStrand Studio's translations.py by tools/sync_translations.py —
+// 12 languages incl. Hebrew RTL). This module is the stable import site: components import { t, tt,
 // isRTL } from './i18n'. Strings missing for a language fall back to English,
 // then to the key itself.
 import type { Language } from '../model/types';

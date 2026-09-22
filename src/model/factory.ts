@@ -45,6 +45,7 @@ export function makeStrand(o: MakeStrandOpts): StrandRecord {
     is_hidden: false,
     shadow_only: false,
     hide_shadow: false,
+    end_styles: [null, null],
     circle_stroke_color: clone(stroke_color),
     knot_connections: {},
     triangle_has_moved: false,

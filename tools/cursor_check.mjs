@@ -221,6 +221,58 @@ try {
     ok('fixture has a masked strand for the Edit Mask checks', false, 'none found');
   }
 
+  // ------------------------------- 7. OSS 1.111: Move mode holds with a closed hand
+  // move_mode.py _set_active_drag_cursor: grabbing a movable point shows the
+  // ClosedHandCursor for the length of the drag, and _restore_idle_cursor brings
+  // the open hand back on release. Before 1.111 the open hand stayed throughout.
+  {
+    await setMode('move');
+    const sp = await screenOf(first);
+    await page.mouse.move(box.x + sp.x, box.y + sp.y);
+    await settle();
+    ok('move: idle over a point is the open hand', (await cursor()) === 'grab', `got '${await cursor()}'`);
+    await page.mouse.down();
+    await page.mouse.move(box.x + sp.x + 15, box.y + sp.y + 10, { steps: 3 });
+    await settle();
+    const held = await page.evaluate(() => window.__store.getState().dragging);
+    ok('move: holding a point shows the closed hand' + (held ? '' : ' (nothing grabbed)'),
+      held && (await cursor()) === 'grabbing', `dragging=${held} cursor='${await cursor()}'`);
+    await page.mouse.up();
+    await settle();
+    ok('move: release goes back to the open hand', (await cursor()) === 'grab', `got '${await cursor()}'`);
+    await page.evaluate(() => window.__store.getState().undo());   // put the point back
+    await settle();
+  }
+
+  // ------------------------------------- 8. OSS 1.111: View mode pans with the left button
+  // strand_drawing_canvas.py view_mode_panning: "In View mode, the primary mouse
+  // button pans just like right-click" — closed hand, pan button pressed, and
+  // the view moves; release restores the open hand and the button.
+  {
+    await setMode('view');
+    await page.mouse.move(cx, cy);
+    const beforeView = await state();
+    await page.mouse.down();
+    await settle();
+    ok('view: left press shows the closed hand', (await cursor()) === 'grabbing', `got '${await cursor()}'`);
+    ok('view: ...and presses the pan button', (await panIcon()) === 'pan_closed.png' && (await panChecked()),
+      `icon=${await panIcon()} checked=${await panChecked()}`);
+    await page.mouse.move(cx + 30, cy - 20, { steps: 3 });
+    await settle();
+    const midView = await state();
+    ok('view: the left-drag pans the view',
+      midView.view.panX === beforeView.view.panX + 30 && midView.view.panY === beforeView.view.panY - 20,
+      `pan ${beforeView.view.panX},${beforeView.view.panY} -> ${midView.view.panX},${midView.view.panY}`);
+    await page.mouse.up();
+    await settle();
+    ok('view: release restores the open hand', (await cursor()) === 'grab', `got '${await cursor()}'`);
+    ok('view: ...with the pan button released', (await panIcon()) === 'pan_open.png' && !(await panChecked()),
+      `icon=${await panIcon()} checked=${await panChecked()}`);
+    const afterView = await state();
+    ok('view: nothing was selected or edited by the pan',
+      afterView.mode === 'view' && !afterView.panMode && !afterView.panning);
+  }
+
   ok('no page errors', errors.length === 0, errors.join(' | '));
 } finally {
   await browser.close().catch(() => {});

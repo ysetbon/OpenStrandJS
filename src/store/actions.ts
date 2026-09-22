@@ -5,6 +5,8 @@
 
 import type { EditorDocument, GroupRecord, HandleKind, KnotConnection, Point, RGBA, Settings, ShadowOverride, StrandRecord } from '../model/types';
 import { biasFromPointer, refreshBiasPositions, setBias } from '../model/biasControl';
+import { copyEndStyle, normalizeEndStyle } from '../model/endStyle';
+import type { EndStyle } from '../model/endStyle';
 import { gestureConnTable, connectedMovers, movingStrandSet } from '../interaction/connections';
 import { DEFAULT_STRAND_COLOR, makeAttachedStrand, makeStrand } from '../model/factory';
 import { formatLayerName, maskComponents, nextFreeSet, nextIndexInSet, parseLayerName } from '../model/layerName';
@@ -1181,6 +1183,34 @@ export function toggleLineVisible(draft: EditorDocument, name: string, end: 'sta
   s.extra[key] = cur === false ? true : false;
 }
 
+// The Stylize End Side dialog's "Show side line" box sets the flag outright
+// (end_style_dialog.py _on_show_line) rather than toggling it.
+export function setLineVisible(draft: EditorDocument, name: string, end: 'start' | 'end', visible: boolean): void {
+  const s = draft.strands[name];
+  if (!s) return;
+  s.extra[`${end}_line_visible`] = visible;
+}
+
+// OSS 1.111 Strand.set_end_style: store the NORMALIZED record for one end
+// (0 = start, 1 = end); a record that draws the classic look is stored as null.
+export function setEndStyle(draft: EditorDocument, name: string, side: 0 | 1, style: EndStyle | null): void {
+  const s = draft.strands[name];
+  if (!s) return;
+  if (!Array.isArray(s.end_styles) || s.end_styles.length !== 2) s.end_styles = [null, null];
+  s.end_styles[side] = normalizeEndStyle(style);
+}
+
+// The dialog's "Apply to both free ends": copy this end's record and side-line
+// flag onto the other end (end_style_dialog.py accept).
+export function copyEndStyleToOtherEnd(draft: EditorDocument, name: string, side: 0 | 1): void {
+  const s = draft.strands[name];
+  if (!s) return;
+  const other = side === 0 ? 1 : 0;
+  setEndStyle(draft, name, other, copyEndStyle(s.end_styles?.[side] ?? null));
+  const visible = s.extra[side === 0 ? 'start_line_visible' : 'end_line_visible'] !== false;
+  s.extra[other === 0 ? 'start_line_visible' : 'end_line_visible'] = visible;
+}
+
 // OSS close_the_knot: connect this strand's free end to the nearest sibling in
 // the same set that also has exactly one free end. Moves the free point (plus any
 // control point — including control_point_center — coincident with it) to the
@@ -1697,7 +1727,7 @@ if (import.meta.env?.DEV) {
     moveHandle, setStrandAngle, setStrandAngleLength, addNewStrand, attachChild, createMask, addDeletionRect, resetMask,
     deleteStrand, deleteAllStrands, reorderLayer, toggleHidden, toggleLock,
     setColor, setWidth, setWidthGridUnits, setShadowOnly, isStrandDeletable,
-    setCircleStrokeColor, toggleCircleVisible, toggleLineVisible, closeKnot,
+    setCircleStrokeColor, toggleCircleVisible, toggleLineVisible, setLineVisible, setEndStyle, copyEndStyleToOtherEnd, closeKnot,
     toggleLockMode, clearAllLocks, renameLayer,
     createGroupFromSet, createGroup, renameGroup, duplicateGroup,
     deleteGroup, translateGroup, rotateGroup, setGroupShadowOnly, createMaskGrid,
@@ -1826,6 +1856,7 @@ export function createMask(
     is_hidden: false,
     shadow_only: false,
     hide_shadow: false,
+    end_styles: [null, null],
     circle_stroke_color: null,
     knot_connections: {},
     deletion_rectangles: [],

@@ -14,7 +14,7 @@ import type { RenderMeta, RenderStrand } from '../model/types';
 
 declare global {
   interface Window {
-    renderFixture: (strands: RenderStrand[], meta: RenderMeta) => unknown;
+    renderFixture: (strands: RenderStrand[], meta: RenderMeta, target?: HTMLCanvasElement) => unknown;
     extractStrands: (data: unknown, step?: number) => unknown[];
     renderDragBackground?: (strands: RenderStrand[], meta: RenderMeta) => unknown;
     renderDragFrame?: (strands: RenderStrand[], meta: RenderMeta) => unknown;
@@ -37,6 +37,16 @@ export function callRender(strands: RenderStrand[], meta: RenderMeta): void {
     throw new Error('strand-renderer.js did not define window.renderFixture');
   }
   window.renderFixture(strands, meta);
+}
+
+// Paint a frame into `target` instead of the live canvas, retaining nothing
+// (the Stylize End Side dialog's preview and shape icons). Same renderer, same
+// pixels as the canvas would show for the same input.
+export function callRenderTo(target: HTMLCanvasElement, strands: RenderStrand[], meta: RenderMeta): void {
+  if (typeof window.renderFixture !== 'function') {
+    throw new Error('strand-renderer.js did not define window.renderFixture');
+  }
+  window.renderFixture(strands, meta, target);
 }
 
 // Drag fast-path bridges. Each degrades gracefully to a full renderFixture if the

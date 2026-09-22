@@ -44,8 +44,10 @@ function handlePos(s: StrandRecord, handle: HandleKind): Point {
 
 export const MoveMode: Mode = {
   name: 'move',
-  // OSS Qt.OpenHandCursor (strand_drawing_canvas.py set_mode 'move'). It stays the
-  // open hand for the whole drag too: move_mode.py never calls setCursor.
+  // OSS Qt.OpenHandCursor (strand_drawing_canvas.py set_mode 'move'). Since 1.111
+  // a drag shows the CLOSED hand while a point is held (move_mode.py
+  // _set_active_drag_cursor); InteractionHost.cursorFor derives that from
+  // store.dragging so the idle cursor here stays the open hand.
   cursor: 'grab',
 
   onPointerDown(p: PointerInfo, ctx: ModeContext) {

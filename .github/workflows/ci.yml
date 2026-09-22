@@ -109,6 +109,14 @@ jobs:
       - name: Guards — Tier 5 shadow-path preview overlay
         run: node tools/tier5_check.mjs
 
+      # OSS 1.111 Stylize End Side: the styled-end pixels (cap pieces added,
+      # cuts removed, the coloured band, the dormant style under a circle, the
+      # default record's fast path), the end_styles save/load slot and undo
+      # dedupe, the hit-test footprint, and the dialog's live preview / OK /
+      # Cancel flow from the layer menu.
+      - name: Guards — Stylize End Side
+        run: node tools/end_style_check.mjs
+
       # Body paint. Qt fills each body layer as ONE WindingFill path (band plus
       # caps) rather than a boolean union — OSS moved off QPainterPath.united()
       # because "Qt's Boolean union can discard the body". paper.js's

@@ -231,15 +231,16 @@ const mkDoc = (strands) => ({
       missing.length === 0, `${missing.length} missing: ${missing.slice(0, 8).join(', ')}`);
   }
 
-  // Each entry must carry all seven languages, or `t()` silently falls back to
-  // English for the missing ones and the gap never surfaces.
-  const LANGS = ['en', 'fr', 'de', 'it', 'es', 'pt', 'he'];
+  // Each entry must carry all twelve languages (the seven originals plus the
+  // five OSS 1.111 added), or `t()` silently falls back to English for the
+  // missing ones and the gap never surfaces.
+  const LANGS = ['en', 'fr', 'de', 'it', 'es', 'pt', 'he', 'ru', 'fi', 'sv', 'ja', 'zh'];
   const short = [];
   for (const m of ts.matchAll(/^  ([A-Za-z0-9_]+): \{(.*)\},$/gm)) {
     const absent = LANGS.filter((l) => !new RegExp(`\\b${l}:\\s`).test(m[2]));
     if (absent.length) short.push(`${m[1]}(no ${absent.join('/')})`);
   }
-  ok('and every entry carries all seven languages',
+  ok('and every entry carries all twelve languages',
     short.length === 0, short.slice(0, 6).join(', '));
 }
 

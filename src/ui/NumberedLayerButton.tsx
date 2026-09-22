@@ -12,6 +12,7 @@ import { ContextMenu, type MenuItem, type MenuRowButton } from './ContextMenu';
 import { StrandShadowEditorDialog } from './dialogs/StrandShadowEditorDialog';
 import { WidthConfigDialog } from './dialogs/WidthConfigDialog';
 import { ArrowCustomizeDialog } from './dialogs/ArrowCustomizeDialog';
+import { EndStyleDialog } from './dialogs/EndStyleDialog';
 import { ColorPickerDialog } from './dialogs/ColorPickerDialog';
 import {
   COPY_PROPERTIES, clipboardPropertyCount, pasteStrandData, snapshotStrandData,
@@ -194,6 +195,8 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
   // Which Change Width variant is open (null = closed).
   const [widthDialog, setWidthDialog] = useState<{ wholeSet: boolean } | null>(null);
   const [arrowDialog, setArrowDialog] = useState(false);
+  // Stylize End Side (1.111): which free end's dialog is open (null = closed).
+  const [endStyleDialog, setEndStyleDialog] = useState<0 | 1 | null>(null);
   const [copyPanel, setCopyPanel] = useState(false);
   const [badgeMenu, setBadgeMenu] = useState<{ x: number; y: number } | null>(null);
   const strandClipboard = useEditorStore((s) => s.strandClipboard);
@@ -508,6 +511,30 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
       );
     }
 
+    // ---- Stylize End Side (OSS 1.111, numbered_layer_button.py:1410-1460) ----
+    // Right under Close the Knot: a compound row built like the Line row, with
+    // one flat button per FREE end (Start / End). A masked layer has no ends of
+    // its own; an attached strand can only style its end (its start is attached).
+    {
+      const stylizeSides: Array<0 | 1> = [];
+      if (!isMasked && strand) {
+        if (!isAttached && !hc[0]) stylizeSides.push(0);
+        if (!hc[1]) stylizeSides.push(1);
+      }
+      if (stylizeSides.length) {
+        items.push({ label: '', separator: true });
+        items.push({
+          label: '',
+          rowLabel: t('stylize_end_side', lang),
+          buttons: stylizeSides.map((side) => ({
+            label: t(side === 0 ? 'stylize_side_start' : 'stylize_side_end', lang),
+            side: side === 0 ? 'start' : 'end',
+            onClick: () => setEndStyleDialog(side),
+          })),
+        });
+      }
+    }
+
     // ---- Closing-knot END edge (numbered_layer_button.py:1410-1453) ----
     // The END-edge twin of the start fold/unfold item, gated differently: it
     // appears only once the end carries a CLOSED connection, after Close the
@@ -765,6 +792,10 @@ export function NumberedLayerButton(props: NumberedLayerButtonProps): JSX.Elemen
 
       {arrowDialog && (
         <ArrowCustomizeDialog layerName={name} onClose={() => setArrowDialog(false)} />
+      )}
+
+      {endStyleDialog != null && (
+        <EndStyleDialog layerName={name} side={endStyleDialog} onClose={() => setEndStyleDialog(null)} />
       )}
 
       {/* Copy-badge popup: clipboard hint + Clear (show_strand_data_badge_popup). */}

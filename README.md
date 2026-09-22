@@ -23,7 +23,9 @@ the desktop strand/knot diagramming tool. Nothing to install — open the link a
 - 🗂️ **Layers panel** — every strand is a layer you can select, recolor, and reorder.
 - 👥 **Groups** — move and transform several strands together.
 - ◀️ **Collapsible group column** — a chevron (or Ctrl+G / Cmd+G) shrinks the group column to a narrow rail so the canvas gets the room; the rail keeps a G tile for Create Group and one lettered tile per group, and the choice is remembered.
+- ✂️ **Stylize End Side** — right-click a layer with a free end and shape that end: Straight, Angled, Rounded, Pointed, Notched or Concave, with tilt, depth, extend/trim and a side line of its own thickness and colour; the preview is live, and shadows, masks and selection follow the new shape.
 - 💾 **Save / load** your work and **export a PNG** of the result.
+- 🌍 **Twelve languages** — English, French, German, Italian, Spanish, Portuguese, Hebrew, Russian, Finnish, Swedish, Japanese and Chinese.
 
 ## Try it online
 

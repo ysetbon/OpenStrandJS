@@ -470,11 +470,20 @@ function polysPath(polys: Point[][], view: ViewState): Path2D {
 
 function drawSelectionOverlay(
   ctx: CanvasRenderingContext2D, st: OverlayState, fillPath: Path2D, outlinePath: Path2D,
-  fill: string, border: string, borderW: number,
+  fill: string, border: string, borderW: number, removedPath: Path2D | null = null,
 ): void {
   const z = st.view.zoom;
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
+  // A stylized free end (1.111) cuts pieces out of the flat-capped body: keep
+  // the fill everywhere but inside those cuts (a clip region of the whole
+  // canvas minus the cut polygons, under the even-odd rule).
+  if (removedPath) {
+    const keep = new Path2D();
+    keep.rect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    keep.addPath(removedPath);
+    ctx.clip(keep, 'evenodd');
+  }
   ctx.fillStyle = fill;
   ctx.fill(fillPath, 'nonzero');
   const ring = borderW > 0 ? ringLayer(ctx.canvas.width, ctx.canvas.height) : null;
@@ -513,7 +522,8 @@ function footprintHighlight(
   }
   const fp = strandFootprint(s, st.doc, st.settings);
   if (!fp.fill.length) return;
-  drawSelectionOverlay(ctx, st, polysPath(fp.fill, st.view), polysPath(fp.outline, st.view), fill, border, borderW);
+  drawSelectionOverlay(ctx, st, polysPath(fp.fill, st.view), polysPath(fp.outline, st.view), fill, border, borderW,
+    fp.removed.length ? polysPath(fp.removed, st.view) : null);
 }
 
 // OSS hover border: QColor(Qt.black), border_width=2 (select_mode.py:128,

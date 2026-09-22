@@ -34,10 +34,16 @@
 
 import type { EditorDocument, Point, RGBA, Settings, StrandRecord } from '../model/types';
 import { endTangentAngles, geometryParams, sampleCenterline } from './hitGeometry';
+import { normalizeEndStyle } from '../model/endStyle';
+import { styledEndPolys } from './endStyleFootprint';
 
 export interface Footprint {
   fill: Point[][];      // union under the nonzero rule (all positively wound)
   outline: Point[][];   // silhouette sources for the border ring
+  // OSS 1.111 stylized free ends: what the end's profile CUTS from the flat-
+  // capped body (end_style.py _behind_polygons). A point inside any of these is
+  // outside the footprint, whatever `fill` says. Empty for unstyled strands.
+  removed: Point[][];
   bbox: { minX: number; minY: number; maxX: number; maxY: number };
 }
 
@@ -240,7 +246,22 @@ export function strandFootprint(s: StrandRecord, doc: EditorDocument, settings: 
   const outline: Point[][] = band.outline.length ? [band.outline] : [];
   const hc = effectiveHasCircles(s, doc);
   const [aStart, aEnd] = endTangentAngles(s, curve);
+  const removed: Point[][] = [];
   for (const side of [0, 1] as const) {
+    // A stylized free end (1.111 strand.py get_body_selection_path): the
+    // profile's cap pieces join the footprint, its cuts leave it, and the
+    // side line is the band inside the footprint rather than a bar outside it.
+    // The style is active only on a FREE end — never an attached start, never
+    // under a circle (strand.py _end_style_active).
+    const style = normalizeEndStyle(s.end_styles?.[side]);
+    const styled = !!style && !hc[side] && !(side === 0 && s.type === 'AttachedStrand');
+    if (styled && style) {
+      const angle = side === 0 ? aStart + Math.PI : aEnd;
+      const polys = styledEndPolys(s, side, style, lineVisible(s, side), angle);
+      for (const poly of polys.added) { const p = positive(poly); fill.push(p); outline.push(p); }
+      for (const poly of polys.removed) removed.push(positive(poly));
+      continue;
+    }
     const deco = endDecoration(s, side, doc, hc, side === 0 ? aStart : aEnd);
     if (deco) { const p = positive(deco); fill.push(p); outline.push(p); }
   }
@@ -249,7 +270,7 @@ export function strandFootprint(s: StrandRecord, doc: EditorDocument, settings: 
     if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y;
     if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y;
   }
-  return { fill, outline, bbox: { minX, minY, maxX, maxY } };
+  return { fill, outline, removed, bbox: { minX, minY, maxX, maxY } };
 }
 
 // A click is a pixel, not a point (selection_utils._HIT_TOLERANCE = 0.5, nine
@@ -263,6 +284,7 @@ export function footprintContains(fp: Footprint, p: Point): boolean {
   if (p.x < b.minX - 0.5 || p.x > b.maxX + 0.5 || p.y < b.minY - 0.5 || p.y > b.maxY + 0.5) return false;
   for (const [dx, dy] of HIT_SAMPLE_OFFSETS) {
     const q = { x: p.x + dx, y: p.y + dy };
+    if (fp.removed.some((poly) => pointInPoly(q, poly))) continue;
     for (const poly of fp.fill) if (pointInPoly(q, poly)) return true;
   }
   return false;

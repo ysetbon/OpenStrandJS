@@ -1,0 +1,94 @@
+/* OSS 1.111 Stylize End Side dialog (end_style_dialog.py _dialog_stylesheet):
+ * section frames grouping the controls, a preview picture, six shape buttons
+ * that reflow from one row of six to two rows of three when the dialog is
+ * narrow, and the Move Group dialog's slider rows. Colours follow the theme
+ * tokens (theme.css); the OSS light/dark section palette is #FFFFFF/#DDDDDD
+ * and #333333/#555555. */
+.es-header {
+  font-size: 14px;
+  padding: 0 2px;
+}
+.es-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--dialog-btn-border, #dddddd);
+  border-radius: 6px;
+  background: var(--es-section-bg, rgba(255, 255, 255, 0.35));
+}
+.theme-dark .es-section {
+  --es-section-bg: #333333;
+  border-color: #555555;
+}
+.es-section-title {
+  font-weight: bold;
+  opacity: 0.9;
+}
+.es-hint {
+  font-size: 12px;
+  opacity: 0.7;
+  white-space: normal;
+}
+.es-preview {
+  display: block;
+  width: 100%;
+  max-width: 380px;
+  aspect-ratio: 380 / 120;
+  height: auto;
+  border: 1px solid var(--dialog-btn-border, #cccccc);
+  border-radius: 4px;
+  align-self: center;
+}
+.es-shape-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.es-shape-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 88px;
+  height: 72px;
+  padding: 4px;
+  cursor: pointer;
+  border: 1px solid var(--dialog-btn-border, #cccccc);
+  border-radius: 5px;
+  background: var(--dialog-btn-bg, #ffffff);
+  color: var(--text);
+  font-size: 12px;
+}
+.es-shape-btn:hover { border-color: #999999; }
+.es-shape-btn.active {
+  background: #a0c0e0;
+  border: 2px solid #7090c0;
+  color: #000;
+}
+.theme-dark .es-shape-btn.active {
+  background: #4a6fa5;
+  border-color: #6a9fd5;
+  color: #fff;
+}
+.es-shape-icon-blank {
+  display: block;
+  width: 56px;
+  height: 34px;
+}
+.es-slider-row > input[type='range'] { flex: 1 1 auto; min-width: 80px; }
+.es-slider-row > .gd-value { min-width: 44px; text-align: end; }
+.es-field {
+  width: 60px;
+  box-sizing: border-box;
+  padding: 2px 4px;
+  border: 1px solid var(--dialog-btn-border, #cccccc);
+  border-radius: 4px;
+  background: var(--set-combo-bg, #ffffff);
+  color: var(--text);
+}
+.es-disabled { opacity: 0.5; }
+.es-check { align-self: flex-start; }
+.es-footer-spacer { flex: 1 1 auto; }
+.modal-footer > .es-footer-spacer { min-width: 8px; }
