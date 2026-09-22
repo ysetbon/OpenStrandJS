@@ -3,6 +3,7 @@
  * Per-button colors arrive via --bg/--bgh/--bgp/--bd/--gc/--gs CSS vars. */
 
 .control-column {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -49,9 +50,35 @@
   user-select: none;
 }
 
-.cc-btn:disabled {
+/* Disabled via class + aria-disabled, not the attribute, so the right-click
+ * tip still reaches a disabled button (ControlColumn.tsx CCBtn). */
+.cc-btn.disabled,
+.cc-btn.disabled:hover,
+.cc-btn.disabled:active {
   background: #D3D3D3;
   border-color: #A9A9A9;
   cursor: default;
 }
-.cc-btn:disabled .cc-icon { filter: grayscale(1) opacity(0.55); }
+.cc-btn.disabled .cc-icon { filter: grayscale(1) opacity(0.55); }
+
+/* Right-click tip (OSS CustomTooltip): no frame, no fill — just the theme's
+ * text colour (black; white in the dark theme), centred under the button rows
+ * where OSS puts it (panel top + 190 = one 40px row below the third row, 36px
+ * at this scale), wrapped to the panel width minus OSS's 8px padding. */
+.cc-tip {
+  position: absolute;
+  top: calc(100% + 36px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 16px);
+  z-index: 20;
+  pointer-events: none;
+  color: var(--text);
+  background: transparent;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  text-align: center;
+  line-height: 1.2;
+  font-size: 13px;
+}

@@ -62,7 +62,7 @@ try {
     await page.evaluate((m) => window.__store.getState().setMode(m), m);
     await page.waitForTimeout(150);
   };
-  const panButton = page.locator('.control-column .cc-btn[title^="Pan"]');
+  const panButton = page.locator('.control-column .cc-btn[aria-label^="Pan"]');
   const panIcon = async () => path.basename(await panButton.locator('img').getAttribute('src'));
   const panChecked = async () => (await panButton.getAttribute('class')).includes('checked');
   const box = await page.locator('#c').boundingBox();

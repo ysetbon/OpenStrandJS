@@ -1,7 +1,8 @@
+import { useEffect, useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import { requestRender } from '../renderer/renderScheduler';
 import { fitPan, viewCenter, zoomAbout, ZOOM_PERCENTAGE } from '../interaction/viewTransform';
-import { STRINGS, t } from './i18n';
+import { STRINGS, isRTL, t } from './i18n';
 import { ossIcon } from './icons';
 import type { Language } from '../model/types';
 import { historyShortLabel } from '../store/historyMeta';
@@ -31,27 +32,36 @@ const TAN:    V = { bg: '#D2B48C', bgh: '#CD853F', bgp: '#654321', bd: '#BC9A6A'
 // OSS tooltip keys (layer_panel.py): reset_tooltip / undo_tooltip / redo_tooltip /
 // zoom_in_tooltip / zoom_out_tooltip / pan_tooltip / refresh_tooltip / center_tooltip /
 // hide_mode_tooltip (the multi-select button uses hide_mode_tooltip, NOT a multi_select key).
-// TODO(oss-fidelity): these *_tooltip keys are not yet in translations.ts (not an owned
-// file in this slice). Until they're added, fall back to the existing English title so we
-// never surface a raw key string. Once the keys land, t() resolves them automatically.
+// All of them are in translations.ts (synced from OSS); the English fallback only
+// guards against a key going missing, so a raw key string never shows.
 function tip(key: string, fallbackEn: string, lang: Language): string {
   return STRINGS[key] ? t(key, lang) : fallbackEn;
 }
 
+// OSS TooltipButton / StrokeTextButton (layer_panel.py, undo_redo_manager.py):
+// these buttons never show a hover tooltip. The tip appears only while the RIGHT
+// mouse button is held on a button — disabled ones included, so a grey Undo can
+// still say it is "Currently unavailable" — and disappears on release. `onTip`
+// receives the text on the press and null on the release.
 function CCBtn(props: {
-  v: V; icon: string; title: string;
+  v: V; icon: string; tip: string; onTip: (text: string | null) => void;
   onClick?: () => void; checked?: boolean; disabled?: boolean;
 }) {
   // OSS renders these buttons from layer_panel_icons/*.png — use the SAME
   // assets so the glyphs look identical on every OS (native emoji fonts,
   // notably macOS, drew completely different symbols here).
+  // Not the `disabled` attribute: a disabled <button> swallows mouse events,
+  // and the right-click tip must still work on it (aria-disabled + a guarded
+  // click instead).
   return (
     <button
-      className={`cc-btn${props.checked ? ' checked' : ''}`}
+      className={`cc-btn${props.checked ? ' checked' : ''}${props.disabled ? ' disabled' : ''}`}
       style={vars(props.v)}
-      title={props.title}
-      disabled={props.disabled}
-      onClick={props.onClick}
+      aria-label={props.tip}
+      aria-disabled={props.disabled || undefined}
+      onClick={props.disabled ? undefined : props.onClick}
+      onMouseDown={(e) => { if (e.button === 2) props.onTip(props.tip); }}
+      onContextMenu={(e) => e.preventDefault()}
     >
       <img className="cc-icon" src={ossIcon(props.icon)} alt="" draggable={false} />
     </button>
@@ -82,6 +92,29 @@ export function ControlColumn() {
   const multiSel = useEditorStore((s) => s.multiSelectMode);
   const toggleMulti = useEditorStore((s) => s.toggleMultiSelect);
   const lang = useEditorStore((s) => s.settings.language);
+
+  // The right-click tip currently held open (null = none). OSS hides it on the
+  // right-button release; we also drop it if the release happens off the button
+  // or the window loses focus mid-hold, so it can never get stuck on screen.
+  const [heldTip, setHeldTip] = useState<string | null>(null);
+  useEffect(() => {
+    if (heldTip == null) return;
+    const hide = () => setHeldTip(null);
+    const onUp = (e: MouseEvent) => { if (e.button === 2) hide(); };
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('blur', hide);
+    return () => {
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('blur', hide);
+    };
+  }, [heldTip]);
+
+  // OSS undo_redo_manager.update_undo_redo_buttons: an enabled Undo/Redo names
+  // the action it would reverse/replay; a disabled one says so instead —
+  // "Undo:\nUndo last action\n(Currently unavailable)".
+  const unavailable = `(${t('currently_unavailable', lang)})`;
+  const undoTip = canUndo ? withWhat(tip('undo_tooltip', 'Undo', lang), undoWhat) : `${tip('undo_tooltip', 'Undo', lang)}\n${unavailable}`;
+  const redoTip = canRedo ? withWhat(tip('redo_tooltip', 'Redo', lang), redoWhat) : `${tip('redo_tooltip', 'Redo', lang)}\n${unavailable}`;
 
   /**
    * One press of Zoom In / Zoom Out, about the viewport centre.
@@ -115,20 +148,26 @@ export function ControlColumn() {
   return (
     <div className="control-column">
       <div className="cc-row cc-row-top">
-        <CCBtn v={PURPLE} icon="home" title={tip('reset_tooltip', 'Reset states', lang)} onClick={resetStates} />
-        <CCBtn v={BLUE} icon="undo" title={withWhat(tip('undo_tooltip', 'Undo', lang), canUndo ? undoWhat : '')} disabled={!canUndo} onClick={() => { undo(); requestRender(); }} />
-        <CCBtn v={BLUE} icon="redo" title={withWhat(tip('redo_tooltip', 'Redo', lang), canRedo ? redoWhat : '')} disabled={!canRedo} onClick={() => { redo(); requestRender(); }} />
+        <CCBtn v={PURPLE} icon="home" tip={tip('reset_tooltip', 'Reset states', lang)} onTip={setHeldTip} onClick={resetStates} />
+        <CCBtn v={BLUE} icon="undo" tip={undoTip} onTip={setHeldTip} disabled={!canUndo} onClick={() => { undo(); requestRender(); }} />
+        <CCBtn v={BLUE} icon="redo" tip={redoTip} onTip={setHeldTip} disabled={!canRedo} onClick={() => { redo(); requestRender(); }} />
       </div>
       <div className="cc-row cc-row-mid">
-        <CCBtn v={GOLD} icon="zoom_in" title={tip('zoom_in_tooltip', 'Zoom in', lang)} onClick={() => zoomBy(1 + ZOOM_PERCENTAGE)} />
-        <CCBtn v={GOLD} icon="zoom_out" title={tip('zoom_out_tooltip', 'Zoom out', lang)} onClick={() => zoomBy(1 - ZOOM_PERCENTAGE)} />
-        <CCBtn v={RED} icon={panHeld ? 'pan_closed' : 'pan_open'} title={tip('pan_tooltip', 'Pan (hand tool)', lang)} checked={panHeld} onClick={togglePanMode} />
+        <CCBtn v={GOLD} icon="zoom_in" tip={tip('zoom_in_tooltip', 'Zoom in', lang)} onTip={setHeldTip} onClick={() => zoomBy(1 + ZOOM_PERCENTAGE)} />
+        <CCBtn v={GOLD} icon="zoom_out" tip={tip('zoom_out_tooltip', 'Zoom out', lang)} onTip={setHeldTip} onClick={() => zoomBy(1 - ZOOM_PERCENTAGE)} />
+        <CCBtn v={RED} icon={panHeld ? 'pan_closed' : 'pan_open'} tip={tip('pan_tooltip', 'Pan (hand tool)', lang)} onTip={setHeldTip} checked={panHeld} onClick={togglePanMode} />
       </div>
       <div className="cc-row cc-row-mid">
-        <CCBtn v={GREEN} icon="refresh" title={tip('refresh_tooltip', 'Refresh', lang)} onClick={() => requestRender()} />
-        <CCBtn v={TAN} icon="center" title={tip('center_tooltip', 'Center on content', lang)} onClick={center} />
-        <CCBtn v={TAN} icon={multiSel ? 'multi_select_on' : 'multi_select_off'} title={tip('hide_mode_tooltip', 'Multi-select', lang)} checked={multiSel} onClick={toggleMulti} />
+        <CCBtn v={GREEN} icon="refresh" tip={tip('refresh_tooltip', 'Refresh', lang)} onTip={setHeldTip} onClick={() => requestRender()} />
+        <CCBtn v={TAN} icon="center" tip={tip('center_tooltip', 'Center on content', lang)} onTip={setHeldTip} onClick={center} />
+        <CCBtn v={TAN} icon={multiSel ? 'multi_select_on' : 'multi_select_off'} tip={tip('hide_mode_tooltip', 'Multi-select', lang)} onTip={setHeldTip} checked={multiSel} onClick={toggleMulti} />
       </div>
+      {/* OSS CustomTooltip: frameless, transparent, plain black (white in the
+          dark theme) text, centred on the button rows one row below them, kept
+          inside the panel and wrapped to its width (undo_redo_manager.py). */}
+      {heldTip != null && (
+        <div className="cc-tip" role="tooltip" dir={isRTL(lang) ? 'rtl' : 'ltr'}>{heldTip}</div>
+      )}
     </div>
   );
 }

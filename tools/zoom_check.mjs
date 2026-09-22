@@ -63,8 +63,8 @@ try {
   }, { project });
   await page.waitForTimeout(1200);
 
-  const zoomIn = page.locator('.control-column .cc-btn[title^="Zoom In"]');
-  const zoomOut = page.locator('.control-column .cc-btn[title^="Zoom Out"]');
+  const zoomIn = page.locator('.control-column .cc-btn[aria-label^="Zoom In"]');
+  const zoomOut = page.locator('.control-column .cc-btn[aria-label^="Zoom Out"]');
   const view = () => page.evaluate(() => ({ ...window.__store.getState().view }));
   const setView = (patch) => page.evaluate((p) => window.__store.getState().setView(p), patch);
   /** World point under the middle of the canvas: the anchor a step must not move. */
@@ -159,7 +159,7 @@ try {
 
   // -------------------------------------- 4. the step reaches the canvas, not just the store
   await setView({ zoom: 1, panX: 0, panY: 0 });
-  await page.locator('.control-column .cc-btn[title^="Center"]').click();
+  await page.locator('.control-column .cc-btn[aria-label^="Center"]').click();
   await page.waitForTimeout(900);
   const span1 = await inkSpan();
   await press(zoomIn, 7);                     // 1.1^7 ~ 1.95x
@@ -182,10 +182,10 @@ try {
     d.strands[d.order[0]].start.x += 10;
   }));
   await page.waitForTimeout(300);
-  const undoBtn = page.locator('.control-column .cc-btn[title^="Undo"]');
+  const undoBtn = page.locator('.control-column .cc-btn[aria-label^="Undo"]');
   ok('there is an undo step to clear before Reset states', await undoBtn.isEnabled());
   const preReset = await view();
-  await page.locator('.control-column .cc-btn[title^="Reset"]').click();
+  await page.locator('.control-column .cc-btn[aria-label^="Reset"]').click();
   await page.waitForTimeout(700);
   v = await view();
   ok('Reset states leaves the zoom where it was (OSS clear_history never touches zoom_factor)',
