@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { Language } from '../model/types';
 import { isRTL } from './i18n';
 import './dialogs.css';
@@ -63,8 +63,13 @@ export function Modal(props: {
   const focusables = (root: HTMLElement | null = modalRef.current): HTMLElement[] => Array.from(
     root?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [],
   ).filter((el) => el.offsetParent !== null || el === document.activeElement);
+  // The element to hand focus back to, read during the FIRST RENDER: a child
+  // marked autoFocus takes focus in React's commit, before any effect runs, so
+  // an effect would record the dialog's own control as the opener.
+  const [opener] = useState<HTMLElement | null>(
+    () => (typeof document === 'undefined' ? null : document.activeElement as HTMLElement | null),
+  );
   useEffect(() => {
-    const opener = document.activeElement as HTMLElement | null;
     const box = modalRef.current;
     if (box && !box.contains(document.activeElement)) {
       const first = focusables(box.querySelector<HTMLElement>('.modal-body'))[0] ?? focusables()[0];
