@@ -9,6 +9,8 @@
 // first, then write the typed fields over it. New strands start with the
 // authentic defaults the Python constructors use.
 
+import type { EndStyles } from './endStyle';
+
 export interface Point { x: number; y: number; }
 export interface RGBA { r: number; g: number; b: number; a: number; } // 0..255
 
@@ -56,6 +58,12 @@ export interface StrandRecord {
   // OSS 1.109 per-layer "Hide Shadow": the strand casts no shadow at all (it
   // still receives). Gates regular casting AND a mask's own crossing shadow.
   hide_shadow: boolean;
+  // OSS 1.111 "Stylize End Side": one record per end (start, end), null = the
+  // classic flat cap + side line (model/endStyle.ts). A record only renders on a
+  // FREE end (no circle; never an attached strand's start) and lies dormant
+  // otherwise, so it is kept through attach / close-knot and comes back when
+  // the end is free again.
+  end_styles: EndStyles;
 
   circle_stroke_color: RGBA | null;
   knot_connections: Record<string, KnotConnection>;
@@ -162,7 +170,9 @@ export interface ViewState {
 }
 
 export type Theme = 'default' | 'light' | 'dark';
-export type Language = 'en' | 'fr' | 'de' | 'it' | 'es' | 'pt' | 'he';
+// OSS 1.111 added Russian, Finnish, Swedish, Japanese and Chinese (settings_dialog.py
+// add_lang_item_*); the order is the desktop dropdown's.
+export type Language = 'en' | 'fr' | 'de' | 'it' | 'es' | 'pt' | 'he' | 'ru' | 'fi' | 'sv' | 'ja' | 'zh';
 
 // Mirrors the OpenStrand Studio user_settings.txt keys (settings_dialog.py). The
 // field names are the JS-side snake_case; SETTINGS_TXT_MAP (settingsJson.ts) maps
@@ -285,6 +295,9 @@ export interface RenderStrand {
   arrow_texture?: 'none' | 'stripes' | 'dots' | 'crosshatch';
   arrow_shaft_style?: 'solid' | 'tiles' | 'stripes' | 'dots';
   arrow_casts_shadow?: boolean;
+  // OSS 1.111 stylized free ends (end_style.py). Absent / [null, null] => the
+  // classic flat cap + side line, so the fidelity oracle is unaffected.
+  end_styles?: EndStyles;
 }
 
 export interface RenderMeta {

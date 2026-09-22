@@ -13,7 +13,8 @@ export const modes: Record<ModeName, Mode> = {
   attach: AttachMode,
   mask: MaskMode,
   // Read-only inspect. OSS ViewMode.activate sets an OpenHand cursor and its
-  // mousePressEvent does nothing (view_mode.py:20-38).
+  // mousePressEvent does nothing (view_mode.py:20-38); since 1.111 the canvas
+  // pans a left-drag in this mode itself (InteractionHost.onPointerDown).
   view: passiveMode('view', 'grab'),
   rotate: RotateMode,
   // Angle adjust is MODAL in OSS, not a canvas gesture: the toolbar button opens

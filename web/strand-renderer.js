@@ -102,6 +102,7 @@ function geomCacheBegin() {
   geomCacheEnd();
   GEOM_CACHE = new Map();
   GEOM_PROJECT = paper.project;
+  esCacheBegin();
 }
 
 // Is the memo open AND still owned by the project being drawn into?
@@ -113,6 +114,7 @@ function geomCacheEnd() {
   const cache = GEOM_CACHE;
   GEOM_CACHE = null;                  // clear first: a render that threw must not
   GEOM_PROJECT = null;                // leave a half-open cache behind
+  esCacheEnd();
   if (!cache) return;
   for (const e of cache.values()) {
     // The project these masters belong to may already be gone (a render that
@@ -647,17 +649,532 @@ function collectSideLines(s, centerline, P, S) {
   // An AttachedStrand's start is its attachment cap: OSS never draws a start
   // side line there, even with the circle hidden (attached_strand.py:600 only
   // ever draws the END line; strand.py:2766 draws both for a plain Strand).
-  if (s.type !== 'AttachedStrand' && s.start_line_visible && !hc[0]) {
+  // A styled end paints its side line as the band along its profile instead
+  // (strand.py _draw_side_lines), so the classic bar is skipped there.
+  if (s.type !== 'AttachedStrand' && s.start_line_visible && !hc[0] && !esActiveStyle(s, 0)) {
     const a = tangentAngle(centerline, 0), c = P(s.start);
     // start shift is opposite the tangent (angle + pi)
     out.push(bar({ x: c.x + shift * Math.cos(a + Math.PI), y: c.y + shift * Math.sin(a + Math.PI) }, a));
   }
-  if (s.end_line_visible && !hc[1]) {
+  if (s.end_line_visible && !hc[1] && !esActiveStyle(s, 1)) {
     const a = tangentAngle(centerline, len), c = P(s.end);
     // end shift is along the tangent
     out.push(bar({ x: c.x + shift * Math.cos(a), y: c.y + shift * Math.sin(a) }, a));
   }
   return out;
+}
+
+// ---- Stylized free ends (OSS 1.111 "Stylize End Side", end_style.py) ---------
+// A free end (an end with no circle) can carry an end style: the shape of its
+// edge (straight / angled / rounded / pointed / notched / concave), a tilt, a
+// depth, an extend/trim offset along the tangent, and the thickness / colour of
+// the side line drawn along it. Everything rendered at a styled end derives
+// from ONE profile P(y) in the local frame of the end (origin at the endpoint,
+// +x outward along the tangent, y across the width), exactly as in OSS:
+//   * the OUTER footprint (stroke colour) is the flat-capped body with
+//     everything beyond the profile removed and the region between the
+//     endpoint plane and the profile added;
+//   * the INNER fill is the fill body cut back to the side line's inner edge
+//     (the profile offset inward by the side-line thickness);
+//   * the side-line BAND is the strip between that inner edge and the profile,
+//     painted in the side-line colour clipped to the body;
+//   * shadows use the outer footprint (pushed outward by the blur margin) and
+//     masks intersect the same footprint.
+// Nothing ahead of the endpoint plane is ever removed from the classic body, so
+// a strand that bends back in front of its own end keeps every pixel it has
+// today, and an unstyled strand never enters this code at all (esGeometry
+// returns null), so the fidelity oracle is byte-identical.
+//
+// All lengths here are PIXEL space (world * S), so every absolute constant OSS
+// expresses in canvas units (the 0.1 edge clearance, the 0.5 cut plane, the 12
+// px zone reach ...) is multiplied by S.
+
+const ES_SHAPES = ['straight', 'angled', 'rounded', 'pointed', 'notched', 'concave'];
+const ES_TILT_MAX = 60;
+const ES_MIN_LINE_WIDTH = 0.5;
+// Qt's path clipper mishandles a polygon vertex that lies exactly on an edge of
+// the other operand (and paper's boolean ops are no happier); the cut polygons
+// keep this far from the body's long edges and its endpoint plane.
+const ES_EDGE_CLEARANCE = 0.1;
+// The cut plane sits a hair ahead of the endpoint plane, so the body's own flat
+// cap (and the mitre spike a tight bend leaves along it) falls cleanly inside
+// the cut instead of straddling its edge.
+const ES_CUT_PLANE = 0.5;
+
+// end_style.normalize_style: a clean record, or null for the classic look.
+function esNormalize(style) {
+  if (!style) return null;
+  const num = (v, fb) => { const n = v == null ? NaN : Number(v); return Number.isFinite(n) ? n : fb; };
+  const shape = ES_SHAPES.includes(style.shape) ? style.shape : 'straight';
+  let tilt = Math.max(-ES_TILT_MAX, Math.min(ES_TILT_MAX, num(style.tilt, 0)));
+  if (shape === 'straight') tilt = 0;
+  const depth = Math.max(0, Math.min(1, num(style.depth, 0.5)));
+  const offset = num(style.offset, 0);
+  const lineWidth = style.line_width == null ? null : Math.max(ES_MIN_LINE_WIDTH, num(style.line_width, 0));
+  const lc = style.line_color;
+  const lineColor = lc && typeof lc === 'object'
+    ? { r: num(lc.r, 0), g: num(lc.g, 0), b: num(lc.b, 0), a: num(lc.a, 255) } : null;
+  if (shape === 'straight' && Math.abs(tilt) < 1e-9 && Math.abs(offset) < 1e-9 && lineWidth == null && !lineColor) return null;
+  return { shape, tilt, depth, offset, line_width: lineWidth, line_color: lineColor };
+}
+
+// A style renders only on a FREE end: a circle cap always wins and the style
+// goes dormant until the end is free again; an attached strand's start is glued
+// to its parent (strand.py _end_style_active). Reads the render-time has_circles.
+function esActiveStyle(s, side) {
+  const styles = s.end_styles;
+  if (!Array.isArray(styles) || styles.length !== 2) return null;
+  if (side === 0 && s.type === 'AttachedStrand') return null;
+  const hc = s.has_circles || [false, false];
+  if (hc[side]) return null;
+  return esNormalize(styles[side]);
+}
+
+function esHasStyledEnd(s) {
+  return s.type !== 'MaskedStrand' && (esActiveStyle(s, 0) !== null || esActiveStyle(s, 1) !== null);
+}
+
+// -- profile in the local frame of the end ---------------------------------------
+function esProfilePoints(shape, half, depth, tiltDeg, baseX, steps = 24) {
+  let pts = [];
+  const width = 2 * half;
+  if (shape === 'rounded' || shape === 'concave') {
+    const r = depth * half, sign = shape === 'rounded' ? 1 : -1;
+    for (let i = 0; i <= steps; i++) {
+      const y = -half + width * i / steps;
+      pts.push({ x: sign * r * Math.sqrt(Math.max(0, 1 - (y / half) * (y / half))), y });
+    }
+  } else if (shape === 'pointed') {
+    pts = [{ x: 0, y: -half }, { x: depth * width, y: 0 }, { x: 0, y: half }];
+  } else if (shape === 'notched') {
+    pts = [{ x: 0, y: -half }, { x: -depth * width, y: 0 }, { x: 0, y: half }];
+  } else {
+    pts = [{ x: 0, y: -half }, { x: 0, y: half }];
+  }
+  // QTransform().translate(base_x, 0).rotate(tilt).map(p): rotate, then shift.
+  const a = tiltDeg * Math.PI / 180, c = Math.cos(a), sn = Math.sin(a);
+  return esFitToBand(pts.map((p) => ({ x: baseX + p.x * c - p.y * sn, y: p.x * sn + p.y * c })), half);
+}
+
+// After a tilt the profile no longer reaches y = +-half. Extend its first and
+// last segments straight on until they do (a hair beyond, so the corner never
+// sits exactly on the body's edge).
+function esFitToBand(pts, half) {
+  if (pts.length < 2) return pts;
+  half = half + ES_EDGE_CLEARANCE_PX;
+  const hit = (a, b, targetY) => {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    if (Math.abs(dy) < 1e-9) return b;
+    const t = (targetY - a.y) / dy;
+    return { x: a.x + dx * t, y: targetY };
+  };
+  const ascending = pts[0].y < pts[pts.length - 1].y;
+  const first = hit(pts[1], pts[0], ascending ? -half : half);
+  const last = hit(pts[pts.length - 2], pts[pts.length - 1], ascending ? half : -half);
+  return [first].concat(pts.slice(1, -1), [last]);
+}
+// esFitToBand runs inside esProfilePoints, before the StyledEnd knows S; the
+// clearance in px is set per end (esStyledEnd) right before the profile is built.
+let ES_EDGE_CLEARANCE_PX = ES_EDGE_CLEARANCE;
+
+// Where the profile's chord (first -> last point), continued past both ends,
+// reaches |y| = ylim (1.5*half by default). The cut continues straight along
+// that line through whatever part of a curved body bulges past the width right
+// behind its endpoint, instead of turning square.
+function esChordExtended(prof, half, ylim) {
+  if (ylim == null) ylim = 1.5 * half;
+  const a = prof[0], b = prof[prof.length - 1];
+  const dx = b.x - a.x, dy = b.y - a.y;
+  if (Math.abs(dy) < 1e-9) return [{ x: a.x, y: -ylim }, { x: b.x, y: ylim }];
+  const sgn = dy > 0 ? 1 : -1;
+  const ta = (-sgn * ylim - a.y) / dy, tb = (sgn * ylim - a.y) / dy;
+  return [{ x: a.x + dx * ta, y: a.y + dy * ta }, { x: a.x + dx * tb, y: a.y + dy * tb }];
+}
+
+// The polyline restricted to |y| <= ylim (crossing points inserted).
+function esClipPolylineY(pts, ylim) {
+  const out = [];
+  let prev = null;
+  for (const p of pts) {
+    const inside = Math.abs(p.y) <= ylim;
+    if (prev !== null) {
+      const prevInside = Math.abs(prev.y) <= ylim;
+      if (prevInside !== inside || (!prevInside && !inside && (prev.y > 0) !== (p.y > 0))) {
+        const bounds = prev.y < p.y ? [-ylim, ylim] : [ylim, -ylim];
+        for (const bound of bounds) {
+          const lo = Math.min(prev.y, p.y), hi = Math.max(prev.y, p.y);
+          if (lo < bound && bound < hi) {
+            const t = (bound - prev.y) / (p.y - prev.y);
+            out.push({ x: prev.x + (p.x - prev.x) * t, y: bound });
+          }
+        }
+      }
+    }
+    if (inside) out.push(p);
+    prev = p;
+  }
+  return out;
+}
+
+// Runs of consecutive points ahead of (x > x0) or behind (x < x0) the plane,
+// each starting and ending on the plane.
+function esRunsByX(pts, x0, ahead) {
+  const runs = [];
+  let run = [];
+  const cross = (a, b) => { const t = (x0 - a.x) / (b.x - a.x); return { x: x0, y: a.y + (b.y - a.y) * t }; };
+  let prev = null;
+  for (const p of pts) {
+    const keep = ahead ? p.x > x0 : p.x < x0;
+    if (prev !== null) {
+      const prevKeep = ahead ? prev.x > x0 : prev.x < x0;
+      if (prevKeep !== keep) {
+        const c = cross(prev, p);
+        if (keep) run = [c];
+        else { run.push(c); runs.push(run); run = []; }
+      }
+    }
+    if (keep) run.push(p);
+    prev = p;
+  }
+  if (run.length >= 2) runs.push(run);
+  return runs.filter((r) => r.length >= 2);
+}
+
+// Close each run back along the plane x = x0 into a simple polygon (a point list).
+function esRunsToPolygons(runs, x0) {
+  return runs.map((run) => [{ x: x0, y: run[0].y }].concat(run, [{ x: x0, y: run[run.length - 1].y }]));
+}
+
+// The region between the plane x = x0 (just behind the endpoint) and the
+// profile, where the profile is ahead of it, within |y| <= yLim: the cap piece
+// ADDED to the classic body. Built directly, so no boolean op is needed.
+function esAheadPolygons(prof, half, yLim, x0) {
+  const [first, last] = esChordExtended(prof, half, yLim + ES_UNIT_PX);
+  const pts = esClipPolylineY([first].concat(prof, [last]), yLim);
+  return esRunsToPolygons(esRunsByX(pts, x0, true), x0);
+}
+
+// The region outward of the profile but behind the plane x = x0: what a cut
+// REMOVES from the classic body. Nothing ahead of the endpoint plane is ever
+// removed, so a body that bends back in front of its own end keeps every pixel.
+function esBehindPolygons(prof, half, yLim, x0) {
+  const [first, last] = esChordExtended(prof, half, yLim);
+  return esRunsToPolygons(esRunsByX([first].concat(prof, [last]), x0, false), x0);
+}
+
+// Local-frame strip between the profile and its inward offset (the side line's
+// inner edge), both continued along their chords to |y| = yLim.
+function esBandRegion(prof, innerProf, half, yLim) {
+  const [first, last] = esChordExtended(prof, half, yLim);
+  // The inner edge continues parallel to the profile's own continuation (its
+  // own chord can point elsewhere once a steep flank has been offset).
+  const p0 = prof[0], pn = prof[prof.length - 1];
+  const i0 = innerProf[0], iN = innerProf[innerProf.length - 1];
+  const innerFirst = { x: i0.x + (first.x - p0.x), y: i0.y + (first.y - p0.y) };
+  const innerLast = { x: iN.x + (last.x - pn.x), y: iN.y + (last.y - pn.y) };
+  return [first].concat(prof, [last, innerLast], innerProf.slice().reverse(), [innerFirst]);
+}
+
+// Shift a polyline a hair backwards if any of its vertices (or its chord
+// continuation) would sit on the endpoint plane x = 0, where the stroked body
+// has vertices of its own.
+function esClearOfEndpointPlane(pts) {
+  const xs = pts.map((p) => p.x);
+  if (pts.length >= 2) {
+    const a = pts[0], b = pts[pts.length - 1];
+    if (Math.abs(b.y - a.y) > 1e-9) {
+      const slope = (b.x - a.x) / (b.y - a.y);
+      for (const y of [-2 * Math.abs(a.y) - ES_UNIT_PX, 2 * Math.abs(b.y) + ES_UNIT_PX]) xs.push(a.x + slope * (y - a.y));
+    }
+  }
+  const clearance = ES_EDGE_CLEARANCE_PX;
+  if (xs.every((x) => Math.abs(x) >= clearance)) return pts;
+  const shift = -clearance - Math.max(...xs.filter((x) => Math.abs(x) < clearance));
+  return pts.map((p) => ({ x: p.x + shift, y: p.y }));
+}
+
+// The profile moved `distance` inward (toward the strand body) along its own
+// normals, with mitred vertices: the inner edge of the side line.
+function esOffsetProfile(prof, distance) {
+  if (distance <= 0 || prof.length < 2) return prof.slice();
+  const normals = [];
+  for (let i = 0; i < prof.length - 1; i++) {
+    const vx = prof[i + 1].x - prof[i].x, vy = prof[i + 1].y - prof[i].y;
+    const len = Math.hypot(vx, vy);
+    // Walking the profile from y=-half to y=+half, the body is on the left.
+    normals.push(len > 1e-9 ? { x: -vy / len, y: vx / len } : null);
+  }
+  const result = [];
+  for (let i = 0; i < prof.length; i++) {
+    const p = prof[i];
+    const n1 = i > 0 ? normals[i - 1] : null, n2 = i < normals.length ? normals[i] : null;
+    if (!n1 && !n2) { result.push({ x: p.x, y: p.y }); continue; }
+    let n, factor;
+    if (!n1 || !n2) { n = n2 || n1; factor = 1; } else {
+      const sx = n1.x + n2.x, sy = n1.y + n2.y, len = Math.hypot(sx, sy);
+      if (len < 1e-9) { n = n1; factor = 1; } else {
+        n = { x: sx / len, y: sy / len };
+        factor = 1 / Math.max(0.25, n.x * n1.x + n.y * n1.y);
+      }
+    }
+    result.push({ x: p.x + n.x * distance * factor, y: p.y + n.y * distance * factor });
+  }
+  return result;
+}
+
+// Absolute constants OSS writes in canvas units, as pixels for the current
+// render (set by esGeometry before any end is built).
+let ES_UNIT_PX = 1;
+
+// The local-frame pieces of one styled end, mapped to pixel coordinates.
+function esStyledEnd(s, side, style, lineVisible, point, angle, S) {
+  const swPx = (s.stroke_width || 0) * S;
+  const total = ((s.width || 0) + 2 * (s.stroke_width || 0)) * S;
+  const half = total / 2;
+  const lineWidth = (style.line_width == null ? (s.stroke_width || 0) : style.line_width) * S;
+  const bandWidth = lineVisible ? lineWidth : 0;
+  const baseX = bandWidth + style.offset * S;
+  const cos = Math.cos(angle), sin = Math.sin(angle);
+  const map = (p) => new paper.Point(point.x + p.x * cos - p.y * sin, point.y + p.x * sin + p.y * cos);
+  const poly = (pts) => new paper.Path({ segments: pts.map(map), closed: true });
+
+  const profile = esClearOfEndpointPlane(esProfilePoints(style.shape, half, style.depth, style.tilt, baseX));
+  const innerProfile = bandWidth > 0 ? esClearOfEndpointPlane(esOffsetProfile(profile, bandWidth)) : profile;
+  let maxX = -Infinity, minX = Infinity;
+  for (const p of profile) { if (p.x > maxX) maxX = p.x; if (p.x < minX) minX = p.x; }
+  const cutPlane = ES_CUT_PLANE * S;
+  return {
+    side, style, half, total, strokeWidth: swPx, bandWidth, point, angle, cos, sin, map,
+    // How far the edge's farthest point sits beyond where the classic end
+    // (endpoint plane + side line) would put it, in px: decorations anchored on
+    // the endpoint (dash extension, small arrow) are shifted by this.
+    extentShift: maxX - bandWidth,
+    // Polygons removed from the classic body (outward of the profile, behind
+    // the endpoint plane) for a body stroked `margin` wider.
+    behindCuts: (margin = 0) => esBehindPolygons(profile, half, 1.5 * half + margin, cutPlane).map(poly),
+    // The same for the fill, along the side line's inner edge.
+    behindFillCuts: () => esBehindPolygons(bandWidth > 0 ? innerProfile : profile, half, 1.5 * half, cutPlane).map(poly),
+    // Polygons added ahead of the endpoint plane to the stroke body of
+    // half-width `half + margin`.
+    aheadPieces: (margin = 0) => esAheadPolygons(profile, half, half + margin, -ES_UNIT_PX).map(poly),
+    // Polygons added ahead of the endpoint plane to the fill body.
+    aheadFillPieces: () => esAheadPolygons(bandWidth > 0 ? innerProfile : profile, half, half - swPx, -ES_UNIT_PX).map(poly),
+    // The side-line band: the strip between the side line's inner edge and the
+    // profile, across exactly the strand's width. A plain polygon, not clipped
+    // to the body: callers paint it clipped to the (uncut) body.
+    band: () => (bandWidth <= 0 ? null : poly(esBandRegion(profile, innerProfile, half, half + ES_EDGE_CLEARANCE_PX))),
+    // Local rectangle around the cap, mapped to pixel coords.
+    zone: (margin = 0) => {
+      const xMin = Math.min(minX, -ES_UNIT_PX) - 2 * margin - 2 * ES_UNIT_PX;
+      const xMax = maxX + half + margin + 12 * ES_UNIT_PX;
+      const y = 1.5 * half + margin;
+      return poly([{ x: xMin, y: -y }, { x: xMax, y: -y }, { x: xMax, y }, { x: xMin, y }]);
+    },
+  };
+}
+
+// Boolean helpers on paper items. Each consumes its operands.
+function esSubtractAll(base, cuts) {
+  let out = base;
+  for (const cut of cuts) {
+    if (!out) { cut.remove(); continue; }
+    const r = out.subtract(cut);
+    out.remove(); cut.remove();
+    out = r;
+  }
+  return out;
+}
+function esUniteAll(base, pieces) {
+  let out = base;
+  for (const piece of pieces) {
+    if (!out) { out = piece; continue; }
+    const r = out.unite(piece);
+    out.remove(); piece.remove();
+    out = r;
+  }
+  return out;
+}
+
+// Outer footprint / inner fill / side-line bands of a strand whose free end(s)
+// carry a style (end_style.EndStyleGeometry), or null when no end is styled.
+// Owns nothing that outlives the render: every path it hands out is fresh and
+// the caller removes it, like every other builder here.
+// Per-render memo of the descriptor below, keyed by layer name: the highlight,
+// the body, both extension rays, both small arrows and every footprint width
+// ask for the same strand's ends in one frame. It holds plain numbers and
+// closures (no paper items), so it is cleared with the geometry memo rather
+// than held in it. The centerline is rebuilt only for the ends' frames, which
+// depend on nothing but the strand and the render-wide constants.
+let ES_CACHE = null;
+function esCacheBegin() { ES_CACHE = new Map(); }
+function esCacheEnd() { ES_CACHE = null; }
+
+function esGeometry(s, P, enableThird, S, centerline) {
+  if (!esHasStyledEnd(s)) return null;
+  const live = ES_CACHE !== null && geomCacheLive();
+  if (live && ES_CACHE.has(s.layer_name)) return ES_CACHE.get(s.layer_name);
+  const g = esBuildGeometry(s, P, enableThird, S, centerline);
+  if (live) ES_CACHE.set(s.layer_name, g);
+  return g;
+}
+
+function esBuildGeometry(s, P, enableThird, S, centerline) {
+  const cl = centerline || buildCenterline(s, P, enableThird);
+  const len = cl.length;
+  ES_UNIT_PX = S;
+  ES_EDGE_CLEARANCE_PX = ES_EDGE_CLEARANCE * S;
+  const ends = {};
+  for (const side of [0, 1]) {
+    const style = esActiveStyle(s, side);
+    if (!style) continue;
+    const visible = side === 0 ? s.start_line_visible !== false : s.end_line_visible !== false;
+    // end_frame: the endpoint and the OUTWARD tangent angle (the start tangent
+    // points into the body, so it is flipped).
+    const point = P(side === 0 ? s.start : s.end);
+    const angle = side === 0 ? tangentAngle(cl, 0) + Math.PI : tangentAngle(cl, len);
+    ends[side] = esStyledEnd(s, side, style, visible, point, angle, S);
+  }
+  if (!centerline) cl.remove();
+  const width = (s.width || 0) * S;
+  const total = ((s.width || 0) + 2 * (s.stroke_width || 0)) * S;
+  const list = Object.values(ends);
+  const each = (fn) => list.flatMap(fn);
+  // Body builders go through the per-render memos (bodyOutline / bodyBand),
+  // never the caller's centerline: the descriptor outlives this call.
+  const classicClean = (w) => bodyOutline(s, P, enableThird, w);
+  const classicRaw = (w) => bodyBand(s, P, enableThird, w);
+
+  const geometry = {
+    ends,
+    // (classic − cuts) ∪ pieces, for the path consumers. The classic body is the
+    // CLEANED outline (paper's boolean ops need a simple input; Qt's clipper
+    // takes the raw WindingFill stroker output).
+    outer: (margin = 0) => {
+      const base = classicClean(total + 2 * margin);
+      if (!base) return null;
+      let out = esSubtractAll(base, each((e) => e.behindCuts(margin)));
+      out = esUniteAll(out, each((e) => e.aheadPieces(margin)));
+      if (out) out.fillRule = 'nonzero';
+      return out;
+    },
+    inner: () => {
+      const base = classicClean(width);
+      if (!base) return null;
+      let out = esSubtractAll(base, each((e) => e.behindFillCuts()));
+      out = esUniteAll(out, each((e) => e.aheadFillPieces()));
+      if (out) out.fillRule = 'nonzero';
+      return out;
+    },
+    // The outer footprint pushed outward by `margin` (shadow and mask helpers).
+    // Unstyled ends keep the classic flat cap (the body is simply stroked
+    // wider, exactly like the classic shadow and mask helpers); styled ends get
+    // the exact offset of their profile.
+    dilated: (margin) => {
+      if (margin <= 0) return geometry.outer();
+      let result = geometry.outer(margin);
+      const outer = geometry.outer();
+      if (!result || !outer) { outer && outer.remove(); return result; }
+      for (const e of list) {
+        const z = e.zone(margin);
+        const piece = outer.intersect(z);
+        z.remove();
+        if (piece && piece.area && Math.abs(piece.area) > 0.5) {
+          // A hair wider than the body stroke so the union never sees two
+          // coincident long edges.
+          const ring = strokedRegionOutline(piece, 2 * (margin + 0.3 * S));
+          let grown = piece;
+          if (ring) { grown = piece.unite(ring); piece.remove(); ring.remove(); }
+          const u = result.unite(grown);
+          result.remove(); grown.remove();
+          result = u;
+        } else {
+          piece && piece.remove();
+        }
+      }
+      outer.remove();
+      if (result) result.fillRule = 'nonzero';
+      return result;
+    },
+    // PAINT bodies: the raw stroker band plus the cap pieces, as one
+    // WindingFill path each (no boolean ops — see windingFillLayer), to be
+    // painted under the matching keep-clip.
+    bodyPieces: (extra) => {
+      const band = classicRaw(total);
+      return band ? [band].concat(each((e) => e.aheadPieces()), extra || []) : null;
+    },
+    fillPieces: (extra) => {
+      const band = classicRaw(width);
+      return band ? [band].concat(each((e) => e.aheadFillPieces()), extra || []) : null;
+    },
+    // Winding-filled clip: a big rectangle (+1) minus the cut polygons
+    // (oriented against the rectangle). Clip paths honour fill rules, so this
+    // is exact where a boolean subtraction of the raw band is not.
+    keepClip: (bounds, cuts) => {
+      const pad = 6 * total + 20 * S;
+      const rect = new paper.Path.Rectangle(bounds.expand(2 * pad));
+      rect.clockwise = true;
+      for (const cut of cuts) cut.clockwise = false;
+      return new paper.CompoundPath({ children: [rect].concat(cuts), fillRule: 'nonzero' });
+    },
+    keepOuterClip: (bounds) => geometry.keepClip(bounds, each((e) => e.behindCuts())),
+    keepInnerClip: (bounds) => geometry.keepClip(bounds, each((e) => e.behindFillCuts())),
+    band: (side) => (ends[side] ? ends[side].band() : null),
+    extentShift: (side) => (ends[side] ? ends[side].extentShift : 0),
+    isStyled: (side) => !!ends[side],
+  };
+  return geometry;
+}
+
+// The strand's rendered footprint at world width `widthW`, the way every
+// shadow and mask helper asks for it: the classic cleaned outline when no end
+// is styled, else the styled footprint that width maps to — the fill area for
+// the strand's own width, the outer footprint for width + 2*stroke, and the
+// outer footprint pushed outward by half the excess for anything wider
+// (masked_strand.py _styled_footprint's inner / margin arguments). Memoized per
+// render like bodyOutline. Returns an owned path or null.
+function strandFootprintAtWidth(s, P, enableThird, S, widthW) {
+  if (!esHasStyledEnd(s)) return bodyOutline(s, P, enableThird, widthW * S);
+  return cachedGeom(`esfoot|${s.layer_name}|${widthW}`, () => {
+    const g = esGeometry(s, P, enableThird, S);
+    if (!g) return bodyOutline(s, P, enableThird, widthW * S);
+    const w = s.width || 0, total = w + 2 * (s.stroke_width || 0);
+    if (Math.abs(widthW - w) < 1e-6) return g.inner();
+    if (widthW <= total + 1e-6) return g.outer();
+    return g.dilated(((widthW - total) / 2) * S);
+  });
+}
+
+// Endpoint shifted to the styled edge's farthest point along the outward
+// tangent, in WORLD units: the anchor for the dash extension and the small
+// arrow, so they never sit on top of an extended cap or float away from a
+// trimmed one (strand.py _end_anchor). Unstyled ends return the endpoint.
+function esEndAnchor(s, side, worldPt, outwardAngle, P, enableThird, S, centerline) {
+  const g = esGeometry(s, P, enableThird, S, centerline);
+  if (!g) return worldPt;
+  const shift = g.extentShift(side) / S;
+  if (Math.abs(shift) < 1e-9) return worldPt;
+  return { x: worldPt.x + Math.cos(outwardAngle) * shift, y: worldPt.y + Math.sin(outwardAngle) * shift };
+}
+
+// A box covering the last `distance` px of an UNSTYLED end (plus the room
+// outside it), bounded by the end's perpendicular plane so a body that curls
+// back past the endpoint is left alone (strand.py _end_slab). Pixel space.
+function esEndSlab(s, side, point, outwardAngle, distancePx, S) {
+  const full = ((s.width || 0) + 2 * (s.stroke_width || 0)) * S;
+  const half = full / 2 + 12 * S;
+  const depth = distancePx + full;
+  const ox = Math.cos(outwardAngle), oy = Math.sin(outwardAngle);
+  const px = -oy, py = ox;
+  const near = { x: point.x - ox * distancePx, y: point.y - oy * distancePx };
+  return new paper.Path({
+    segments: [
+      new paper.Point(near.x + px * half, near.y + py * half),
+      new paper.Point(near.x - px * half, near.y - py * half),
+      new paper.Point(near.x - px * half + ox * depth, near.y - py * half + oy * depth),
+      new paper.Point(near.x + px * half + ox * depth, near.y + py * half + oy * depth),
+    ],
+    closed: true,
+  });
 }
 
 // ---- shadow geometry (PIXEL space) -----------------------------------------
@@ -678,7 +1195,11 @@ function buildShadowReceiverGeom(s, strands, P, enableThird, S) {
   const w = s.width || 0, sw = s.stroke_width || 0;
   const td = (w + 2 * sw) * S;          // full diameter (px) for the body + cap circles
   const cl = buildCenterline(s, P, enableThird);
-  let path = bodyOutline(s, P, enableThird, td, cl);
+  // A stylized free end replaces the flat cap with its own footprint
+  // (shader_utils.py build_rendered_geometry, 1.111).
+  let path = esHasStyledEnd(s)
+    ? strandFootprintAtWidth(s, P, enableThird, S, w + 2 * sw)
+    : bodyOutline(s, P, enableThird, td, cl);
   if (!path) { cl.remove(); return null; }
   const hc = s.has_circles || [false, false];
   const startA = circleStrokeAlpha(effStartStroke(s));
@@ -708,7 +1229,9 @@ function buildShadowReceiverGeom(s, strands, P, enableThird, S) {
 // path (caller removes it) or null.
 function buildShadowCasterCore(s, P, enableThird, S) {
   const w = s.width || 0, sw = s.stroke_width || 0;
-  return bodyOutline(s, P, enableThird, (w + 2 * sw) * S);
+  // Stylized free ends: the styled footprint, so the cast shadow follows the
+  // end's profile (shader_utils.py build_shadow_geometry, 1.111).
+  return strandFootprintAtWidth(s, P, enableThird, S, w + 2 * sw);
 }
 
 // Cut the caster CORE at every UNFOLDED end. Faithful port of the transparent-
@@ -1164,7 +1687,35 @@ function drawHighlight(s, strands, P, enableThird, S) {
   // strand.py:2090-2095: 5.0 both) whenever either edge is unfolded and the
   // path is longer than 10.
   let band = cl.clone();
-  if ((startA === 0 || endA === 0) && len > 10 * S) {
+  // Stylized free ends (1.111, strand.py highlight_footprint_path): the styled
+  // footprint already carries the cap and the band, so the halo is a 10px ring
+  // along its boundary (Qt strokes the footprint outline 10 wide); an unstyled
+  // end with a transparent circle stroke is trimmed by an end slab instead of
+  // the resampled band below.
+  const styledGeom = esGeometry(s, P, enableThird, S, cl);
+  // The same outer footprint the shadow caster / receiver ask for (memoized).
+  const styledFootprint = styledGeom ? strandFootprintAtWidth(s, P, enableThird, S, w + 2 * sw) : null;
+  if (styledFootprint) {
+    band.remove();
+    let fp = styledFootprint;
+    for (const side of [0, 1]) {
+      const alpha = side === 0 ? startA : endA;
+      if (alpha !== 0 || styledGeom.isStyled(side)) continue;
+      const trim = (side === 0 ? (isAttached ? 5.5 : 5.0) : (isAttached ? 3.5 : 5.0)) * S;
+      const angle = side === 0 ? tangentAngle(cl, 0) + Math.PI : tangentAngle(cl, len);
+      const slab = esEndSlab(s, side, P(side === 0 ? s.start : s.end), angle, trim, S);
+      const cut = fp.subtract(slab);
+      fp.remove(); slab.remove();
+      fp = cut;
+    }
+    band = fp;
+    band.fillColor = red;
+    band.strokeColor = red;
+    band.strokeWidth = 10 * S;
+    band.strokeCap = 'butt';
+    band.strokeJoin = 'miter';
+    items.push(band);
+  } else if ((startA === 0 || endA === 0) && len > 10 * S) {
     const tS = startA === 0 ? (isAttached ? 5.5 : 5.0) * S : 0;
     const tE = endA === 0 ? (isAttached ? 3.5 : 5.0) * S : 0;
     const pts = [];
@@ -1175,12 +1726,14 @@ function drawHighlight(s, strands, P, enableThird, S) {
     band.remove();
     band = new paper.Path({ segments: pts });
   }
-  band.strokeColor = red;
-  band.strokeWidth = td + 10 * S;
-  band.strokeCap = 'butt';
-  band.strokeJoin = 'round';
-  band.fillColor = null;
-  items.push(band);
+  if (!styledFootprint) {
+    band.strokeColor = red;
+    band.strokeWidth = td + 10 * S;
+    band.strokeCap = 'butt';
+    band.strokeJoin = 'round';
+    band.fillColor = null;
+    items.push(band);
+  }
 
   // Which ends carry a circle (-> C-shape ring) vs a flat side line. Mirrors the
   // cap/side-line gating in collectCaps / collectSideLines so the highlight always
@@ -1218,8 +1771,11 @@ function drawHighlight(s, strands, P, enableThird, S) {
     line.strokeColor = red; line.strokeWidth = barW; line.strokeCap = 'butt';
     items.push(line);
   };
-  if (s.start_line_visible !== false && !hc[0] && startA > 0) bar(P(s.start), tangentAngle(cl, 0), -1);  // shift opposite tangent
-  if (s.end_line_visible !== false && !hc[1] && endA > 0) bar(P(s.end), tangentAngle(cl, len), 1);       // shift along tangent
+  // A styled end's band lies inside the styled footprint (strand.py:2367-2385
+  // gate the bars on `not self._end_style_active(side)`).
+  const styled0 = !!(styledGeom && styledGeom.isStyled(0)), styled1 = !!(styledGeom && styledGeom.isStyled(1));
+  if (s.start_line_visible !== false && !hc[0] && startA > 0 && !styled0) bar(P(s.start), tangentAngle(cl, 0), -1);  // shift opposite tangent
+  if (s.end_line_visible !== false && !hc[1] && endA > 0 && !styled1) bar(P(s.end), tangentAngle(cl, len), 1);       // shift along tangent
 
   cl.remove();
   if (items.length) new paper.Group(items);
@@ -1297,8 +1853,11 @@ function drawExtensions(s, P, enableThird, S) {
     line.dashArray = [dashSeg * S, dashSeg * S];
   };
 
-  if (wantStart) ray(s.start, tangentAngle(cl, 0), -1);
-  if (wantEnd) ray(s.end, tangentAngle(cl, len), 1);
+  // A stylized free end anchors its ray on the styled edge's farthest point
+  // (strand.py _end_anchor), never on top of an extended cap.
+  const aS = tangentAngle(cl, 0), aE = tangentAngle(cl, len);
+  if (wantStart) ray(esEndAnchor(s, 0, s.start, aS + Math.PI, P, enableThird, S, cl), aS, -1);
+  if (wantEnd) ray(esEndAnchor(s, 1, s.end, aE, P, enableThird, S, cl), aE, 1);
   cl.remove();
 }
 
@@ -1513,8 +2072,16 @@ function drawArrows(s, P, enableThird, S) {
     drawHead(s1, dir, toColor(defaultArrowFill(s)));
   };
 
-  if (s.start_arrow_visible === true) endArrow(s.start, tangentAngle(cl, 0), -1);
-  if (s.end_arrow_visible === true) endArrow(s.end, tangentAngle(cl, len), 1);
+  // The small arrows anchor on a stylized end's farthest edge point too
+  // (strand.py _end_anchor); the full arrow's head stays on the endpoint.
+  if (s.start_arrow_visible === true) {
+    const a = tangentAngle(cl, 0);
+    endArrow(esEndAnchor(s, 0, s.start, a + Math.PI, P, enableThird, S, cl), a, -1);
+  }
+  if (s.end_arrow_visible === true) {
+    const a = tangentAngle(cl, len);
+    endArrow(esEndAnchor(s, 1, s.end, a, P, enableThird, S, cl), a, 1);
+  }
 
   if (s.full_arrow_visible === true) {
     const alpha = Math.max(0, Math.min(100, s.arrow_transparency != null ? s.arrow_transparency : 100)) / 100;
@@ -1557,13 +2124,45 @@ function drawStrand(s, strands, P, enableThird, S) {
 
   const caps = collectCaps(s, strands, centerline, P, S);
   const sideLines = collectSideLines(s, centerline, P, S);
+
+  // Stylized free ends (OSS 1.111 strand.py draw + _paint_body_paths): the
+  // bodies are the uncut extended bands plus the cap pieces, painted with the
+  // painter clipped to everything but the cut polygons; the side line of a
+  // styled end is its band, clipped to the uncut body.
+  const geometry = esGeometry(s, P, enableThird, S, centerline);
   centerline.remove();
+  if (geometry) {
+    band.remove();
+    inner.remove();
+    const strokePath = windingFillLayer(geometry.bodyPieces(caps.stroke), toColor(s.stroke_color));
+    const fillPath = windingFillLayer(geometry.fillPieces(caps.fill), toColor(s.color));
+    const bounds = (strokePath || fillPath).bounds;
+    const layers = [];
+    if (strokePath) layers.push(new paper.Group({ children: [geometry.keepOuterClip(bounds), strokePath], clipped: true }));
+    if (fillPath) layers.push(new paper.Group({ children: [geometry.keepInnerClip(bounds), fillPath], clipped: true }));
+    layers.push(...sideLines);
+    for (const side of [0, 1]) {
+      if (!geometry.isStyled(side)) continue;
+      const visible = side === 0 ? s.start_line_visible !== false : s.end_line_visible !== false;
+      if (!visible) continue;
+      const bandPath = geometry.band(side);
+      if (!bandPath) continue;
+      const style = geometry.ends[side].style;
+      bandPath.fillColor = toColor(style.line_color || s.stroke_color);
+      bandPath.strokeColor = null;
+      // The band is a plain strip; the (uncut) body clips it.
+      const clip = windingFillLayer(geometry.bodyPieces(), 'black');
+      if (!clip) { bandPath.remove(); continue; }
+      layers.push(new paper.Group({ children: [clip, bandPath], clipped: true }));
+    }
+    new paper.Group(layers.filter(Boolean));
+  } else {
+    const strokePath = windingFillLayer([band, ...caps.stroke], toColor(s.stroke_color));
+    const fillPath = windingFillLayer([inner, ...caps.fill], toColor(s.color));
 
-  const strokePath = windingFillLayer([band, ...caps.stroke], toColor(s.stroke_color));
-  const fillPath = windingFillLayer([inner, ...caps.fill], toColor(s.color));
-
-  // Paint stroke layer, then fill layer, then side bars (top), in order.
-  new paper.Group([strokePath, fillPath, ...sideLines].filter(Boolean));
+    // Paint stroke layer, then fill layer, then side bars (top), in order.
+    new paper.Group([strokePath, fillPath, ...sideLines].filter(Boolean));
+  }
 
   // Extension rays sit above the body and BELOW the arrows, matching OSS's
   // in-draw order (:2779 extensions, then :2818 arrow heads).
@@ -1596,7 +2195,10 @@ function deletionPath(rect, P, ss) {
 // (radius widthW/2). Mirrors masked_strand.py get_*_path_for_strand for the
 // circular case (elliptical caps are not exercised by the corpus).
 function maskComponentPath(s, P, enableThird, S, widthW) {
-  let path = bodyOutline(s, P, enableThird, widthW * S);
+  // A component with a stylized free end contributes its styled footprint at
+  // this width (masked_strand.py _styled_footprint), so the mask follows a
+  // trimmed, angled or extended end.
+  let path = strandFootprintAtWidth(s, P, enableThird, S, widthW);
   if (!path) return null;
   if (
     s.type === 'AttachedStrand' &&
@@ -1805,8 +2407,8 @@ function defaultSubtracted(s, o, byLayer) {
 // faded loop. No separate unclipped solid-core pass for masks (unlike strands);
 // only the clipped faded strokes plus a clipped inner-core fill.
 function drawMaskShadow(ms, first, second, fw, fsw, sw, ssw, P, enableThird, S) {
-  const firstPath = bodyOutline(first, P, enableThird, (fw + 2 * fsw) * S);
-  const secondPath = bodyOutline(second, P, enableThird, (sw + 2 * ssw) * S);
+  const firstPath = strandFootprintAtWidth(first, P, enableThird, S, fw + 2 * fsw);
+  const secondPath = strandFootprintAtWidth(second, P, enableThird, S, sw + 2 * ssw);
   if (!firstPath || !secondPath) {
     firstPath && firstPath.remove();
     secondPath && secondPath.remove();
@@ -1830,7 +2432,7 @@ function drawMaskShadow(ms, first, second, fw, fsw, sw, ssw, P, enableThird, S) 
   }
   // inner-core = stroke(first centerline, fw+2fsw) ∩ second_path, filled SOLID at
   // full alpha 150. (Same stroke width as firstPath here, so == firstPath ∩ second.)
-  const innerStroke = bodyOutline(first, P, enableThird, (fw + 2 * fsw) * S);
+  const innerStroke = strandFootprintAtWidth(first, P, enableThird, S, fw + 2 * fsw);
   if (innerStroke) {
     let core = innerStroke.intersect(secondPath);
     core = subtractDeletions(core, ms, P, S);
@@ -2033,7 +2635,12 @@ function compositeTo(vis, hi, W, H, ss, meta) {
 }
 
 // Render `strands` (flat array) using `meta` into the canvas #c.
-window.renderFixture = function (strands, meta) {
+// `target` (optional, LIVE EDITOR ONLY) composites the frame into that canvas
+// instead of #c and retains nothing: the Stylize End Side dialog paints its
+// preview picture and shape icons through the very same code the canvas uses
+// (end_style_dialog.py _paint_preview / _shape_icon), without disturbing the
+// scene the last on-screen render left behind. The offline oracle never passes it.
+window.renderFixture = function (strands, meta, target) {
   CURVE = meta.curve_params || CURVE_DEFAULT;
   SAMPLE_STEP = 1; // full-accuracy sampling for the oracle / pointer-up render
   const W = meta.image_width, H = meta.image_height;
@@ -2053,8 +2660,9 @@ window.renderFixture = function (strands, meta) {
   const ox = meta.x_offset, oy = meta.y_offset;
 
   // A render replaces whatever scene was retained (see PAN_SCENE): each one owns a
-  // paper project and an offscreen canvas, and exactly one is ever live.
-  dropScene();
+  // paper project and an offscreen canvas, and exactly one is ever live. A
+  // preview render into `target` leaves the retained scene alone.
+  if (!target) dropScene();
 
   const hi = document.createElement('canvas');
   // Opt out of paper.js's automatic devicePixelRatio scaling: this renderer does
@@ -2197,6 +2805,15 @@ window.renderFixture = function (strands, meta) {
   geomCacheEnd();
 
   paper.view.update();
+  if (target) {
+    compositeTo(target, hi, W, H, ss, meta);
+    // A preview owns nothing past this frame: free its project and hand the
+    // active slot back to the retained on-screen scene (if any).
+    const previewProject = paper.project;
+    try { previewProject.remove(); } catch { /* already gone */ }
+    if (PAN_SCENE) { try { PAN_SCENE.project.activate(); } catch { /* torn down */ } }
+    return;
+  }
   compositeTo(document.getElementById('c'), hi, W, H, ss, meta);
 
   // RETAIN this render's project as the live scene. renderFixture used to remove

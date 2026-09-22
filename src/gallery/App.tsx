@@ -14,7 +14,7 @@ import type { Theme, Language } from '../model/types';
 // once the frame has settled.
 
 const THEMES: Theme[] = ['default', 'light', 'dark'];
-const LANGS: Language[] = ['en', 'fr', 'de', 'it', 'es', 'pt', 'he'];
+const LANGS: Language[] = ['en', 'fr', 'de', 'it', 'es', 'pt', 'he', 'ru', 'fi', 'sv', 'ja', 'zh'];
 
 function params() {
   const q = new URLSearchParams(location.search);

@@ -6,9 +6,12 @@ import type { Language } from '../../model/types';
 const BASE = import.meta.env.BASE_URL; // ends with '/'
 const root = `${BASE}settings`;
 
-// Flag image per language. OSS gotcha: English uses the US flag, Hebrew the IL flag.
+// Flag image per language. OSS gotcha: English uses the US flag, Hebrew the IL
+// flag, and the 1.111 languages use country files too (Swedish se, Japanese jp,
+// Chinese cn — settings_dialog.py add_lang_item_*).
 const FLAG_FILE: Record<Language, string> = {
   en: 'us', fr: 'fr', de: 'de', it: 'it', es: 'es', pt: 'pt', he: 'il',
+  ru: 'ru', fi: 'fi', sv: 'se', ja: 'jp', zh: 'cn',
 };
 export const flagUrl = (lang: Language): string => `${root}/flags/${FLAG_FILE[lang]}.png`;
 

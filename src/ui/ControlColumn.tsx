@@ -64,9 +64,9 @@ export function ControlColumn() {
   // What undo would reverse, and what redo would replay — recorded when each
   // state was made (store/historyMeta.ts). Appended to the tooltip so the
   // buttons say what they are about to do, not just that they exist.
-  const undoWhat = useEditorStore((s) => historyShortLabel(s.presentMeta));
+  const undoWhat = useEditorStore((s) => historyShortLabel(s.presentMeta, s.settings.language));
   const redoWhat = useEditorStore((s) => historyShortLabel(
-    s.future.length ? s.future[s.future.length - 1].meta : null,
+    s.future.length ? s.future[s.future.length - 1].meta : null, s.settings.language,
   ));
   const undo = useEditorStore((s) => s.undo);
   const redo = useEditorStore((s) => s.redo);

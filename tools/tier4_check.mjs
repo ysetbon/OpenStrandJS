@@ -231,15 +231,31 @@ const mkDoc = (strands) => ({
       missing.length === 0, `${missing.length} missing: ${missing.slice(0, 8).join(', ')}`);
   }
 
-  // Each entry must carry all seven languages, or `t()` silently falls back to
-  // English for the missing ones and the gap never surfaces.
-  const LANGS = ['en', 'fr', 'de', 'it', 'es', 'pt', 'he'];
+  // Each entry must carry all twelve languages (the seven originals plus the
+  // five OSS 1.111 added), or `t()` silently falls back to English for the
+  // missing ones and the gap never surfaces.
+  const LANGS = ['en', 'fr', 'de', 'it', 'es', 'pt', 'he', 'ru', 'fi', 'sv', 'ja', 'zh'];
+  // Records are read as blocks, from the `  key: {` line to the line that
+  // closes the record with `},`: the long HTML / help strings are multiline
+  // template literals (tools/sync_translations.py emits them that way), and a
+  // single-line matcher would skip exactly those entries.
   const short = [];
-  for (const m of ts.matchAll(/^  ([A-Za-z0-9_]+): \{(.*)\},$/gm)) {
-    const absent = LANGS.filter((l) => !new RegExp(`\\b${l}:\\s`).test(m[2]));
-    if (absent.length) short.push(`${m[1]}(no ${absent.join('/')})`);
+  const lines = ts.split('\n');
+  let entries = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const head = /^  ([A-Za-z0-9_]+): \{ /.exec(lines[i]);
+    if (!head) continue;
+    let j = i;
+    while (j < lines.length && !lines[j].trimEnd().endsWith('},')) j++;
+    const block = lines.slice(i, j + 1).join('\n');
+    entries++;
+    // A top-level `lang: <quote>` token (after `{ ` / `, `), never prose inside a value.
+    const absent = LANGS.filter((l) => !new RegExp(`(?:\\{ |, )${l}: ['\"\`]`).test(block));
+    if (absent.length) short.push(`${head[1]}(no ${absent.join('/')})`);
+    i = j;
   }
-  ok('and every entry carries all seven languages',
+  ok('the block reader saw every entry the key scan saw', entries === jsKeys.size, `${entries} vs ${jsKeys.size}`);
+  ok('and every entry carries all twelve languages',
     short.length === 0, short.slice(0, 6).join(', '));
 }
 

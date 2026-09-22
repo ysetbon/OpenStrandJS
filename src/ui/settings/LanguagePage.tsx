@@ -7,7 +7,8 @@ import type { PageProps } from './types';
 
 // Change Language page (settings_dialog.py index 3). A flag combobox (en→us.png,
 // he→il.png) + an info label. Selecting applies live (App.tsx flips <html dir> for
-// Hebrew). Order is fixed: en, fr, de, it, es, pt, he.
+// Hebrew). Order is the desktop dropdown's (settings_dialog.py:2868-2879): the
+// seven original languages, then the five OSS 1.111 added.
 const LANGS: ReadonlyArray<{ code: Language; nameKey: string }> = [
   { code: 'en', nameKey: 'english' },
   { code: 'fr', nameKey: 'french' },
@@ -16,6 +17,11 @@ const LANGS: ReadonlyArray<{ code: Language; nameKey: string }> = [
   { code: 'es', nameKey: 'spanish' },
   { code: 'pt', nameKey: 'portuguese' },
   { code: 'he', nameKey: 'hebrew' },
+  { code: 'ru', nameKey: 'russian' },
+  { code: 'fi', nameKey: 'finnish' },
+  { code: 'sv', nameKey: 'swedish' },
+  { code: 'ja', nameKey: 'japanese' },
+  { code: 'zh', nameKey: 'chinese' },
 ];
 
 export function LanguagePage({ lang }: PageProps) {
@@ -27,7 +33,9 @@ export function LanguagePage({ lang }: PageProps) {
     <img
       src={flagUrl(code)}
       alt={code}
-      style={{ height: 28, width: 'auto', border: '1px solid var(--set-list-border)', borderRadius: 2, verticalAlign: 'middle' }}
+      // OSS 1.111 draws the flag with transparent padding and no outline
+      // (settings_dialog.py create_flag_icon, 25c82c6).
+      style={{ height: 28, width: 'auto', padding: 2, verticalAlign: 'middle' }}
     />
   );
 
@@ -49,7 +57,10 @@ export function LanguagePage({ lang }: PageProps) {
         {open && (
           <ul
             className="set-nav"
-            style={{ position: 'absolute', top: 'calc(100% + 4px)', insetInlineStart: 0, zIndex: 5, maxHeight: '60vh' }}
+            // Twelve entries no longer fit under the combobox inside the settings
+            // page, so the list scrolls within the room it has (a QComboBox popup
+            // would spill past the dialog; the page area cannot).
+            style={{ position: 'absolute', top: 'calc(100% + 4px)', insetInlineStart: 0, zIndex: 5, maxHeight: 'min(60vh, 330px)', overflowY: 'auto' }}
           >
             {LANGS.map((l) => (
               <li

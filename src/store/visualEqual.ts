@@ -7,6 +7,7 @@
 
 import type { DeletionRect, EditorDocument, Point, RGBA, StrandRecord } from '../model/types';
 import { BIAS_EPS, readBias } from '../model/biasControl';
+import { endStylesEqual } from '../model/endStyle';
 
 const approx = (x: number, y: number) => Math.abs(x - y) < 0.1;
 
@@ -53,6 +54,13 @@ export function strandVisualEqual(a: StrandRecord, b: StrandRecord): boolean {
   if (a.has_circles[0] !== b.has_circles[0] || a.has_circles[1] !== b.has_circles[1]) return false;
   if (!!a.is_hidden !== !!b.is_hidden || !!a.shadow_only !== !!b.shadow_only) return false;
   if (!!a.hide_shadow !== !!b.hide_shadow) return false;
+  // 1.111 stylized end sides (undo_redo_manager.py compares serialize_end_styles).
+  const sa = a.end_styles ?? [null, null], sb = b.end_styles ?? [null, null];
+  if (!endStylesEqual(sa[0], sb[0]) || !endStylesEqual(sa[1], sb[1])) return false;
+  // The side-line flags gate what the styled band (and the classic bar) draws.
+  for (const k of ['start_line_visible', 'end_line_visible'] as const) {
+    if ((exa[k] !== false) !== (exb[k] !== false)) return false;
+  }
   // Arrow flags/customization live in `extra` but are rendered (1.109 §7), so
   // arrow-only edits must create an undo step.
   const ea = a.extra ?? {}, eb = b.extra ?? {};

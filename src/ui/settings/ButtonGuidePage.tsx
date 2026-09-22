@@ -60,10 +60,13 @@ export function ButtonGuidePage({ lang }: PageProps) {
     </li>
   );
 
-  // The 14 shared context-menu entries (identical for main + attached strands).
-  const sharedCtx: ReactNode[] = [
+  // The shared context-menu entries (identical for main + attached strands,
+  // apart from the Stylize End Side wording — a main strand may style Start
+  // and/or End, an attached strand its End only, settings_dialog.py 1.111).
+  const sharedCtx = (stylizeDescKey: string): ReactNode[] => [
     ctxLi(['hide_layer', 'show_layer'], 'ctx_hide_show_desc'),
     ctxLi(['shadow_only'], 'ctx_shadow_only_desc'),
+    ctxLi(['hide_shadow'], 'ctx_hide_shadow_desc'),
     ctxLi(['edit_shadows'], 'ctx_edit_shadows_desc'),
     ctxLi(['change_color'], 'ctx_change_color_desc'),
     ctxLi(['change_stroke_color'], 'ctx_change_stroke_color_desc'),
@@ -74,6 +77,7 @@ export function ButtonGuidePage({ lang }: PageProps) {
     ctxLi(['arrow'], 'ctx_arrow_desc'),
     ctxLi(['show_full_arrow'], 'ctx_full_arrow_desc'),
     ctxLi(['close_the_knot'], 'ctx_close_knot_desc'),
+    ctxLi(['stylize_end_side'], stylizeDescKey),
     ctxLi(['transparent_closing_knot_side'], 'ctx_closing_knot_desc'),
     ctxLi(['extension'], 'ctx_dash_desc'),
     ctxLi(['circle'], 'ctx_circle_desc'),
@@ -177,15 +181,16 @@ export function ButtonGuidePage({ lang }: PageProps) {
         <p>{t('layer_context_menu_info', lang)}</p>
 
         <h3 style={headStyle}>{t('main_strand_menu_title', lang)}</h3>
-        <ul>{sharedCtx}</ul>
+        <ul>{sharedCtx('ctx_stylize_end_side_desc')}</ul>
 
         <h3 style={headStyle}>{t('attached_strand_menu_title', lang)}</h3>
-        <ul>{sharedCtx}</ul>
+        <ul>{sharedCtx('ctx_stylize_end_side_attached_desc')}</ul>
 
         <h3 style={headStyle}>{t('mask_strand_menu_title', lang)}</h3>
         <ul>
           {ctxLi(['hide_layer', 'show_layer'], 'ctx_hide_show_desc')}
           {ctxLi(['shadow_only'], 'ctx_shadow_only_desc')}
+          {ctxLi(['hide_shadow'], 'ctx_hide_shadow_desc')}
           {ctxLi(['edit_shadows'], 'ctx_edit_shadows_desc')}
           {ctxLi(['edit_mask'], 'ctx_edit_mask_desc')}
           {ctxLi(['reset_mask'], 'ctx_reset_mask_desc')}

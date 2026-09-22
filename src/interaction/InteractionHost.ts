@@ -10,7 +10,11 @@
 //   * the hand tool shows the open hand (toggle_pan_mode -> OpenHandCursor);
 //   * any pan DRAG shows the closed hand for its duration (mousePressEvent ->
 //     ClosedHandCursor) and the cursor it interrupted comes back on release
-//     (_pre_right_pan_cursor restored in mouseReleaseEvent).
+//     (_pre_right_pan_cursor restored in mouseReleaseEvent);
+//   * in View mode the LEFT button pans too (1.111 strand_drawing_canvas.py
+//     view_mode_panning: "the primary mouse button pans just like right-click");
+//   * Move mode shows the closed hand while it holds a strand point (1.111
+//     move_mode.py _set_active_drag_cursor) and the open hand again on release.
 // OSS never changes the cursor on hover — a handle under the pointer highlights
 // in the overlay, the cursor stays the mode's — so neither do we.
 
@@ -21,6 +25,7 @@ import {
 } from '../renderer/renderScheduler';
 import { modes } from '../modes';
 import { SelectMode } from '../modes/SelectMode';
+import { moveHolding } from '../modes/MoveMode';
 import { addDeletionRect } from '../store/actions';
 import type { Mode, ModeContext, PointerInfo } from '../modes/Mode';
 import type { Point } from '../model/types';
@@ -63,7 +68,7 @@ export class InteractionHost {
         // ended (enter/exit_mask_edit_mode), or a doc change removed the mask
         // being edited.
         if (state.panMode !== prev.panMode || state.maskEditTarget !== prev.maskEditTarget
-            || state.doc !== prev.doc) this.syncCursor();
+            || state.doc !== prev.doc || state.dragging !== prev.dragging) this.syncCursor();
         return;
       }
       this.cancelPendingMove();   // the queued move belongs to the outgoing mode
@@ -98,7 +103,13 @@ export class InteractionHost {
   cursorFor(): string {
     if (this.panning) return 'grabbing';
     if (this.editTarget()) return 'crosshair';
-    if (useEditorStore.getState().panMode) return 'grab';
+    const st = useEditorStore.getState();
+    if (st.panMode) return 'grab';
+    // OSS 1.111 move_mode.py: the closed hand for as long as Move mode has
+    // grabbed a movable point (start_movement -> ClosedHandCursor; the idle
+    // open hand comes back in mouseReleaseEvent / cancel_movement). Gated on
+    // the mode's own hold: the group dialogs raise store.dragging too.
+    if (st.mode === 'move' && st.dragging && moveHolding()) return 'grabbing';
     return this.mode().cursor;
   }
 
@@ -196,7 +207,10 @@ export class InteractionHost {
       st.setPanMode(false);
       return;
     }
-    const isPan = e.button === 1 || e.button === 2 || (e.button === 0 && (this.spaceHeld || panTool));
+    // View mode is look-only, so its left button pans like the right one (OSS
+    // 1.111 strand_drawing_canvas.py mousePressEvent, view_mode_panning).
+    const viewPan = e.button === 0 && st.mode === 'view';
+    const isPan = e.button === 1 || e.button === 2 || (e.button === 0 && (this.spaceHeld || panTool || viewPan));
     if (isPan) {
       const view = st.view;
       this.panning = true;

@@ -470,13 +470,26 @@ function polysPath(polys: Point[][], view: ViewState): Path2D {
 
 function drawSelectionOverlay(
   ctx: CanvasRenderingContext2D, st: OverlayState, fillPath: Path2D, outlinePath: Path2D,
-  fill: string, border: string, borderW: number,
+  fill: string, border: string, borderW: number, removedPath: Path2D | null = null,
 ): void {
   const z = st.view.zoom;
+  // A stylized free end (1.111) cuts pieces out of the flat-capped body. The
+  // footprint is then `fill` minus `removed`: the fill is painted under a clip
+  // of everything but the cuts, and the ring's erase of the footprint runs
+  // under the same clip, so the half of the border stroke that lies outward
+  // of the profile (inside a cut polygon) survives — the silhouette the ring
+  // strokes already follows the profile (selectionFootprint.strandFootprint).
+  const keep = new Path2D();
+  if (removedPath) {
+    keep.rect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    keep.addPath(removedPath);
+  }
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (removedPath) ctx.clip(keep, 'evenodd');
   ctx.fillStyle = fill;
   ctx.fill(fillPath, 'nonzero');
+  ctx.restore();
   const ring = borderW > 0 ? ringLayer(ctx.canvas.width, ctx.canvas.height) : null;
   if (ring) {
     ring.lineWidth = borderW * 2 * z;
@@ -485,13 +498,17 @@ function drawSelectionOverlay(
     ring.lineCap = 'butt';
     ring.strokeStyle = border;
     ring.stroke(outlinePath);
+    ring.save();
+    if (removedPath) ring.clip(keep, 'evenodd');
     ring.globalCompositeOperation = 'destination-out';
     ring.fillStyle = '#000';
     ring.fill(fillPath, 'nonzero');
-    ring.globalCompositeOperation = 'source-over';
+    ring.restore();
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(ringCanvas as HTMLCanvasElement, 0, 0);
+    ctx.restore();
   }
-  ctx.restore();
 }
 
 // Highlight one layer's footprint: a regular/attached strand's polygons, or a
@@ -513,7 +530,8 @@ function footprintHighlight(
   }
   const fp = strandFootprint(s, st.doc, st.settings);
   if (!fp.fill.length) return;
-  drawSelectionOverlay(ctx, st, polysPath(fp.fill, st.view), polysPath(fp.outline, st.view), fill, border, borderW);
+  drawSelectionOverlay(ctx, st, polysPath(fp.fill, st.view), polysPath(fp.outline, st.view), fill, border, borderW,
+    fp.removed.length ? polysPath(fp.removed, st.view) : null);
 }
 
 // OSS hover border: QColor(Qt.black), border_width=2 (select_mode.py:128,

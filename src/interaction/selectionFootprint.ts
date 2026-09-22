@@ -34,10 +34,16 @@
 
 import type { EditorDocument, Point, RGBA, Settings, StrandRecord } from '../model/types';
 import { endTangentAngles, geometryParams, sampleCenterline } from './hitGeometry';
+import { normalizeEndStyle } from '../model/endStyle';
+import { styledEndPolys } from './endStyleFootprint';
 
 export interface Footprint {
   fill: Point[][];      // union under the nonzero rule (all positively wound)
   outline: Point[][];   // silhouette sources for the border ring
+  // OSS 1.111 stylized free ends: what the end's profile CUTS from the flat-
+  // capped body (end_style.py _behind_polygons). A point inside any of these is
+  // outside the footprint, whatever `fill` says. Empty for unstyled strands.
+  removed: Point[][];
   bbox: { minX: number; minY: number; maxX: number; maxY: number };
 }
 
@@ -145,13 +151,13 @@ function pointInPoly(p: Point, poly: Point[]): boolean {
 // itself still fills completely (a single self-intersecting band polygon would
 // cancel to holes under nonzero). The outline is the single mitred band
 // boundary the ring is stroked from.
-function bandPieces(poly: Point[], half: number): { fill: Point[][]; outline: Point[] } {
+function bandPieces(poly: Point[], half: number): { fill: Point[][]; left: Point[]; right: Point[] } {
   const pts: Point[] = [];
   for (const p of poly) {
     const last = pts[pts.length - 1];
     if (!last || Math.hypot(p.x - last.x, p.y - last.y) > 1e-9) pts.push(p);
   }
-  if (pts.length < 2 || half <= 0) return { fill: [], outline: [] };
+  if (pts.length < 2 || half <= 0) return { fill: [], left: [], right: [] };
   const n = pts.length;
   const normals: Point[] = [];
   for (let i = 0; i + 1 < n; i++) {
@@ -191,7 +197,7 @@ function bandPieces(poly: Point[], half: number): { fill: Point[][]; outline: Po
       fill.push(positive([p, { x: p.x - nPrev.x * half, y: p.y - nPrev.y * half }, R, { x: p.x - nNext.x * half, y: p.y - nNext.y * half }]));
     }
   }
-  return { fill, outline: left.concat(right.reverse()) };
+  return { fill, left, right };
 }
 
 // ---- end decorations (get_end_decoration_path) ----------------------------------
@@ -237,19 +243,69 @@ export function strandFootprint(s: StrandRecord, doc: EditorDocument, settings: 
   const half = (s.width + 2 * s.stroke_width) / 2;
   const band = bandPieces(centre, half);
   const fill = band.fill.slice();
-  const outline: Point[][] = band.outline.length ? [band.outline] : [];
+  // The silhouette: the mitred band boundary, left edge out and right edge
+  // back. A styled end replaces the flat cap between the two edges with its
+  // profile (the edges run straight on to where the profile meets them), so
+  // the border ring follows the cut instead of the endpoint plane.
+  const left = band.left.slice(), right = band.right.slice();
+  const capStart: Point[] = [], capEnd: Point[] = [];
+  const outline: Point[][] = [];
   const hc = effectiveHasCircles(s, doc);
   const [aStart, aEnd] = endTangentAngles(s, curve);
+  const removed: Point[][] = [];
   for (const side of [0, 1] as const) {
+    // A stylized free end (1.111 strand.py get_body_selection_path): the
+    // profile's cap pieces join the footprint, its cuts leave it, and the
+    // side line is the band inside the footprint rather than a bar outside it.
+    // The style is active only on a FREE end — never an attached start, never
+    // under a circle (strand.py _end_style_active).
+    const style = normalizeEndStyle(s.end_styles?.[side]);
+    const styled = !!style && !hc[side] && !(side === 0 && s.type === 'AttachedStrand');
+    if (styled && style) {
+      const angle = side === 0 ? aStart + Math.PI : aEnd;
+      const polys = styledEndPolys(s, side, style, lineVisible(s, side), angle);
+      for (const poly of polys.added) fill.push(positive(poly));
+      for (const poly of polys.removed) removed.push(positive(poly));
+      // The silhouette walks the left edge out, crosses the end cap left ->
+      // right, walks the right edge back and crosses the start cap right ->
+      // left. In the end's local frame +y is the LEFT normal (the outward +x
+      // is the tangent), so its profile (y: -half -> +half) runs right -> left
+      // and is reversed; in the start's frame (+x flipped) +y is the RIGHT
+      // normal, so its profile runs left -> right and is reversed as well.
+      // Each edge is cut back to where the profile meets it (a trimmed or
+      // angled end gives up the vertices beyond the cut; an extended end keeps
+      // them all and the profile carries the edge on), measured along the
+      // end's outward tangent.
+      const ux = Math.cos(angle), uy = Math.sin(angle);
+      const pt = side === 0 ? s.start : s.end;
+      const along = (p: Point) => (p.x - pt.x) * ux + (p.y - pt.y) * uy;
+      const prof = polys.profile;
+      const leftEnd = side === 1 ? prof[prof.length - 1] : prof[0];
+      const rightEnd = side === 1 ? prof[0] : prof[prof.length - 1];
+      const cutBack = (edge: Point[], limit: Point) => {
+        const lim = along(limit) - 1e-6;
+        if (side === 1) { while (edge.length && along(edge[edge.length - 1]) > lim) edge.pop(); }
+        else { while (edge.length && along(edge[0]) > lim) edge.shift(); }
+      };
+      cutBack(left, leftEnd);
+      cutBack(right, rightEnd);
+      const cap = prof.slice().reverse();
+      if (side === 1) capEnd.push(...cap); else capStart.push(...cap);
+      continue;
+    }
     const deco = endDecoration(s, side, doc, hc, side === 0 ? aStart : aEnd);
     if (deco) { const p = positive(deco); fill.push(p); outline.push(p); }
+  }
+  if (left.length || capStart.length || capEnd.length) {
+    // right edge walked back, then the start cap closes onto the left edge
+    outline.unshift(left.concat(capEnd, right.reverse(), capStart));
   }
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const poly of fill) for (const p of poly) {
     if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y;
     if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y;
   }
-  return { fill, outline, bbox: { minX, minY, maxX, maxY } };
+  return { fill, outline, removed, bbox: { minX, minY, maxX, maxY } };
 }
 
 // A click is a pixel, not a point (selection_utils._HIT_TOLERANCE = 0.5, nine
@@ -263,6 +319,7 @@ export function footprintContains(fp: Footprint, p: Point): boolean {
   if (p.x < b.minX - 0.5 || p.x > b.maxX + 0.5 || p.y < b.minY - 0.5 || p.y > b.maxY + 0.5) return false;
   for (const [dx, dy] of HIT_SAMPLE_OFFSETS) {
     const q = { x: p.x + dx, y: p.y + dy };
+    if (fp.removed.some((poly) => pointInPoly(q, poly))) continue;
     for (const poly of fp.fill) if (pointInPoly(q, poly)) return true;
   }
   return false;

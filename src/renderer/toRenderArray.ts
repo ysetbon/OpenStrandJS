@@ -85,6 +85,9 @@ export function toRenderArray(
       arrow_texture: ex.arrow_texture as RenderStrand['arrow_texture'],
       arrow_shaft_style: ex.arrow_shaft_style as RenderStrand['arrow_shaft_style'],
       arrow_casts_shadow: ex.arrow_casts_shadow as boolean | undefined,
+      // 1.111 stylized free ends: the renderer builds the styled footprint from
+      // these (end_style.py). [null, null] is the classic look.
+      end_styles: s.end_styles,
     };
     if (s.type === 'MaskedStrand') r.deletion_rectangles = s.deletion_rectangles ?? [];
     out.push(r);

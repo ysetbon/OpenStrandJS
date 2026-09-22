@@ -12,6 +12,7 @@
 // snapshots (ui/settings/history.ts), and is read back by the undo/redo tooltips
 // and the History settings page.
 import type { ModeName } from '../model/types';
+import { ACTION_TRANSLATIONS } from './historyTranslations';
 
 // Which part of the app produced a state. Modes are the canvas tools; the rest
 // are the non-mode surfaces that also mutate the document.
@@ -85,6 +86,7 @@ export const ACTIONS: Record<string, string> = {
   'strand.close_knot': 'Closed a knot',
   'strand.paste': 'Pasted strand data',
   'strand.width': 'Changed strand width',
+  'strand.end_style': 'Stylized an end side',
   'strand.properties': 'Edited strand properties',
   'strand.shadow': 'Edited strand shadow',
 
@@ -134,9 +136,27 @@ export function historyLabel(meta: HistoryMeta | null): string {
   return `${parts.join(' — ')}  ·  ${where}`;
 }
 
-// Short form for a button tooltip: no source suffix.
-export function historyShortLabel(meta: HistoryMeta | null): string {
+// Short form for a button tooltip: no source suffix. Since OSS 1.111 the
+// action name is translated (undo_redo_metadata.short_label + the
+// undo_redo_translations table): a move names the endpoint / control point it
+// moved, and Hebrew isolates each layer name so its digits and underscores keep
+// their order inside the RTL sentence.
+export function historyShortLabel(meta: HistoryMeta | null, lang = 'en'): string {
   if (!meta) return '';
-  const head = ACTIONS[meta.action] ?? prettify(meta.action);
-  return meta.targets.length ? `${head} (${meta.targets.join(', ')})` : head;
+  let action = meta.action;
+  let head = ACTIONS[action] ?? prettify(action);
+  if (action === 'move.handle') {
+    // OSS ids: move.strand with detail 'endpoint' / 'control point'. Here the
+    // detail is the handle kind that was grabbed.
+    const d = meta.detail;
+    action = d === 'start' || d === 'end' ? 'move.endpoint'
+      : d === 'control_point1' || d === 'control_point2' || d === 'control_point_center' ? 'move.control_point'
+        : 'move.strand';   // a curvature-bias square keeps the generic "Moved a point"
+    if (action === 'move.endpoint') head = 'Moved an endpoint';
+    else if (action === 'move.control_point') head = 'Moved a control point';
+  }
+  head = ACTION_TRANSLATIONS[lang]?.[action] ?? head;
+  let targets = meta.targets;
+  if (lang === 'he') targets = targets.map((tg) => `\u2068${tg}\u2069`);
+  return targets.length ? `${head} (${targets.join(', ')})` : head;
 }

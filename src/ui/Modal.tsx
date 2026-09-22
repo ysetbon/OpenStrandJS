@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { Language } from '../model/types';
 import { isRTL } from './i18n';
 import './dialogs.css';
@@ -52,6 +52,35 @@ export function Modal(props: {
     };
   }, [token]);
 
+  // Keyboard focus, as a QDialog handles it: focus moves into the dialog when
+  // it opens (a control with autoFocus takes it during React's commit; else
+  // the first control in the body, else the first focusable at all), a MODAL
+  // dialog keeps Tab cycling within it (below), and the control that opened
+  // the dialog gets focus back when it closes. A modeless dialog (shadow
+  // editor, mask grid) leaves the rest of the window reachable, as OSS's do.
+  const modalRef = useRef<HTMLDivElement>(null);
+  const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  const focusables = (root: HTMLElement | null = modalRef.current): HTMLElement[] => Array.from(
+    root?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [],
+  ).filter((el) => el.offsetParent !== null || el === document.activeElement);
+  // The element to hand focus back to, read during the FIRST RENDER: a child
+  // marked autoFocus takes focus in React's commit, before any effect runs, so
+  // an effect would record the dialog's own control as the opener.
+  const [opener] = useState<HTMLElement | null>(
+    () => (typeof document === 'undefined' ? null : document.activeElement as HTMLElement | null),
+  );
+  useEffect(() => {
+    const box = modalRef.current;
+    if (box && !box.contains(document.activeElement)) {
+      const first = focusables(box.querySelector<HTMLElement>('.modal-body'))[0] ?? focusables()[0];
+      first?.focus();
+    }
+    return () => {
+      if (opener && typeof opener.focus === 'function' && document.contains(opener)) opener.focus();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // Only the topmost dialog owns the keyboard.
@@ -72,16 +101,28 @@ export function Modal(props: {
         e.stopPropagation();
         e.preventDefault();   // no synthetic click on a focused button on top of onEnter
         onEnter();
+        return;
+      }
+      // Tab never leaves a modal dialog: past the last control it wraps to
+      // the first, and Shift+Tab past the first wraps to the last.
+      if (e.key === 'Tab' && !modeless) {
+        const items = focusables();
+        if (!items.length) return;
+        const first = items[0], last = items[items.length - 1];
+        const active = document.activeElement as HTMLElement | null;
+        const inside = !!active && !!modalRef.current?.contains(active);
+        if (!inside) { e.preventDefault(); (e.shiftKey ? last : first).focus(); return; }
+        if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+        else if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
       }
     };
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
-  }, [onClose, onEnter, token]);
+  }, [onClose, onEnter, token, modeless]);
 
   // Title-bar drag. Every OSS dialog is a real window the user can pick up by its
   // title bar and park wherever it is not in the way of the canvas; the dialog is
   // moved with a transform so the centred flex layout of the backdrop is untouched.
-  const modalRef = useRef<HTMLDivElement>(null);
   const offset = useRef({ x: 0, y: 0 });
   const drag = useRef<{ id: number; sx: number; sy: number; ox: number; oy: number } | null>(null);
   const onTitleDown = (e: React.PointerEvent<HTMLDivElement>) => {
