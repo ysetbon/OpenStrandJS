@@ -58,7 +58,7 @@ const fixture = JSON.parse(readFileSync(path.join(root, 'fixtures/end_styles.jso
     });
     const meta = { image_width: 600, image_height: 200, x_offset: 0, y_offset: 0, supersample: 2, shadow_enabled: true,
       curve_params: { base_fraction: 1.0, dist_multiplier: 2.0, exponent: 2.0 } };
-    const render = (strands, probes) => page.evaluate(({ strands, meta, probes }) => {
+    const render = (strands, probes, m = meta) => page.evaluate(({ strands, meta, probes }) => {
       window.renderFixture(strands, meta);
       const c = document.getElementById('c');
       const ctx = c.getContext('2d');
@@ -66,7 +66,7 @@ const fixture = JSON.parse(readFileSync(path.join(root, 'fixtures/end_styles.jso
       let h = 0; const d = ctx.getImageData(0, 0, c.width, c.height).data;
       for (let i = 0; i < d.length; i += 7) h = (h * 31 + d[i]) >>> 0;
       return { px, hash: h };
-    }, { strands, meta, probes });
+    }, { strands, meta: m, probes });
     const isWhite = (p) => p[0] > 250 && p[1] > 250 && p[2] > 250;
     const isFill = (p) => Math.abs(p[0] - 200) < 12 && Math.abs(p[1] - 170) < 12 && Math.abs(p[2] - 230) < 12;
     const isBlack = (p) => p[0] < 40 && p[1] < 40 && p[2] < 40;
@@ -130,10 +130,35 @@ const fixture = JSON.parse(readFileSync(path.join(root, 'fixtures/end_styles.jso
     const dormantPlain = await render([s6plain], []);
     ok('renderer: a style on an end that carries a circle draws nothing (dormant)', dormant.hash === dormantPlain.hash);
 
-    // The whole fixture (shadows on, a crossing strand, a mask) renders without
-    // a page error and with every styled end present.
-    const all = await render(fixture.strands, [[520, 100]]);
-    ok('renderer: the styled fixture renders with shadows and its mask', typeof all.hash === 'number');
+    // The fixture's own styled ends, probed where their profiles put them. The
+    // horizontals sit at world (100..520, y = 100 + 110*i) and the meta offsets
+    // by 20; the crossing strand and its mask are left out of this render
+    // because they cover the ends.
+    //   2_1 (orange) angled, tilt 30: the cut runs from ~17 px past the endpoint
+    //       on one edge to ~9 px before it on the other, so at x = 525 one
+    //       corner is fill and the other is cut away;
+    //   5_1 (purple) notched, depth 0.6 of 54 = 32 px: the notch apex sits 28 px
+    //       INSIDE the endpoint (world ~492), so on the centreline x = 500 is
+    //       inside the blank wedge, while 18 px off the centreline the flank is
+    //       at ~513 with its 4 px band inside it, so (500, 522) is still fill.
+    const P = (x, y) => [x + 20, y + 20];
+    const fixtureMeta = { ...meta, image_width: 860, image_height: 900, x_offset: 20, y_offset: 20 };
+    const bare = fixture.strands.filter((s) => s.layer_name !== '7_1' && s.layer_name !== '7_1_3_1');
+    const ends = await render(bare, [P(525, 188), P(525, 232), P(500, 540), P(500, 522)], fixtureMeta);
+    const isOrange = (p) => Math.abs(p[0] - 255) < 12 && Math.abs(p[1] - 170) < 14 && Math.abs(p[2] - 127) < 14;
+    ok('renderer: the fixture\'s angled end is cut on exactly one corner',
+      isWhite(ends.px[0]) !== isWhite(ends.px[1]) && (isOrange(ends.px[0]) || isOrange(ends.px[1])), JSON.stringify([ends.px[0], ends.px[1]]));
+    ok('renderer: the fixture\'s notched end is blank at its apex and filled beside it',
+      isWhite(ends.px[2]) && isFill(ends.px[3]), JSON.stringify([ends.px[2], ends.px[3]]));
+    // The whole fixture (shadows on): the crossing strand paints over the styled
+    // ends and casts its shadow onto the strand beneath (1_1 at y = 100 turns
+    // from the pure strand colour into the shadowed one just left of the green
+    // body, whose edge is near x = 475).
+    const all = await render(fixture.strands, [P(465, 100), P(485, 100), P(520, 430)], fixtureMeta);
+    const isGreen = (p) => Math.abs(p[0] - 120) < 12 && Math.abs(p[1] - 200) < 12 && Math.abs(p[2] - 140) < 12;
+    ok('renderer: the crossing strand paints over the styled ends (and its mask draws)', isGreen(all.px[1]) && isGreen(all.px[2]), JSON.stringify([all.px[1], all.px[2]]));
+    ok('renderer: ...and casts its shadow onto the styled strand beneath',
+      !isWhite(all.px[0]) && !isFill(all.px[0]) && all.px[0][0] < 170, JSON.stringify(all.px[0]));
     ok('renderer: no page errors', errors.length === 0, errors.join(' | '));
   } finally {
     await browser.close();

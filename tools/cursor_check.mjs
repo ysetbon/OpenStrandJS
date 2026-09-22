@@ -252,6 +252,11 @@ try {
     await setMode('view');
     await page.mouse.move(cx, cy);
     const beforeView = await state();
+    const editState = () => page.evaluate(() => {
+      const s = window.__store.getState();
+      return { selection: JSON.stringify(s.selection), dragging: s.dragging, past: s.past.length, rev: s.docRevision };
+    });
+    const editBefore = await editState();
     await page.mouse.down();
     await settle();
     ok('view: left press shows the closed hand', (await cursor()) === 'grabbing', `got '${await cursor()}'`);
@@ -269,8 +274,12 @@ try {
     ok('view: ...with the pan button released', (await panIcon()) === 'pan_open.png' && !(await panChecked()),
       `icon=${await panIcon()} checked=${await panChecked()}`);
     const afterView = await state();
+    const editAfter = await editState();
     ok('view: nothing was selected or edited by the pan',
-      afterView.mode === 'view' && !afterView.panMode && !afterView.panning);
+      afterView.mode === 'view' && !afterView.panMode && !afterView.panning
+        && editAfter.selection === editBefore.selection && !editAfter.dragging
+        && editAfter.past === editBefore.past && editAfter.rev === editBefore.rev,
+      JSON.stringify({ editBefore, editAfter }));
   }
 
   ok('no page errors', errors.length === 0, errors.join(' | '));

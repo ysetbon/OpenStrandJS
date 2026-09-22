@@ -81,6 +81,11 @@ export function EndStyleDialog(props: { layerName: string; side: Side; onClose: 
   // controls cannot show (depth 0.333, tilt 12.5, a fractional stroke width)
   // must survive an open + OK untouched, and must not cost an undo step.
   const touched = useRef(false);
+  // Which FIELDS the user changed. A field the user never touched keeps the
+  // exact value it was loaded with (the controls show it rounded, but the
+  // record is written from the original), so editing the side line alone
+  // cannot turn a depth of 0.333 into 0.33.
+  const changed = useRef(new Set<'tilt' | 'depth' | 'offset' | 'line_width' | 'line_color'>());
   // Set by OK / Cancel so the unmount cleanup knows the gesture was closed.
   const settled = useRef(false);
 
@@ -105,14 +110,21 @@ export function EndStyleDialog(props: { layerName: string; side: Side; onClose: 
   }, []);
 
   // The record described by the controls (normalizeEndStyle may turn it null).
-  const currentStyle = (): EndStyle => ({
-    shape,
-    tilt,
-    depth: depth / 100,
-    offset,
-    line_width: Math.abs(thickness - initial.strokeWidth) < 1e-6 ? null : thickness,
-    line_color: useStrokeColor ? null : { ...pinnedColor },
-  });
+  const currentStyle = (): EndStyle => {
+    const c = changed.current;
+    const init = initial.style;
+    return {
+      shape,
+      // Straight is always square (normalizeEndStyle zeroes the tilt anyway).
+      tilt: c.has('tilt') || shape === 'straight' ? tilt : init.tilt,
+      depth: c.has('depth') ? depth / 100 : init.depth,
+      offset: c.has('offset') ? offset : init.offset,
+      line_width: c.has('line_width')
+        ? (Math.abs(thickness - initial.strokeWidth) < 1e-6 ? null : thickness)
+        : init.line_width,
+      line_color: c.has('line_color') ? (useStrokeColor ? null : { ...pinnedColor }) : init.line_color,
+    };
+  };
 
   // Live apply: every control change lands on the canvas immediately
   // (end_style_dialog.py _apply_live). mutateDocLive edits the gesture's live
@@ -131,10 +143,16 @@ export function EndStyleDialog(props: { layerName: string; side: Side; onClose: 
 
   // Every control goes through this, so the live apply above knows a change
   // came from the user and not from the mount.
-  const touch = <T,>(set: (v: T) => void) => (v: T) => { touched.current = true; set(v); };
-  const setShapeT = touch(setShape), setTiltT = touch(setTilt), setDepthT = touch(setDepth);
-  const setOffsetT = touch(setOffset), setShowLineT = touch(setShowLine), setThicknessT = touch(setThickness);
-  const setUseStrokeColorT = touch(setUseStrokeColor), setPinnedColorT = touch(setPinnedColor);
+  type Field = 'tilt' | 'depth' | 'offset' | 'line_width' | 'line_color';
+  const touch = <T,>(set: (v: T) => void, field?: Field) => (v: T) => {
+    touched.current = true;
+    if (field) changed.current.add(field);
+    set(v);
+  };
+  const setShapeT = touch(setShape), setTiltT = touch(setTilt, 'tilt'), setDepthT = touch(setDepth, 'depth');
+  const setOffsetT = touch(setOffset, 'offset'), setShowLineT = touch(setShowLine);
+  const setThicknessT = touch(setThickness, 'line_width');
+  const setUseStrokeColorT = touch(setUseStrokeColor, 'line_color'), setPinnedColorT = touch(setPinnedColor, 'line_color');
 
   // Preview picture: the real end, as the canvas paints it, centred on the
   // endpoint (end_style_dialog.py _paint_preview). Re-painted after every live
@@ -297,6 +315,7 @@ export function EndStyleDialog(props: { layerName: string; side: Side; onClose: 
               className={'es-shape-btn' + (shape === key ? ' active' : '')}
               onClick={() => onShape(key)}
               aria-pressed={shape === key}
+              autoFocus={key === shape}
             >
               {icons[key]
                 ? <img src={icons[key]} width={ICON_W} height={ICON_H} alt="" draggable={false} />
