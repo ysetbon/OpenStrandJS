@@ -237,7 +237,8 @@ const mkDoc = (strands) => ({
   const LANGS = ['en', 'fr', 'de', 'it', 'es', 'pt', 'he', 'ru', 'fi', 'sv', 'ja', 'zh'];
   const short = [];
   for (const m of ts.matchAll(/^  ([A-Za-z0-9_]+): \{(.*)\},$/gm)) {
-    const absent = LANGS.filter((l) => !new RegExp(`\\b${l}:\\s`).test(m[2]));
+    // A top-level `lang: <quote>` token (after `{ ` / `, `), never prose inside a value.
+    const absent = LANGS.filter((l) => !new RegExp(`(?:^ ?|, )${l}: ['\"\`]`).test(m[2]));
     if (absent.length) short.push(`${m[1]}(no ${absent.join('/')})`);
   }
   ok('and every entry carries all twelve languages',

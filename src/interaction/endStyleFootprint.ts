@@ -26,6 +26,9 @@ const CUT_PLANE = 0.5;
 export interface StyledEndPolys {
   added: Point[][];
   removed: Point[][];
+  // The profile itself in world space, running across the body from the
+  // end's local y = -half to +half: the edge the highlight border follows.
+  profile: Point[];
   // How far the edge's farthest point reaches beyond the classic end, along
   // the outward tangent (negative when trimmed).
   extentShift: number;
@@ -166,6 +169,7 @@ export function styledEndPolys(s: StrandRecord, side: 0 | 1, style: EndStyle, li
   return {
     added: aheadPolygons(profile, half, half, -1).map(map),
     removed: behindPolygons(profile, 1.5 * half, CUT_PLANE).map(map),
+    profile: map(profile),
     extentShift: maxX - bandWidth,
   };
 }

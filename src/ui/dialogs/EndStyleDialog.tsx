@@ -76,6 +76,13 @@ export function EndStyleDialog(props: { layerName: string; side: Side; onClose: 
   const [colorDialog, setColorDialog] = useState(false);
   const previewRef = useRef<HTMLCanvasElement>(null);
   const [icons, setIcons] = useState<Record<string, string>>({});
+  // Set once a control has been touched. OSS applies only on a control change
+  // (_apply_live), never on open: a record loaded with values the integer
+  // controls cannot show (depth 0.333, tilt 12.5, a fractional stroke width)
+  // must survive an open + OK untouched, and must not cost an undo step.
+  const touched = useRef(false);
+  // Set by OK / Cancel so the unmount cleanup knows the gesture was closed.
+  const settled = useRef(false);
 
   // One gesture for the whole dialog: its baseline is the snapshot Cancel
   // restores, and OK commits it as one undo step (end_style_dialog.py accept /
@@ -85,6 +92,15 @@ export function EndStyleDialog(props: { layerName: string; side: Side; onClose: 
     useEditorStore.getState().beginGesture({
       action: 'strand.end_style', source: 'dialog', targets: [layerName], detail: side === 0 ? 'start' : 'end',
     });
+    // Unmounted without OK / Cancel (the layer button re-rendered away, the
+    // strand vanished): close the gesture the way Cancel would, so the baseline
+    // never lingers to become some later edit's undo snapshot.
+    return () => {
+      if (!settled.current) {
+        useEditorStore.getState().cancelGesture();
+        requestRender();
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -102,6 +118,7 @@ export function EndStyleDialog(props: { layerName: string; side: Side; onClose: 
   // (end_style_dialog.py _apply_live). mutateDocLive edits the gesture's live
   // document in place, so a slider drag never clones the whole document per step.
   useEffect(() => {
+    if (!touched.current) return;
     const st = useEditorStore.getState();
     const apply = (d: typeof st.doc) => {
       setEndStyle(d, layerName, side, currentStyle());
@@ -111,6 +128,13 @@ export function EndStyleDialog(props: { layerName: string; side: Side; onClose: 
     requestRender();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shape, tilt, depth, offset, showLine, thickness, useStrokeColor, pinnedColor]);
+
+  // Every control goes through this, so the live apply above knows a change
+  // came from the user and not from the mount.
+  const touch = <T,>(set: (v: T) => void) => (v: T) => { touched.current = true; set(v); };
+  const setShapeT = touch(setShape), setTiltT = touch(setTilt), setDepthT = touch(setDepth);
+  const setOffsetT = touch(setOffset), setShowLineT = touch(setShowLine), setThicknessT = touch(setThickness);
+  const setUseStrokeColorT = touch(setUseStrokeColor), setPinnedColorT = touch(setPinnedColor);
 
   // Preview picture: the real end, as the canvas paints it, centred on the
   // endpoint (end_style_dialog.py _paint_preview). Re-painted after every live
@@ -176,23 +200,24 @@ export function EndStyleDialog(props: { layerName: string; side: Side; onClose: 
 
   const onShape = (key: EndShape) => {
     const previous = shape;
-    setShape(key);
-    if (key === 'straight') setTilt(0);
+    setShapeT(key);
+    if (key === 'straight') setTiltT(0);
     // Angled is the slanted cut: start it visibly slanted
-    else if (key === 'angled' && previous === 'straight' && tilt === 0) setTilt(ANGLED_DEFAULT_TILT);
+    else if (key === 'angled' && previous === 'straight' && tilt === 0) setTiltT(ANGLED_DEFAULT_TILT);
   };
 
   const resetToStraight = () => {
-    setShape('straight');
-    setTilt(0);
-    setDepth(50);
-    setOffset(0);
-    setThickness(Math.max(1, Math.round(initial.strokeWidth)));
-    setUseStrokeColor(true);
-    setShowLine(true);
+    setShapeT('straight');
+    setTiltT(0);
+    setDepthT(50);
+    setOffsetT(0);
+    setThicknessT(Math.max(1, Math.round(initial.strokeWidth)));
+    setUseStrokeColorT(true);
+    setShowLineT(true);
   };
 
   const accept = () => {
+    settled.current = true;
     const st = useEditorStore.getState();
     if (bothEnds && hasTwoFreeEnds) {
       const apply = (d: typeof st.doc) => copyEndStyleToOtherEnd(d, layerName, side);
@@ -206,6 +231,7 @@ export function EndStyleDialog(props: { layerName: string; side: Side; onClose: 
   // Cancel / Escape / the title-bar X: put both ends back exactly as they were
   // (end_style_dialog.py restore_snapshot) — no undo entry.
   const cancel = () => {
+    settled.current = true;
     useEditorStore.getState().cancelGesture();
     requestRender();
     onClose();
@@ -279,14 +305,14 @@ export function EndStyleDialog(props: { layerName: string; side: Side; onClose: 
             </button>
           ))}
         </div>
-        {sliderRow(t('end_tilt', lang), -TILT_MAX, TILT_MAX, tilt, (v) => `${v > 0 ? '+' : ''}${v}°`, setTilt, tiltEnabled)}
+        {sliderRow(t('end_tilt', lang), -TILT_MAX, TILT_MAX, tilt, (v) => `${v > 0 ? '+' : ''}${v}°`, setTiltT, tiltEnabled)}
         <div className="es-hint">{t('end_tilt_hint', lang)}</div>
-        {sliderRow(t('end_depth', lang), 0, 100, depth, (v) => `${v} %`, setDepth, depthEnabled)}
+        {sliderRow(t('end_depth', lang), 0, 100, depth, (v) => `${v} %`, setDepthT, depthEnabled)}
         <div className="es-hint">{t('end_depth_hint', lang)}</div>
         <div className="gd-row">
           <span className="gd-label">{t('end_extend_trim', lang)}</span>
           <NumberInput value={offset} min={offsetMin} max={offsetMax} step={1}
-            onChange={(v) => setOffset(Math.round(v))} />
+            onChange={(v) => setOffsetT(Math.round(v))} />
           <span className="gd-label" style={{ minWidth: 0 }}>{t('px', lang)}</span>
         </div>
         <div className="es-hint">{t('end_extend_trim_hint', lang)}</div>
@@ -296,12 +322,12 @@ export function EndStyleDialog(props: { layerName: string; side: Side; onClose: 
       <div className="es-section">
         <div className="es-section-title">{t('side_line_section', lang)}</div>
         <label className="set-check es-check">
-          <input type="checkbox" checked={showLine} onChange={(e) => setShowLine(e.target.checked)} />
+          <input type="checkbox" checked={showLine} onChange={(e) => setShowLineT(e.target.checked)} />
           <span>{t('show_side_line', lang)}</span>
         </label>
         <div className={'gd-row' + (showLine ? '' : ' es-disabled')}>
           <span className="gd-label">{t('side_line_thickness', lang)}</span>
-          <NumberInput value={thickness} min={1} max={40} step={1} onChange={(v) => setThickness(Math.round(v))} />
+          <NumberInput value={thickness} min={1} max={40} step={1} onChange={(v) => setThicknessT(Math.round(v))} />
           <span className="gd-label" style={{ minWidth: 0 }}>{t('px', lang)}</span>
         </div>
         <div className={'gd-row' + (showLine ? '' : ' es-disabled')}>
@@ -315,7 +341,7 @@ export function EndStyleDialog(props: { layerName: string; side: Side; onClose: 
           />
           <label className="set-check es-check" style={{ marginInlineStart: 12 }}>
             <input type="checkbox" checked={useStrokeColor} disabled={!showLine}
-              onChange={(e) => setUseStrokeColor(e.target.checked)} />
+              onChange={(e) => setUseStrokeColorT(e.target.checked)} />
             <span>{t('use_stroke_color', lang)}</span>
           </label>
         </div>
@@ -333,7 +359,7 @@ export function EndStyleDialog(props: { layerName: string; side: Side; onClose: 
           title={t('side_line_color', lang)}
           value={pinnedColor}
           lang={lang}
-          onAccept={(c) => setPinnedColor(c)}
+          onAccept={(c) => setPinnedColorT(c)}
           onClose={() => setColorDialog(false)}
         />
       )}

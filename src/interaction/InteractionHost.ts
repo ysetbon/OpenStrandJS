@@ -25,6 +25,7 @@ import {
 } from '../renderer/renderScheduler';
 import { modes } from '../modes';
 import { SelectMode } from '../modes/SelectMode';
+import { moveHolding } from '../modes/MoveMode';
 import { addDeletionRect } from '../store/actions';
 import type { Mode, ModeContext, PointerInfo } from '../modes/Mode';
 import type { Point } from '../model/types';
@@ -106,8 +107,9 @@ export class InteractionHost {
     if (st.panMode) return 'grab';
     // OSS 1.111 move_mode.py: the closed hand for as long as Move mode has
     // grabbed a movable point (start_movement -> ClosedHandCursor; the idle
-    // open hand comes back in mouseReleaseEvent / cancel_movement).
-    if (st.mode === 'move' && st.dragging) return 'grabbing';
+    // open hand comes back in mouseReleaseEvent / cancel_movement). Gated on
+    // the mode's own hold: the group dialogs raise store.dragging too.
+    if (st.mode === 'move' && st.dragging && moveHolding()) return 'grabbing';
     return this.mode().cursor;
   }
 

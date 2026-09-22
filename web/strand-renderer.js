@@ -102,6 +102,7 @@ function geomCacheBegin() {
   geomCacheEnd();
   GEOM_CACHE = new Map();
   GEOM_PROJECT = paper.project;
+  esCacheBegin();
 }
 
 // Is the memo open AND still owned by the project being drawn into?
@@ -113,6 +114,7 @@ function geomCacheEnd() {
   const cache = GEOM_CACHE;
   GEOM_CACHE = null;                  // clear first: a render that threw must not
   GEOM_PROJECT = null;                // leave a half-open cache behind
+  esCacheEnd();
   if (!cache) return;
   for (const e of cache.values()) {
     // The project these masters belong to may already be gone (a render that
@@ -997,8 +999,26 @@ function esUniteAll(base, pieces) {
 // carry a style (end_style.EndStyleGeometry), or null when no end is styled.
 // Owns nothing that outlives the render: every path it hands out is fresh and
 // the caller removes it, like every other builder here.
+// Per-render memo of the descriptor below, keyed by layer name: the highlight,
+// the body, both extension rays, both small arrows and every footprint width
+// ask for the same strand's ends in one frame. It holds plain numbers and
+// closures (no paper items), so it is cleared with the geometry memo rather
+// than held in it. The centerline is rebuilt only for the ends' frames, which
+// depend on nothing but the strand and the render-wide constants.
+let ES_CACHE = null;
+function esCacheBegin() { ES_CACHE = new Map(); }
+function esCacheEnd() { ES_CACHE = null; }
+
 function esGeometry(s, P, enableThird, S, centerline) {
   if (!esHasStyledEnd(s)) return null;
+  const live = ES_CACHE !== null && geomCacheLive();
+  if (live && ES_CACHE.has(s.layer_name)) return ES_CACHE.get(s.layer_name);
+  const g = esBuildGeometry(s, P, enableThird, S, centerline);
+  if (live) ES_CACHE.set(s.layer_name, g);
+  return g;
+}
+
+function esBuildGeometry(s, P, enableThird, S, centerline) {
   const cl = centerline || buildCenterline(s, P, enableThird);
   const len = cl.length;
   ES_UNIT_PX = S;
@@ -1019,12 +1039,10 @@ function esGeometry(s, P, enableThird, S, centerline) {
   const total = ((s.width || 0) + 2 * (s.stroke_width || 0)) * S;
   const list = Object.values(ends);
   const each = (fn) => list.flatMap(fn);
-  const classicClean = (w) => (centerline
-    ? strokedBodyAtWidth(s, P, enableThird, w, centerline)
-    : bodyOutline(s, P, enableThird, w));
-  const classicRaw = (w) => (centerline
-    ? strokedOutline(centerline, w)
-    : bodyBand(s, P, enableThird, w));
+  // Body builders go through the per-render memos (bodyOutline / bodyBand),
+  // never the caller's centerline: the descriptor outlives this call.
+  const classicClean = (w) => bodyOutline(s, P, enableThird, w);
+  const classicRaw = (w) => bodyBand(s, P, enableThird, w);
 
   const geometry = {
     ends,
@@ -1675,7 +1693,8 @@ function drawHighlight(s, strands, P, enableThird, S) {
   // end with a transparent circle stroke is trimmed by an end slab instead of
   // the resampled band below.
   const styledGeom = esGeometry(s, P, enableThird, S, cl);
-  const styledFootprint = styledGeom ? styledGeom.outer() : null;
+  // The same outer footprint the shadow caster / receiver ask for (memoized).
+  const styledFootprint = styledGeom ? strandFootprintAtWidth(s, P, enableThird, S, w + 2 * sw) : null;
   if (styledFootprint) {
     band.remove();
     let fp = styledFootprint;

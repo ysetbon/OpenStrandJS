@@ -42,6 +42,13 @@ function handlePos(s: StrandRecord, handle: HandleKind): Point {
   }
 }
 
+// Is Move mode holding a strand point right now? The canvas cursor reads this
+// (InteractionHost.cursorFor) rather than store.dragging, which the group
+// Move / Rotate / Angle dialogs also raise during their slider drags.
+export function moveHolding(): boolean {
+  return drag !== null;
+}
+
 export const MoveMode: Mode = {
   name: 'move',
   // OSS Qt.OpenHandCursor (strand_drawing_canvas.py set_mode 'move'). Since 1.111

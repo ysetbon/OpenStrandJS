@@ -148,8 +148,10 @@ export function historyShortLabel(meta: HistoryMeta | null, lang = 'en'): string
   if (action === 'move.handle') {
     // OSS ids: move.strand with detail 'endpoint' / 'control point'. Here the
     // detail is the handle kind that was grabbed.
-    action = meta.detail === 'start' || meta.detail === 'end' ? 'move.endpoint'
-      : meta.detail ? 'move.control_point' : 'move.strand';
+    const d = meta.detail;
+    action = d === 'start' || d === 'end' ? 'move.endpoint'
+      : d === 'control_point1' || d === 'control_point2' || d === 'control_point_center' ? 'move.control_point'
+        : 'move.strand';   // a curvature-bias square keeps the generic "Moved a point"
     if (action === 'move.endpoint') head = 'Moved an endpoint';
     else if (action === 'move.control_point') head = 'Moved a control point';
   }

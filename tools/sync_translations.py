@@ -37,7 +37,10 @@ LANGS = ['en', 'fr', 'de', 'it', 'es', 'pt', 'he', 'ru', 'fi', 'sv', 'ja', 'zh']
 FORCE_FROM_OSS = {'refresh_tooltip', 'whats_new_info'}
 
 ENTRY_RE = re.compile(r'^  ([A-Za-z0-9_]+): \{ ')
-PRESENT_RE = re.compile(r'(?:^|[ {])(' + '|'.join(LANGS) + r'): ')
+# A `lang: <quote>` token at the record's top level: right after `{ ` or `, `
+# and followed by the value's opening quote, so prose containing " it: " or
+# " es: " inside a value is never mistaken for a translation.
+PRESENT_RE = re.compile(r'(?:\{ |, )(' + '|'.join(LANGS) + r'): [\'"`]')
 
 
 def literal(value):

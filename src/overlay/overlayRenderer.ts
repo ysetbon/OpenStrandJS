@@ -473,19 +473,23 @@ function drawSelectionOverlay(
   fill: string, border: string, borderW: number, removedPath: Path2D | null = null,
 ): void {
   const z = st.view.zoom;
-  ctx.save();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  // A stylized free end (1.111) cuts pieces out of the flat-capped body: keep
-  // the fill everywhere but inside those cuts (a clip region of the whole
-  // canvas minus the cut polygons, under the even-odd rule).
+  // A stylized free end (1.111) cuts pieces out of the flat-capped body. The
+  // footprint is then `fill` minus `removed`: the fill is painted under a clip
+  // of everything but the cuts, and the ring's erase of the footprint runs
+  // under the same clip, so the half of the border stroke that lies outward
+  // of the profile (inside a cut polygon) survives — the silhouette the ring
+  // strokes already follows the profile (selectionFootprint.strandFootprint).
+  const keep = new Path2D();
   if (removedPath) {
-    const keep = new Path2D();
     keep.rect(0, 0, ctx.canvas.width, ctx.canvas.height);
     keep.addPath(removedPath);
-    ctx.clip(keep, 'evenodd');
   }
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (removedPath) ctx.clip(keep, 'evenodd');
   ctx.fillStyle = fill;
   ctx.fill(fillPath, 'nonzero');
+  ctx.restore();
   const ring = borderW > 0 ? ringLayer(ctx.canvas.width, ctx.canvas.height) : null;
   if (ring) {
     ring.lineWidth = borderW * 2 * z;
@@ -494,13 +498,17 @@ function drawSelectionOverlay(
     ring.lineCap = 'butt';
     ring.strokeStyle = border;
     ring.stroke(outlinePath);
+    ring.save();
+    if (removedPath) ring.clip(keep, 'evenodd');
     ring.globalCompositeOperation = 'destination-out';
     ring.fillStyle = '#000';
     ring.fill(fillPath, 'nonzero');
-    ring.globalCompositeOperation = 'source-over';
+    ring.restore();
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(ringCanvas as HTMLCanvasElement, 0, 0);
+    ctx.restore();
   }
-  ctx.restore();
 }
 
 // Highlight one layer's footprint: a regular/attached strand's polygons, or a
