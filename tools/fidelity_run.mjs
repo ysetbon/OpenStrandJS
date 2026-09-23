@@ -38,6 +38,11 @@ const DEFAULT_CORPUS = [
   'fid_shadow_unfolded_attach', // straight unfolded child through a receiver (cut-back shadow)
   'fid_unfold_angled',          // unfolded child bending 45deg at the junction
   'fid_unfold_chain',           // parent -> unfolded child -> unfolded grandchild over two receivers
+  // Mask shadow scenes (mask_receiver variants): each flips one input the mask
+  // shadow pipeline reads.
+  'fid_mask_cross_toggle',      // (mask -> second) visibility off hides the crossing shading
+  'fid_mask_hidden',            // a hidden mask's components shadow each other again
+  'fid_mask_full_nosub',        // explicit empty subtracted_layers + allow_full_shadow on mask -> second
   // (fid_shadow_folded_attach and fid_shadow_cross remain as contrast/control
   // cases runnable via --fixtures.)
 ];

@@ -13,5 +13,20 @@
     "match_pct": 100,
     "width": 1176,
     "height": 1362
+  },
+  "fid_mask_cross_toggle": {
+    "match_pct": 99.781,
+    "width": 800,
+    "height": 682
+  },
+  "fid_mask_hidden": {
+    "match_pct": 99.79,
+    "width": 800,
+    "height": 682
+  },
+  "fid_mask_full_nosub": {
+    "match_pct": 99.787,
+    "width": 800,
+    "height": 682
   }
 }

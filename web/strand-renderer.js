@@ -1362,15 +1362,19 @@ function buildPairShadowRegion(s, i, o, j, strands, byLayer, P, enableThird, S, 
   if (region && region.area && Math.abs(region.area) > 0.5) {
     // (a) subtracted_layers (UNGATED). Default = masked-caster second-component
     //     branch when no override key is present.
-    const subNames = (ov && ov.subtracted_layers) || defaultSubtracted(s, o, byLayer);
+    // An override that carries the key wins even when its list is empty (Qt
+    // get_subtracted_layers: `'subtracted_layers' in override_data`), so a user
+    // who cleared the mask->second-component default keeps it cleared.
+    const subNames = ov && 'subtracted_layers' in ov
+      ? (ov.subtracted_layers || [])
+      : defaultSubtracted(s, o, byLayer);
     const subAcc = { path: null };
     region = subtractLayers(region, subNames, byLayer, strands, P, enableThird, S, subAcc);
     clipBlocker = subAcc.path; // fed into the Pass B clip (shader_utils.py:985-987)
 
     // (b) mask-blocking (gated !allowFull): subtract every VISIBLE mask whose
     //     layer rank is strictly ABOVE the caster (k > i) and that is not the
-    //     receiver itself. Same blocker geometry covers the visible-component
-    //     mask-coverage case for our corpus (single mask above both indices).
+    //     receiver itself.
     if (!allowFull && region && Math.abs(region.area || 0) > 0.5) {
       for (let k = i + 1; k < strands.length; k++) {
         const m = strands[k];
@@ -1379,6 +1383,31 @@ function buildPairShadowRegion(s, i, o, j, strands, byLayer, P, enableThird, S, 
         // Memoized: the blocker for a given mask is the same for every pair it
         // blocks, and it is one of the most expensive builds in the renderer
         // (two mask regions plus a stroked boundary).
+        const blk = cachedGeom('blocker|' + m.layer_name,
+          () => buildShadowBlockerPath(m, byLayer, P, enableThird, S));
+        if (blk) {
+          const r = region.subtract(blk);
+          blk.remove();
+          region.remove();
+          region = r;
+        }
+        if (!region || Math.abs(region.area || 0) <= 0.5) break;
+      }
+    }
+
+    // (b2) visible-component mask coverage (gated !allowFull), Qt
+    //     _subtract_visible_component_mask_coverage (shader_utils.py:119): when
+    //     the RECEIVER is a component of a visible mask layered above it, that
+    //     mask's blocker is cut out of the shadow, whatever the mask's rank
+    //     relative to the caster (so a strand above the mask still leaves the
+    //     crossing and its blur ring clear on the component underneath).
+    if (!allowFull && region && Math.abs(region.area || 0) > 0.5) {
+      for (let k = j + 1; k < strands.length; k++) {
+        const m = strands[k];
+        if (m.type !== 'MaskedStrand' || m.is_hidden === true) continue;
+        const mp = (m.layer_name || '').split('_');
+        if (mp.length < 4) continue;
+        if (o.layer_name !== mp[0] + '_' + mp[1] && o.layer_name !== mp[2] + '_' + mp[3]) continue;
         const blk = cachedGeom('blocker|' + m.layer_name,
           () => buildShadowBlockerPath(m, byLayer, P, enableThird, S));
         if (blk) {
@@ -1573,15 +1602,9 @@ function castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i) 
     if (o.is_hidden === true) continue;
     // A mask CAN receive a shadow from a higher strand (Qt draw_strand_shadow uses
     // other_stroke_path = get_proper_masked_strand_path when the receiver has
-    // get_mask_path, shader_utils.py:718-722). A hidden mask draws nothing so it
-    // receives nothing; and a mask never receives a shadow from one of its own
-    // components (it owns that crossing region).
-    if (o.type === 'MaskedStrand') {
-      if (o.is_hidden === true) continue;
-      const comp = (o.layer_name || '').split('_');
-      if (comp.length >= 4 &&
-          (s.layer_name === comp[0] + '_' + comp[1] || s.layer_name === comp[2] + '_' + comp[3])) continue;
-    }
+    // get_mask_path, shader_utils.py:718-722) — including from one of its own
+    // components layered above it: Qt's same-mask skip only fires when BOTH
+    // layers are components, which a mask layer never is.
     if (maskPairs.has(s.layer_name + '|' + o.layer_name)) continue; // same-mask component pair
 
     // Per-pair shadow override (keyed [caster][receiver]). allow_full_shadow gates
@@ -2407,8 +2430,13 @@ function defaultSubtracted(s, o, byLayer) {
 // faded loop. No separate unclipped solid-core pass for masks (unlike strands);
 // only the clipped faded strokes plus a clipped inner-core fill.
 function drawMaskShadow(ms, first, second, fw, fsw, sw, ssw, P, enableThird, S) {
-  const firstPath = strandFootprintAtWidth(first, P, enableThird, S, fw + 2 * fsw);
-  const secondPath = strandFootprintAtWidth(second, P, enableThird, S, sw + 2 * ssw);
+  // first_path / second_path = get_stroked_path_for_strand: the component
+  // footprint at (w+2sw) PLUS its visible attached start circle, the same
+  // outline the mask body's stroke layer uses (shared memo entries).
+  const firstPath = cachedGeom(`mcomp|${first.layer_name}|${fw + 2 * fsw}`,
+    () => maskComponentPath(first, P, enableThird, S, fw + 2 * fsw));
+  const secondPath = cachedGeom(`mcomp|${second.layer_name}|${sw + 2 * ssw}`,
+    () => maskComponentPath(second, P, enableThird, S, sw + 2 * ssw));
   if (!firstPath || !secondPath) {
     firstPath && firstPath.remove();
     secondPath && secondPath.remove();
@@ -2430,9 +2458,10 @@ function drawMaskShadow(ms, first, second, fw, fsw, sw, ssw, P, enableThird, S) 
       items.push(item);
     }
   }
-  // inner-core = stroke(first centerline, fw+2fsw) ∩ second_path, filled SOLID at
-  // full alpha 150. (Same stroke width as firstPath here, so == firstPath ∩ second.)
-  const innerStroke = strandFootprintAtWidth(first, P, enableThird, S, fw + 2 * fsw);
+  // inner-core = stroke(first.get_path(), fw+2fsw) ∩ second_path, filled SOLID at
+  // full alpha 150. Qt strokes the plain centerline here — no start circle and no
+  // styled-end footprint — so it is the bare body outline, not firstPath.
+  const innerStroke = bodyOutline(first, P, enableThird, (fw + 2 * fsw) * S);
   if (innerStroke) {
     let core = innerStroke.intersect(secondPath);
     core = subtractDeletions(core, ms, P, S);
@@ -2484,7 +2513,12 @@ function drawMasked(ms, byLayer, P, enableThird, S, shadowOnly) {
   //     alpha 150 (no separate unclipped solid-core pass for masks).
   // hide_shadow also suppresses the mask's own crossing shadow (OSS
   // masked_strand.py:516,665 gate draw_mask_strand_shadow on it).
-  if (SHADOW_ENABLED && ms.hide_shadow !== true) {
+  // The crossing shading is the mask's shadow on its second component, so the
+  // shadow editor's (mask -> second) visibility toggle hides it too (Qt
+  // _intersection_shadow_visible -> get_shadow_visibility; default true).
+  const crossOv = (SHADOW_OVERRIDES[ms.layer_name] || {})[second.layer_name] || null;
+  const crossVisible = !(crossOv && crossOv.visibility === false);
+  if (SHADOW_ENABLED && ms.hide_shadow !== true && crossVisible) {
     drawMaskShadow(ms, first, second, fw, fsw, sw, ssw, P, enableThird, S);
   }
 
@@ -2746,11 +2780,12 @@ window.renderFixture = function (strands, meta, target) {
   // it in the Port phase without threading a new param. Inert until that phase.
   SHADOW_OVERRIDES = meta.shadow_overrides || {};
 
-  // Pairs that are the two components of a mask don't shadow each other (the
-  // mask owns that crossing).
+  // Pairs that are the two components of a VISIBLE mask don't shadow each other
+  // (the mask owns that crossing). A hidden mask owns nothing, so its components
+  // shadow each other normally (Qt part_of_same_visible_mask, shader_utils.py:649).
   const maskPairs = new Set();
   for (const s of strands) {
-    if (s.type !== 'MaskedStrand') continue;
+    if (s.type !== 'MaskedStrand' || s.is_hidden === true) continue;
     const p = (s.layer_name || '').split('_');
     if (p.length >= 4) {
       maskPairs.add(p[0] + '_' + p[1] + '|' + p[2] + '_' + p[3]);
