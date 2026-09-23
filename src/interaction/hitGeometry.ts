@@ -43,6 +43,21 @@ function buildProfile(s: StrandRecord, curve: Curve, enableThird: boolean, enabl
   const thirdLocked = enableThird && s.control_point_center_locked && s.control_point_center;
   if (thirdLocked && s.control_point_center) {
     const p0 = start, p1 = control_point1, p2 = s.control_point_center, p3 = control_point2, p4 = end;
+    if (s.type === 'AttachedStrand') {
+      // attached_strand.py get_path: its own locked-centre curve (one fraction
+      // capped at 0.49, normalised centre tangent) — same as the renderer.
+      const in_n = norm(sub(p2, p1)), out_n = norm(sub(p3, p2));
+      const ctn = norm({ x: 0.5 * in_n.x + 0.5 * out_n.x, y: 0.5 * in_n.y + 0.5 * out_n.y });
+      const dist12 = dist(p2, p1), dist23 = dist(p3, p2);
+      let fraction = Math.min(0.1 + base_fraction * 0.13, 3.77);
+      fraction = Math.min(fraction * dist_multiplier, 0.49);
+      if (exponent !== 1.0) fraction = Math.pow(fraction, 1 / exponent);
+      const cp1 = add(p0, mul(sub(p1, p0), fraction * (0.5 + bias_triangle)));
+      const cp2 = sub(p2, mul(ctn, dist12 * fraction * (0.5 + bias_triangle)));
+      const cp3 = add(p2, mul(ctn, dist23 * fraction * (0.5 + bias_circle)));
+      const cp4 = add(p4, mul(sub(p3, p4), fraction * (0.5 + bias_circle)));
+      return { mode: 'multi', segments: [{ p0, cp1, cp2, p3: p2 }, { p0: p2, cp1: cp3, cp2: cp4, p3: p4 }] };
+    }
     const in_norm = norm(sub(p2, p1)), out_norm = norm(sub(p3, p2));
     const ct = { x: (in_norm.x + out_norm.x) * 0.5, y: (in_norm.y + out_norm.y) * 0.5 };
     const dist2 = dist(p2, p1), dist3 = dist(p3, p2);

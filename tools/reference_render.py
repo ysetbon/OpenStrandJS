@@ -243,7 +243,11 @@ def main():
             and canvas.layer_state_manager.getOrder()
             else [s.layer_name for s in canvas.strands]
         ),
-        "num_steps": 2,
+        # The oracle canvas's own shadow settings, so the JS render uses the same
+        # blur radius and step count the Qt reference was painted with (a canvas
+        # with no user_settings.txt runs at max_blur_radius 29.99, not 30).
+        "num_steps": int(getattr(canvas, "num_steps", 2)),
+        "max_blur_radius": float(getattr(canvas, "max_blur_radius", 29.99)),
         "shadow_color": (
             {
                 "r": canvas.default_shadow_color.red(),
