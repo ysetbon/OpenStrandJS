@@ -1,0 +1,115 @@
+{
+  "sub": "pr-60",
+  "kind": "pr",
+  "pr": 60,
+  "branch": "claude/tender-thompson-360gcv",
+  "title": "Mask shadows: match the OSS mask shadow pipeline exactly",
+  "sha": "6e12c8495c",
+  "updated": "2026-09-23T18:23:24.075Z",
+  "summary": {
+    "fixtures": 9,
+    "perfect": 6,
+    "lowest": 99.79
+  },
+  "results": [
+    {
+      "fixture": "fid_shadow_unfolded_attach",
+      "match_pct": 100
+    },
+    {
+      "fixture": "fid_unfold_angled",
+      "match_pct": 100
+    },
+    {
+      "fixture": "fid_unfold_chain",
+      "match_pct": 100
+    },
+    {
+      "fixture": "fid_mask_cross_toggle",
+      "match_pct": 99.79
+    },
+    {
+      "fixture": "fid_mask_hidden",
+      "match_pct": 99.79
+    },
+    {
+      "fixture": "fid_mask_full_nosub",
+      "match_pct": 99.79
+    },
+    {
+      "fixture": "fid_mask_shadow_only",
+      "match_pct": 100
+    },
+    {
+      "fixture": "fid_mask_curved_shadow_only",
+      "match_pct": 100
+    },
+    {
+      "fixture": "fid_attached_locked_center",
+      "match_pct": 100
+    }
+  ],
+  "selected": "fid_shadow_unfolded_attach",
+  "thumb": {
+    "file": "thumb.png",
+    "from": "fid_shadow_unfolded_attach",
+    "w": 364,
+    "h": 360
+  },
+  "thumbs": [
+    {
+      "fixture": "fid_shadow_unfolded_attach",
+      "file": "snaps/fid_shadow_unfolded_attach.png",
+      "w": 364,
+      "h": 360
+    },
+    {
+      "fixture": "fid_unfold_angled",
+      "file": "snaps/fid_unfold_angled.png",
+      "w": 371,
+      "h": 360
+    },
+    {
+      "fixture": "fid_unfold_chain",
+      "file": "snaps/fid_unfold_chain.png",
+      "w": 311,
+      "h": 360
+    },
+    {
+      "fixture": "fid_mask_cross_toggle",
+      "file": "snaps/fid_mask_cross_toggle.png",
+      "w": 422,
+      "h": 360
+    },
+    {
+      "fixture": "fid_mask_hidden",
+      "file": "snaps/fid_mask_hidden.png",
+      "w": 422,
+      "h": 360
+    },
+    {
+      "fixture": "fid_mask_full_nosub",
+      "file": "snaps/fid_mask_full_nosub.png",
+      "w": 422,
+      "h": 360
+    },
+    {
+      "fixture": "fid_mask_shadow_only",
+      "file": "snaps/fid_mask_shadow_only.png",
+      "w": 422,
+      "h": 360
+    },
+    {
+      "fixture": "fid_mask_curved_shadow_only",
+      "file": "snaps/fid_mask_curved_shadow_only.png",
+      "w": 423,
+      "h": 360
+    },
+    {
+      "fixture": "fid_attached_locked_center",
+      "file": "snaps/fid_attached_locked_center.png",
+      "w": 466,
+      "h": 360
+    }
+  ]
+}
