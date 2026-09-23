@@ -400,4 +400,7 @@ export interface RenderMeta {
   // (the live editor). The PNG export passes OSS draw_grid's pen width (1, or 1.5
   // below 50% zoom) scaled by its painter transform, since Qt's pen is not cosmetic.
   grid_line_width?: number;
+  // OSS paints masks through MaskedStrand._draw_direct whenever the canvas is
+  // zoomed or panned (masked_strand.py draw()); set by buildMeta for that view.
+  mask_direct?: boolean;
 }

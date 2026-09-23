@@ -47,6 +47,9 @@ const DEFAULT_CORPUS = [
   'fid_mask_shadow_only',        // even-odd mask blocker lattice; Pass B strokes each survivor outline
   'fid_mask_curved_shadow_only', // curved blocker, a component casting past its own mask, even-odd clip after a subtraction
   'fid_attached_locked_center',  // AttachedStrand locked-centre curve (its own get_path) under two masks with deletions
+  // Panned by 1e-4 px ("oss_pan"), which moves no pixels but switches OSS masks to
+  // MaskedStrand._draw_direct (1px-ring first_path); the JS follows via meta.mask_direct.
+  'fid_mask_panned_shadow_only', // fid_mask_shadow_only through _draw_direct (fid_mask_panned_knot: same for overhand_knot)
   // (fid_shadow_folded_attach and fid_shadow_cross remain as contrast/control
   // cases runnable via --fixtures.)
 ];

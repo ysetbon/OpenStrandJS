@@ -43,6 +43,9 @@ const EDITOR_SUPERSAMPLE = 1;
 type SceneSig = {
   doc: unknown; docRevision: number; settings: unknown; shadowPaths: unknown;
   highlight: string | null; zoom: number; w: number; h: number; ss: number;
+  // Whether masks take OSS's zoomed/panned path. A pan that leaves or returns to
+  // the origin changes the mask geometry, so it must rebuild the scene.
+  maskDirect: boolean;
 };
 let sceneSig: SceneSig | null = null;
 // Monotonic id for the CURRENT signature. The renderer only ever compares scene
@@ -54,7 +57,7 @@ function sameSceneSig(a: SceneSig | null, b: SceneSig): boolean {
   return !!a && a.doc === b.doc && a.docRevision === b.docRevision
     && a.settings === b.settings && a.shadowPaths === b.shadowPaths
     && a.highlight === b.highlight && a.zoom === b.zoom
-    && a.w === b.w && a.h === b.h && a.ss === b.ss;
+    && a.w === b.w && a.h === b.h && a.ss === b.ss && a.maskDirect === b.maskDirect;
 }
 
 // The key this frame's scene is tagged with, bumped whenever anything but the pan
@@ -259,6 +262,7 @@ function renderNow(): void {
       highlight: highlightLayer, zoom: view.zoom,
       w: Math.max(1, Math.round(view.width)), h: Math.max(1, Math.round(view.height)),
       ss: EDITOR_SUPERSAMPLE,
+      maskDirect: view.zoom !== 1 || view.panX !== 0 || view.panY !== 0,
     };
     // ONE non-drag paint path, the way OSS has one: set the offset and repaint.
     //
