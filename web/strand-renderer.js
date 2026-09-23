@@ -256,6 +256,23 @@ function buildProfile(s, enableThird) {
 
   if (thirdLocked) {
     const p0 = start, p1 = control_point1, p2 = s.control_point_center, p3 = control_point2, p4 = end;
+    if (s.type === 'AttachedStrand') {
+      // AttachedStrand overrides get_path / get_shadow_path with its own locked-
+      // centre curve (attached_strand.py get_path): ONE fraction, capped at 0.49
+      // before the exponent, and a NORMALISED centre tangent. OSS draws the body,
+      // the shadows and every mask built on the strand from this curve.
+      const in_n = vnorm(vsub(p2, p1)), out_n = vnorm(vsub(p3, p2));
+      const ctn = vnorm({ x: 0.5 * in_n.x + 0.5 * out_n.x, y: 0.5 * in_n.y + 0.5 * out_n.y });
+      const dist12 = vdist(p2, p1), dist23 = vdist(p3, p2);
+      let fraction = Math.min(0.1 + base_fraction * 0.13, 3.77);
+      fraction = Math.min(fraction * dist_multiplier, 0.49);
+      if (exponent !== 1.0) fraction = Math.pow(fraction, 1 / exponent);
+      const cp1 = vadd(p0, vmul(vsub(p1, p0), fraction * (0.5 + bias_triangle)));
+      const cp2 = vsub(p2, vmul(ctn, dist12 * fraction * (0.5 + bias_triangle)));
+      const cp3 = vadd(p2, vmul(ctn, dist23 * fraction * (0.5 + bias_circle)));
+      const cp4 = vadd(p4, vmul(vsub(p3, p4), fraction * (0.5 + bias_circle)));
+      return { mode: 'multi', segments: [{ p0, cp1, cp2, p3: p2 }, { p0: p2, cp1: cp3, cp2: cp4, p3: p4 }] };
+    }
     const in_norm = vnorm(vsub(p2, p1)), out_norm = vnorm(vsub(p3, p2));
     const center_tangent = { x: (in_norm.x + out_norm.x) * 0.5, y: (in_norm.y + out_norm.y) * 0.5 };
     const dist2 = vdist(p2, p1), dist3 = vdist(p3, p2);
@@ -1192,36 +1209,77 @@ function esEndSlab(s, side, point, outwardAngle, distancePx, S) {
 // the RECEIVER geometry the caster shadow is intersected with, and also the clip
 // region for Pass B. Returns a paper path (caller removes it) or null.
 function buildShadowReceiverGeom(s, strands, P, enableThird, S) {
+  const pieces = buildShadowReceiverPieces(s, strands, P, enableThird, S);
+  if (!pieces) return null;
+  let path = pieces[0];
+  for (let k = 1; k < pieces.length; k++) {
+    const u = path.unite(pieces[k]);
+    path.remove();
+    pieces[k].remove();
+    path = u;
+  }
+  return path;
+}
+
+// The same geometry as separate subpaths, the way build_rendered_geometry hands
+// it to Qt: the body outline, then each visible end circle added with addPath
+// (not united). Only matters where Qt evaluates them EVEN-ODD (the Pass B clip
+// after a subtraction, see castStrandShadow); everywhere else they are united.
+function buildShadowReceiverPieces(s, strands, P, enableThird, S) {
   const w = s.width || 0, sw = s.stroke_width || 0;
   const td = (w + 2 * sw) * S;          // full diameter (px) for the body + cap circles
   const cl = buildCenterline(s, P, enableThird);
   // A stylized free end replaces the flat cap with its own footprint
   // (shader_utils.py build_rendered_geometry, 1.111).
-  let path = esHasStyledEnd(s)
+  const body = esHasStyledEnd(s)
     ? strandFootprintAtWidth(s, P, enableThird, S, w + 2 * sw)
     : bodyOutline(s, P, enableThird, td, cl);
-  if (!path) { cl.remove(); return null; }
+  if (!body) { cl.remove(); return null; }
+  const pieces = [body];
   const hc = s.has_circles || [false, false];
   const startA = circleStrokeAlpha(effStartStroke(s));
   const endA = circleStrokeAlpha(effEndStroke(s));
   const len = cl.length;
   const isAttached = s.type === 'AttachedStrand';
   const addCircle = (centre, angle, which) => {
-    let circle;
-    if (isAttached) {
-      circle = which === 0 ? capOuterStart(centre, angle, td) : capOuterEnd(centre, angle, td);
-    } else {
-      circle = new paper.Path.Circle(centre, td / 2);
-    }
-    const u = path.unite(circle);
-    path.remove();
-    circle.remove();
-    path = u;
+    pieces.push(isAttached
+      ? (which === 0 ? capOuterStart(centre, angle, td) : capOuterEnd(centre, angle, td))
+      : new paper.Path.Circle(centre, td / 2));
   };
   if (hc[0] && startA > 0) addCircle(P(s.start), tangentAngle(cl, 0), 0);
   if (hc[1] && endA > 0) addCircle(P(s.end), tangentAngle(cl, len), 1);
   cl.remove();
-  return path;
+  return pieces;
+}
+
+// Does Qt hand back get_mask_path() (masked_strand.py:246) as an ODD-EVEN path?
+// It is component outline ∩ component outline. QPathClipper resolves that into
+// a fresh OddEvenFill path, unless one outline is an axis-aligned rectangle (a
+// straight, horizontal or vertical component with nothing united onto it): then
+// it clips the other outline by the rectangle and keeps THAT outline's rule,
+// winding for a plain stroker outline, even-odd once a start circle was united
+// in. A deletion rectangle that reaches it resolves it again (even-odd).
+function qtMaskPathOddEven(ms, byLayer, P, enableThird, S) {
+  const parts = (ms.layer_name || '').split('_');
+  const first = byLayer[parts[0] + '_' + parts[1]], second = byLayer[parts[2] + '_' + parts[3]];
+  if (!first || !second) return true;
+  const circled = (t) => t.type === 'AttachedStrand' && (t.has_circles || [])[0] && circleStrokeAlpha(effStartStroke(t)) > 0;
+  const isRect = (t) => !circled(t) && !esHasStyledEnd(t) && buildProfile(t, enableThird).mode === 'line'
+    && (t.start.x === t.end.x || t.start.y === t.end.y);
+  const r1 = isRect(first), r2 = isRect(second);
+  let oddEven = !(r1 || r2) || (r1 && !r2 && circled(second)) || (r2 && !r1 && circled(first));
+  if (!oddEven && (ms.deletion_rectangles || []).length) {
+    const region = buildMaskPath(ms, byLayer, P, enableThird, S);
+    if (region) {
+      for (const rect of ms.deletion_rectangles) {
+        const rp = deletionPath(rect, P, S);
+        if (rp && rp.bounds.intersects(region.bounds)) oddEven = true;
+        rp && rp.remove();
+      }
+      region.remove();
+    }
+  }
+  return oddEven;
 }
 
 // build_shadow_geometry(strand, 0, include_circles=False): the caster CORE =
@@ -1318,14 +1376,16 @@ function shadowBlurSteps() {
 //   • caster CORE  = build_shadow_geometry(s, 0, include_circles=False)
 //   • caster CIRCLES = build_shadow_circle_geometry(s)  (radius (w+2sw)/2+2)
 //   For each receiver o (gated by §3): region = (core ∪ circles) ∩ rendered(o).
-//     Accumulate non-empty survivors into `combined` (UNION) and the receiver
-//     geometry into `clip` (UNION).
+//     Accumulate non-empty survivors into `combined` (UNION), keep each one's
+//     own outline for Pass B, and grow `clip` from the receiver geometry the
+//     way Qt grows clip_path (union while winding, XOR once even-odd).
 //   PASS A: fill `combined` SOLID at alpha 150, SourceOver, UNCLIPPED.
-//   PASS B: total = combined ∪ circles; in a Group clipped to `clip`, run
-//     NUM_STEPS boundary-stroke passes over `total` (FlatCap / RoundJoin) with
-//     the computed width/alpha table.
-// Both passes reuse the same `combined`. Drawn BEFORE the caster's own body so
-// the body covers the inner shadow and only the fringe over lower strands shows.
+//   PASS B: in a Group clipped to `clip`, run NUM_STEPS stroke passes over every
+//     survivor outline plus the caster's circle outlines, NOT united (Qt's
+//     total_shadow_path is built with addPath), FlatCap / RoundJoin, with the
+//     computed width/alpha table.
+// Drawn BEFORE the caster's own body so the body covers the inner shadow and
+// only the fringe over lower strands shows.
 // Per-pair survivor region for caster `s` (rank i) onto receiver `o` (rank j):
 // receiver rendered geometry, caster∩receiver, then the renderer's subtractions
 // IN ORDER (Qt: subtracted_layers -> mask-blocking -> intermediate). Shared by
@@ -1362,31 +1422,45 @@ function buildPairShadowRegion(s, i, o, j, strands, byLayer, P, enableThird, S, 
   if (region && region.area && Math.abs(region.area) > 0.5) {
     // (a) subtracted_layers (UNGATED). Default = masked-caster second-component
     //     branch when no override key is present.
-    const subNames = (ov && ov.subtracted_layers) || defaultSubtracted(s, o, byLayer);
+    // An override that carries the key wins even when its list is empty (Qt
+    // get_subtracted_layers: `'subtracted_layers' in override_data`), so a user
+    // who cleared the mask->second-component default keeps it cleared.
+    const subNames = ov && 'subtracted_layers' in ov
+      ? (ov.subtracted_layers || [])
+      : defaultSubtracted(s, o, byLayer);
     const subAcc = { path: null };
     region = subtractLayers(region, subNames, byLayer, strands, P, enableThird, S, subAcc);
     clipBlocker = subAcc.path; // fed into the Pass B clip (shader_utils.py:985-987)
 
     // (b) mask-blocking (gated !allowFull): subtract every VISIBLE mask whose
     //     layer rank is strictly ABOVE the caster (k > i) and that is not the
-    //     receiver itself. Same blocker geometry covers the visible-component
-    //     mask-coverage case for our corpus (single mask above both indices).
+    //     receiver itself.
     if (!allowFull && region && Math.abs(region.area || 0) > 0.5) {
       for (let k = i + 1; k < strands.length; k++) {
         const m = strands[k];
         if (m.type !== 'MaskedStrand' || m.is_hidden === true) continue;
         if (m.layer_name === o.layer_name) continue; // self-block guard
-        // Memoized: the blocker for a given mask is the same for every pair it
-        // blocks, and it is one of the most expensive builds in the renderer
-        // (two mask regions plus a stroked boundary).
-        const blk = cachedGeom('blocker|' + m.layer_name,
-          () => buildShadowBlockerPath(m, byLayer, P, enableThird, S));
-        if (blk) {
-          const r = region.subtract(blk);
-          blk.remove();
-          region.remove();
-          region = r;
-        }
+        // The blocker (and its complement) is memoized per mask: it is the same
+        // for every pair it blocks and one of the most expensive builds here.
+        region = subtractBlocker(region, m, byLayer, P, enableThird, S);
+        if (!region || Math.abs(region.area || 0) <= 0.5) break;
+      }
+    }
+
+    // (b2) visible-component mask coverage (gated !allowFull), Qt
+    //     _subtract_visible_component_mask_coverage (shader_utils.py:119): when
+    //     the RECEIVER is a component of a visible mask layered above it, that
+    //     mask's blocker is cut out of the shadow, whatever the mask's rank
+    //     relative to the caster (so a strand above the mask still leaves the
+    //     crossing and its blur ring clear on the component underneath).
+    if (!allowFull && region && Math.abs(region.area || 0) > 0.5) {
+      for (let k = j + 1; k < strands.length; k++) {
+        const m = strands[k];
+        if (m.type !== 'MaskedStrand' || m.is_hidden === true) continue;
+        const mp = (m.layer_name || '').split('_');
+        if (mp.length < 4) continue;
+        if (o.layer_name !== mp[0] + '_' + mp[1] && o.layer_name !== mp[2] + '_' + mp[3]) continue;
+        region = subtractBlocker(region, m, byLayer, P, enableThird, S);
         if (!region || Math.abs(region.area || 0) <= 0.5) break;
       }
     }
@@ -1563,8 +1637,10 @@ function castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i) 
   if (!fp) return;
   const { core, circles, casterFootprint, rejectBounds } = fp;
 
-  let combined = null;          // PASS A/B survivor union (caster ∩ receivers)
+  let combined = null;          // PASS A survivor union (caster ∩ receivers)
+  const pieces = [];            // PASS B: every survivor's own outline (not united)
   let clip = null;              // PASS B clip = ⋃ receiver rendered geometry
+  let clipEvenOdd = false;      // Qt clip_path.fillRule() == OddEvenFill
   for (let j = 0; j < i; j++) {
     const o = strands[j];
     // A hidden strand paints nothing, so it receives nothing (Qt
@@ -1573,15 +1649,9 @@ function castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i) 
     if (o.is_hidden === true) continue;
     // A mask CAN receive a shadow from a higher strand (Qt draw_strand_shadow uses
     // other_stroke_path = get_proper_masked_strand_path when the receiver has
-    // get_mask_path, shader_utils.py:718-722). A hidden mask draws nothing so it
-    // receives nothing; and a mask never receives a shadow from one of its own
-    // components (it owns that crossing region).
-    if (o.type === 'MaskedStrand') {
-      if (o.is_hidden === true) continue;
-      const comp = (o.layer_name || '').split('_');
-      if (comp.length >= 4 &&
-          (s.layer_name === comp[0] + '_' + comp[1] || s.layer_name === comp[2] + '_' + comp[3])) continue;
-    }
+    // get_mask_path, shader_utils.py:718-722) — including from one of its own
+    // components layered above it: Qt's same-mask skip only fires when BOTH
+    // layers are components, which a mask layer never is.
     if (maskPairs.has(s.layer_name + '|' + o.layer_name)) continue; // same-mask component pair
 
     // Per-pair shadow override (keyed [caster][receiver]). allow_full_shadow gates
@@ -1602,15 +1672,40 @@ function castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i) 
     if (!recv) continue;
 
     if (region && region.area && Math.abs(region.area) > 0.5) {
+      pieces.push(region.clone({ insert: false }));
       // survivor — accumulate into combined (union)
       if (!combined) { combined = region; }
       else { const u = combined.unite(region); combined.remove(); region.remove(); combined = u; }
-      // accumulate receiver geometry into the Pass B clip (union)
-      if (!clip) { clip = recv; }
-      else { const u = clip.unite(recv); clip.remove(); recv.remove(); clip = u; }
+      // Pass B clip, grown the way Qt grows clip_path (shader_utils.py:986-995): a
+      // copy of the first receiver's path, then addPath for each later one, so it
+      // keeps that first path's FILL RULE until subtracted() hands back a resolved
+      // even-odd path. Under winding, addPath of same-orientation outlines (every
+      // Qt strand and mask outline is) is a union; under even-odd each receiver's
+      // own subpaths (outline, end circles) are XORed in instead.
+      if (!clip) {
+        clip = recv;
+        clipEvenOdd = o.type === 'MaskedStrand' && qtMaskPathOddEven(o, byLayer, P, enableThird, S);
+      } else if (!clipEvenOdd) {
+        const u = clip.unite(recv); clip.remove(); recv.remove(); clip = u;
+      } else {
+        recv.remove();
+        const recvPieces = o.type === 'MaskedStrand'
+          ? [buildMaskPath(o, byLayer, P, enableThird, S)].filter(Boolean)
+          : (buildShadowReceiverPieces(o, strands, P, enableThird, S) || []);
+        for (const piece of recvPieces) {
+          const x = clip.exclude(piece); clip.remove(); piece.remove(); clip = x;
+        }
+      }
       // Qt subtracts this pair's subtracted-layer geometry from the accumulated
-      // clip so the faded Pass B stroke can't bleed into it (shader_utils.py:985-987).
-      if (clipBlocker) { const c = clip.subtract(clipBlocker); clip.remove(); clip = c; }
+      // clip so the faded Pass B stroke can't bleed into it (shader_utils.py:991-995).
+      // QPathClipper hands the subject back untouched when the bounds miss;
+      // otherwise the result is a resolved even-odd path. An emptied clip is
+      // re-seeded by the next receiver, exactly like clip_path.isEmpty().
+      if (clipBlocker && clip && clip.bounds.intersects(clipBlocker.bounds)) {
+        const c = clip.subtract(clipBlocker); clip.remove(); clip = c;
+        clipEvenOdd = true;
+        if (!clip || !clip.area || Math.abs(clip.area) <= 0.5) { clip && clip.remove(); clip = null; }
+      }
     } else {
       region && region.remove();
       recv.remove();
@@ -1624,34 +1719,102 @@ function castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i) 
     solid.fillColor = SHADOW_PAINT;
     solid.strokeColor = null;
 
-    // PASS B — faded blur, clipped to the union of receiver geometries.
-    let total = combined.clone();
-    if (circles) {
-      const u = total.unite(circles);
-      total.remove();
-      total = u;
-    }
+    // PASS B — faded blur, clipped to the union of receiver geometries. Qt
+    // strokes total_shadow_path, which it builds with addPath, not a union: each
+    // survivor's own outline plus the caster's end-circle outlines, so edges that
+    // lie inside another survivor (overlapping receivers, the mask blocker's
+    // lattice, a circle over the body) are stroked too (shader_utils.py:1015-1024,
+    // 1367-1370, 1429). One compound path, so the steps don't double-darken where
+    // the outlines' strokes overlap, exactly like a single strokePath.
+    const total = passBOutline(pieces, circles, combined);
+    for (const piece of pieces) piece.remove();
     const strokeItems = [];
     for (const st of shadowBlurSteps()) {
       const item = total.clone();
       item.fillColor = null;
       item.strokeColor = new paper.Color(SHADOW_COLOR.r / 255, SHADOW_COLOR.g / 255, SHADOW_COLOR.b / 255, st.alpha / 255);
       item.strokeWidth = st.width * S;
-      item.strokeCap = 'butt';   // Qt FlatCap
+      // Closed outlines take no caps (Qt FlatCap never shows); the open interior
+      // runs end where Qt's closed outline turns onto the union outline through a
+      // RoundJoin, so they end round.
+      item.strokeCap = 'round';
       item.strokeJoin = 'round'; // Qt RoundJoin
       strokeItems.push(item);
     }
     total.remove();
     // A clipped Group: first child is the clip mask, the rest are clipped to it.
-    new paper.Group({ children: [clip, ...strokeItems], clipped: true });
+    // A clip a subtraction emptied is never set, so Qt strokes unclipped.
+    if (clip) new paper.Group({ children: [clip, ...strokeItems], clipped: true });
     combined.remove();
-  } else if (clip) {
-    clip.remove();
+  } else {
+    if (clip) clip.remove();
+    for (const piece of pieces) piece.remove();
   }
 
   casterFootprint.remove();
   core.remove();
   circles && circles.remove();
+}
+
+// The edges Qt's Pass B strokes (every survivor outline plus the caster's circle
+// outlines) cover exactly the points within half a pen width of ANY of them,
+// round joins making every corner a disk. Handing paper those outlines as-is
+// puts each edge two survivors share into the path twice, and coincident edges
+// anti-alias unstably (their coverage conflates and shifts with sub-pixel
+// position). So this draws the same covered area with each edge once: the
+// union's outline, plus the pieces' edges that lie strictly inside the union, as
+// open runs (their round caps stand in for Qt's round joins where the piece's
+// outline turns onto the union outline). Returns a CompoundPath (caller removes).
+function passBOutline(pieces, circles, combined) {
+  const kidsOf = (it) => (it.children && it.children.length ? it.children : [it]);
+  let union = combined.clone();
+  if (circles) { const u = union.unite(circles); union.remove(); union = u; }
+  const out = new paper.CompoundPath({ children: [] });
+  for (const k of kidsOf(union)) out.addChild(k.clone({ insert: false }));
+  const EPS = 0.05;
+  const seen = new Set();
+  const key = (p) => Math.round(p.x * 1e4) + ',' + Math.round(p.y * 1e4);
+  for (const piece of [...pieces, ...(circles ? [circles] : [])]) {
+    for (const kid of kidsOf(piece)) {
+      let src = kid;
+      if (kid.hasHandles()) { src = kid.clone({ insert: false }); src.flatten(0.05); }
+      const pts = src.segments.map((sg) => sg.point);
+      const n = pts.length;
+      const inner = pts.map((a, i) => {
+        const b = pts[(i + 1) % n];
+        const dx = b.x - a.x, dy = b.y - a.y, l = Math.hypot(dx, dy);
+        if (l < 1e-9) return false;
+        const k1 = key(a), k2 = key(b);
+        const k = k1 < k2 ? k1 + '|' + k2 : k2 + '|' + k1;
+        if (seen.has(k)) return false;
+        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, nx = -dy / l * EPS, ny = dx / l * EPS;
+        const ok = union.contains(new paper.Point(mx + nx, my + ny)) && union.contains(new paper.Point(mx - nx, my - ny));
+        if (ok) seen.add(k);
+        return ok;
+      });
+      if (inner.every(Boolean)) {
+        out.addChild(new paper.Path({ segments: pts.map((q) => q.clone()), closed: true, insert: false }));
+      } else {
+        // Walk the ring from an edge on the union outline so a run never wraps.
+        const start = inner.findIndex((v) => !v);
+        let run = null;
+        for (let t = 1; t <= n; t++) {
+          const i = (start + t) % n;
+          if (inner[i]) {
+            if (!run) run = [pts[i].clone()];
+            run.push(pts[(i + 1) % n].clone());
+          } else if (run) {
+            out.addChild(new paper.Path({ segments: run, closed: false, insert: false }));
+            run = null;
+          }
+        }
+        if (run) out.addChild(new paper.Path({ segments: run, closed: false, insert: false }));
+      }
+      if (src !== kid) src.remove();
+    }
+  }
+  union.remove();
+  return out;
 }
 
 // Selection highlight — faithful port of strand.py::_draw_unified_highlight /
@@ -2329,19 +2492,343 @@ function strokedRegionOutline(region, widthPx) {
   return out;
 }
 
-// Port of get_shadow_blocker_path (shader_utils.py:1876) + _get_mask_visual_path:
-// base = mask VISUAL path (fill ∪ stroke regions); blocker = base UNION
-// stroke(base boundary, width=MAX_BLUR*S). Subtracted from a caster->receiver
-// shadow for a VISIBLE mask layered ABOVE the caster. Returns a path or null.
+// ---- Qt QStroker port (polylines; MiterJoin, FlatCap) ----------------------
+// get_shadow_blocker_path builds its blocker with QPainterPathStroker, and the
+// blocker's EVEN-ODD fill makes the stroker's exact output matter: every loop
+// the stroker emits, including the "inner join" excursions it makes back through
+// the original corner point, flips the parity of what it encloses. This is a
+// line-for-line port of qstroker.cpp (qt_stroke_side + QStroker::joinPoints) for
+// closed polylines, which is all the blocker ever strokes (QPathClipper output is
+// always flattened). It reproduces Qt 5.15's element list to ~1e-10 px.
+const qtFuzzy = (a, b) => Math.abs(a - b) * 1e12 <= Math.min(Math.abs(a), Math.abs(b));
+function qtLineAngle(l) {                    // QLineF::angle
+  const t = Math.atan2(-(l[3] - l[1]), l[2] - l[0]) * 180 / Math.PI;
+  const n = t < 0 ? t + 360 : t;
+  return qtFuzzy(n, 360) ? 0 : n;
+}
+function qtAngleTo(a, b) {                   // QLineF::angleTo (this = a)
+  if ((qtFuzzy(a[0], a[2]) && qtFuzzy(a[1], a[3])) || (qtFuzzy(b[0], b[2]) && qtFuzzy(b[1], b[3]))) return 0;
+  const d = qtLineAngle(b) - qtLineAngle(a);
+  return qtFuzzy(d, 360) ? 0 : (d < 0 ? d + 360 : d);
+}
+function qtIntersects(a, b) {                // QLineF::intersects: 0 none, 1 bounded, 2 unbounded
+  const ax = a[2] - a[0], ay = a[3] - a[1], bx = b[0] - b[2], by = b[1] - b[3];
+  const cx = a[0] - b[0], cy = a[1] - b[1];
+  const den = ay * bx - ax * by;
+  if (den === 0 || !Number.isFinite(den)) return { type: 0 };
+  const rec = 1 / den;
+  const na = (by * cx - bx * cy) * rec;
+  const x = a[0] + ax * na, y = a[1] + ay * na;
+  if (na < 0 || na > 1) return { type: 2, x, y };
+  const nb = (ax * cy - ay * cx) * rec;
+  return { type: nb < 0 || nb > 1 ? 2 : 1, x, y };
+}
+// Stroke one CLOSED polyline (first point repeated at the end) at `width` and
+// return the stroker's subpaths ([[x, y], ...]).
+function qtStrokeClosedPolyline(pts, width, miterLimit) {
+  const offset = width / 2, limit = width * miterLimit;
+  const loops = [];
+  let cur = null, b1x = 0, b1y = 0, b2x = 0, b2y = 0;
+  const emit = (x, y, move) => {
+    b2x = b1x; b2y = b1y; b1x = x; b1y = y;
+    if (move) { cur = [[x, y]]; loops.push(cur); } else cur.push([x, y]);
+  };
+  const join = (fx, fy, nl) => {
+    if (qtFuzzy(b1x, nl[0]) && qtFuzzy(b1y, nl[1])) return;   // already connected
+    const prev = [b2x, b2y, b1x, b1y];
+    const is = qtIntersects(prev, nl);
+    const ang = qtAngleTo([b1x, b1y, nl[0], nl[1]], prev);
+    if (is.type === 1 || (ang > 90 && !qtFuzzy(ang, 90))) {   // inner join: via the corner
+      emit(fx, fy);
+      emit(nl[0], nl[1]);
+      return;
+    }
+    if (is.type === 0 || Math.hypot(is.x - b1x, is.y - b1y) > limit) {
+      const pl = Math.hypot(prev[2] - prev[0], prev[3] - prev[1]);
+      const nlen = Math.hypot(nl[2] - nl[0], nl[3] - nl[1]);
+      emit(prev[2] + (prev[2] - prev[0]) / pl * limit, prev[3] + (prev[3] - prev[1]) / pl * limit);
+      emit(nl[0] - (nl[2] - nl[0]) / nlen * limit, nl[1] - (nl[3] - nl[1]) / nlen * limit);
+    } else {
+      emit(is.x, is.y);
+    }
+    emit(nl[0], nl[1]);
+  };
+  const side = (seq) => {
+    const sx = seq[0][0], sy = seq[0][1];
+    let px = sx, py = sy, first = true, startTangent = null;
+    for (let i = 1; i < seq.length; i++) {
+      const ex = seq[i][0], ey = seq[i][1];
+      if (px === ex && py === ey) continue;
+      const dx = ex - px, dy = ey - py, l = Math.hypot(dx, dy);
+      const nx = dy / l * offset, ny = -dx / l * offset;          // QLineF::normalVector
+      const line = [px + nx, py + ny, ex + nx, ey + ny];
+      if (first) { emit(line[0], line[1], true); startTangent = line; first = false; }
+      else join(px, py, line);
+      emit(line[2], line[3]);
+      px = ex; py = ey;
+    }
+    if (!first && qtFuzzy(sx, px) && qtFuzzy(sy, py)) join(px, py, startTangent);
+  };
+  side(pts);
+  side(pts.slice().reverse());
+  return loops;
+}
+
+// A region's boundary as closed polylines the way QPathClipper hands them to the
+// stroker: curves flattened, the first point repeated at the end, duplicate and
+// collinear points dropped (QPainterPath::simplified merges parallel lines).
+function regionPolylines(region) {
+  const out = [];
+  const kids = region.children && region.children.length ? region.children : [region];
+  for (const kid of kids) {
+    let src = kid;
+    if (kid.hasHandles && kid.hasHandles()) { src = kid.clone({ insert: false }); src.flatten(0.25); }
+    const raw = src.segments.map((sg) => [sg.point.x, sg.point.y]);
+    const pts = [];
+    for (const p of raw) {
+      const q = pts[pts.length - 1];
+      if (!q || q[0] !== p[0] || q[1] !== p[1]) pts.push(p);
+    }
+    while (pts.length > 1 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) pts.pop();
+    // Boolean ops on the sampled outlines leave micro-edges and near-straight
+    // vertices QPathClipper never produces. Each would make the stroker throw a
+    // 15px spike whose parity sliver is thinner than 0.02px, invisible, but
+    // enough to derail paper's boolean. Merge them away first.
+    let changed = true;
+    while (changed && pts.length > 3) {
+      changed = false;
+      for (let i = 0; i < pts.length && pts.length > 3; i++) {
+        const a = pts[(i + pts.length - 1) % pts.length], b = pts[i], c = pts[(i + 1) % pts.length];
+        const ux = b[0] - a[0], uy = b[1] - a[1], vx = c[0] - b[0], vy = c[1] - b[1];
+        const lu = Math.hypot(ux, uy), lv = Math.hypot(vx, vy);
+        const cross = ux * vy - uy * vx, dot = ux * vx + uy * vy;
+        if (lu < 0.05 || (dot > 0 && Math.abs(cross) <= 1e-3 * lu * lv)) {
+          pts.splice(i, 1); i--; changed = true;
+        }
+      }
+    }
+    if (pts.length >= 3) { pts.push(pts[0].slice()); out.push(pts); }
+  }
+  return out;
+}
+
+// The EVEN-ODD region of a set of closed rings, returned as the boundary cycles
+// of its odd faces: simple polygons that never cross (they may touch at a
+// corner). paper.js can't be handed the rings directly: its crossing resolver
+// keeps one copy of two coincident edges (right for unions, wrong for even-odd,
+// where they cancel) and stumbles on rings passing through a shared corner.
+// So this builds the planar arrangement itself: coincident collinear edges are
+// cancelled mod 2, every edge is split at every crossing, the faces are traced
+// in angular order, and each face is classified by exact ray-cast parity
+// against the original rings. rings: [[x, y], ...], implicitly closed.
+function evenOddFaces(rings) {
+  // -- 1. edges, with exactly overlapping collinear edges cancelled mod 2
+  const raw = [];
+  for (const r of rings) for (let i = 0; i < r.length; i++) {
+    const a = r[i], b = r[(i + 1) % r.length];
+    if (a[0] !== b[0] || a[1] !== b[1]) raw.push([a, b]);
+  }
+  const lines = raw.map((e, idx) => {
+    let dx = e[1][0] - e[0][0], dy = e[1][1] - e[0][1];
+    const L = Math.hypot(dx, dy); dx /= L; dy /= L;
+    if (dy < 0 || (dy === 0 && dx < 0)) { dx = -dx; dy = -dy; }
+    return { idx, ang: Math.atan2(dy, dx), off: -dy * e[0][0] + dx * e[0][1], dx, dy };
+  }).sort((p, q) => p.ang - q.ang || p.off - q.off);
+  const segs = [];
+  for (let s = 0; s < lines.length;) {
+    let e = s + 1;
+    while (e < lines.length && lines[e].ang - lines[e - 1].ang <= 1e-9 && Math.abs(lines[e].off - lines[e - 1].off) <= 1e-7) e++;
+    if (e - s === 1) segs.push(raw[lines[s].idx]);
+    else {
+      const { dx, dy } = lines[s];
+      const marks = [], ivs = [];
+      for (let k = s; k < e; k++) {
+        const [a, b] = raw[lines[k].idx];
+        const ta = a[0] * dx + a[1] * dy, tb = b[0] * dx + b[1] * dy;
+        marks.push([ta, a], [tb, b]); ivs.push(ta < tb ? [ta, tb] : [tb, ta]);
+      }
+      marks.sort((p, q) => p[0] - q[0]);
+      const ts = [], tp = [];
+      for (const [t, p] of marks) if (!ts.length || t - ts[ts.length - 1] > 1e-9) { ts.push(t); tp.push(p); }
+      for (let k = 0; k + 1 < ts.length; k++) {
+        const mid = (ts[k] + ts[k + 1]) / 2;
+        let c = 0;
+        for (const iv of ivs) if (iv[0] < mid && mid < iv[1]) c++;
+        if (c & 1) segs.push([tp[k], tp[k + 1]]);
+      }
+    }
+    s = e;
+  }
+  // -- 2. split every segment at every crossing / T-junction
+  const n = segs.length;
+  const cuts = segs.map(() => []);
+  const order = segs.map((sg, i) => i).sort((i, j) => Math.min(segs[i][0][0], segs[i][1][0]) - Math.min(segs[j][0][0], segs[j][1][0]));
+  const EPS = 1e-9;
+  for (let oi = 0; oi < n; oi++) {
+    const i = order[oi];
+    const [p1, p2] = segs[i];
+    const maxXi = Math.max(p1[0], p2[0]);
+    const minYi = Math.min(p1[1], p2[1]), maxYi = Math.max(p1[1], p2[1]);
+    for (let oj = oi + 1; oj < n; oj++) {
+      const j = order[oj];
+      const [q1, q2] = segs[j];
+      if (Math.min(q1[0], q2[0]) > maxXi) break;
+      if (Math.max(q1[1], q2[1]) < minYi || Math.min(q1[1], q2[1]) > maxYi) continue;
+      const rx = p2[0] - p1[0], ry = p2[1] - p1[1], sx = q2[0] - q1[0], sy = q2[1] - q1[1];
+      const den = rx * sy - ry * sx;
+      if (den === 0) continue;                               // parallel (overlaps already cancelled)
+      const qpx = q1[0] - p1[0], qpy = q1[1] - p1[1];
+      const t = (qpx * sy - qpy * sx) / den, u = (qpx * ry - qpy * rx) / den;
+      if (t < -EPS || t > 1 + EPS || u < -EPS || u > 1 + EPS) continue;
+      const x = p1[0] + t * rx, y = p1[1] + t * ry;
+      if (t > EPS && t < 1 - EPS) cuts[i].push([t, [x, y]]);
+      if (u > EPS && u < 1 - EPS) cuts[j].push([u, [x, y]]);
+    }
+  }
+  // -- 3. vertices (snapped), sub-edges, second mod-2 cancellation
+  const vid = new Map(), verts = [];
+  const V = (p) => {
+    const k = Math.round(p[0] * 1e6) + ',' + Math.round(p[1] * 1e6);
+    let id = vid.get(k);
+    if (id === undefined) { id = verts.length; verts.push(p); vid.set(k, id); }
+    return id;
+  };
+  const edgeCount = new Map();
+  for (let i = 0; i < n; i++) {
+    const pts = [[0, segs[i][0]], ...cuts[i].sort((a, b) => a[0] - b[0]), [1, segs[i][1]]];
+    let prev = V(pts[0][1]);
+    for (let k = 1; k < pts.length; k++) {
+      const cur = V(pts[k][1]);
+      if (cur !== prev) {
+        const key = prev < cur ? prev + ':' + cur : cur + ':' + prev;
+        edgeCount.set(key, (edgeCount.get(key) || 0) ^ 1);
+      }
+      prev = cur;
+    }
+  }
+  // -- 4. half-edges sorted by angle around each vertex
+  const out = verts.map(() => []);
+  for (const [key, c] of edgeCount) {
+    if (!c) continue;
+    const [a, b] = key.split(':').map(Number);
+    out[a].push(b); out[b].push(a);
+  }
+  for (let v = 0; v < verts.length; v++) {
+    const [vx, vy] = verts[v];
+    out[v].sort((a, b) => Math.atan2(verts[a][1] - vy, verts[a][0] - vx) - Math.atan2(verts[b][1] - vy, verts[b][0] - vx));
+  }
+  // -- 5. faces: from half-edge u->v continue with the neighbour of v that comes
+  //    just before u in angular order (keeps the face on one consistent side)
+  const visited = new Set();
+  const cycles = [];
+  for (let u = 0; u < verts.length; u++) for (const v0 of out[u]) {
+    if (visited.has(u + '>' + v0)) continue;
+    const cyc = [];
+    let a = u, b = v0, guard = 0;
+    while (!visited.has(a + '>' + b) && guard++ < 1e6) {
+      visited.add(a + '>' + b);
+      cyc.push(a);
+      const nb = out[b];
+      const idx = nb.indexOf(a);
+      const c = nb[(idx - 1 + nb.length) % nb.length];
+      a = b; b = c;
+    }
+    if (cyc.length >= 3) cycles.push(cyc.map((k) => verts[k]));
+  }
+  // -- 6. keep the cycles whose face (on the side we traced) has odd parity
+  const parity = (x, y) => {
+    let inside = false;
+    for (const r of rings) for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+      const [xi, yi] = r[i], [xj, yj] = r[j];
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  };
+  const kept = [];
+  for (const cyc of cycles) {
+    let area = 0;
+    for (let i = 0; i < cyc.length; i++) { const p = cyc[i], q = cyc[(i + 1) % cyc.length]; area += p[0] * q[1] - q[0] * p[1]; }
+    if (Math.abs(area) < 1e-12) continue;
+    // sample just to the face side of the longest edge
+    let best = 0, bl = -1;
+    for (let i = 0; i < cyc.length; i++) { const p = cyc[i], q = cyc[(i + 1) % cyc.length]; const l = Math.hypot(q[0] - p[0], q[1] - p[1]); if (l > bl) { bl = l; best = i; } }
+    const p = cyc[best], q = cyc[(best + 1) % cyc.length];
+    const mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2;
+    const nx = -(q[1] - p[1]) / bl, ny = (q[0] - p[0]) / bl;
+    // The walk keeps its face on the left (+90deg) side of every edge, for outer
+    // boundaries and hole boundaries alike; the unbounded face comes out odd-free.
+    const e = Math.min(1e-5, bl * 1e-3);
+    if (parity(mx + nx * e, my + ny * e)) kept.push(cyc);
+  }
+  return kept;
+}
+
+// Port of get_shadow_blocker_path (shader_utils.py:1902). Qt builds
+//   blocker = QPainterPath(base); blocker.addPath(stroker.createStroke(base))
+// with base = _get_mask_visual_path (fill ∪ stroke region, simplified() => an
+// OddEvenFill path) and a MiterJoin/FlatCap stroker of width max_blur_radius.
+// addPath keeps the base's EVEN-ODD rule, so the blocker is the parity of the
+// base and both stroke loops: the band INSIDE the mask outline is not blocked
+// (it is covered twice), the band outside is, and every inner-join excursion of
+// the stroker toggles a wedge back. That lattice is what OSS subtracts, so it is
+// what this subtracts. Returns a compound path of simple faces (or null).
 function buildShadowBlockerPath(ms, byLayer, P, enableThird, S) {
   const base = buildMaskVisualPath(ms, byLayer, P, enableThird, S);
   if (!base) return null;
-  const stroked = strokedRegionOutline(base, MAX_BLUR * S);
-  if (!stroked) return base; // degrade to base-only blocker
-  const u = base.unite(stroked);
+  const polys = regionPolylines(base);
   base.remove();
-  stroked.remove();
-  return u;
+  const rings = [];
+  for (const poly of polys) {
+    rings.push(poly.slice(0, -1));
+    for (const loop of qtStrokeClosedPolyline(poly, MAX_BLUR * S, 2)) rings.push(loop);
+  }
+  const faces = rings.length ? evenOddFaces(rings) : [];
+  if (!faces.length) return null;
+  const cp = new paper.CompoundPath({
+    children: faces.map((f) => new paper.Path({ segments: f, closed: true })),
+    fillRule: 'evenodd',
+  });
+  // One pass through paper's own boolean (against a far-away speck) turns the
+  // faces into its canonical region: collinear pieces merged, orientation fixed.
+  // The faces never cross, so this is safe; and later subtractions that share
+  // edges with the mask outline (a component casting past its own mask) are
+  // only reliable against that canonical form.
+  const far = new paper.Path.Rectangle(new paper.Point(-1e7, -1e7), new paper.Size(1, 1));
+  const blocker = cp.subtract(far);
+  cp.remove();
+  far.remove();
+  if (blocker && blocker.area && Math.abs(blocker.area) > 0.5) return blocker;
+  blocker && blocker.remove();
+  return null;
+}
+
+// region − blocker(mask), phrased as region ∩ (far rectangle − blocker). The
+// blocker's hairline lattice slivers share edges with a region cast by one of
+// the mask's own components (both come from the same memoised outline), and
+// paper's subtract can come back inside-out on that combination; intersecting
+// with the precomputed complement (which shares no edges with anything) does
+// not. Memoized per mask per render like the blocker itself.
+function subtractBlocker(region, m, byLayer, P, enableThird, S) {
+  if (!region) return region;
+  const bounds = cachedGeomBounds('blocker|' + m.layer_name,
+    () => buildShadowBlockerPath(m, byLayer, P, enableThird, S));
+  if (bounds === null) return region;                          // mask blocks nothing
+  if (bounds && !bounds.intersects(region.bounds)) return region;
+  const comp = cachedGeom('blockerComp|' + m.layer_name, () => {
+    const blk = cachedGeom('blocker|' + m.layer_name,
+      () => buildShadowBlockerPath(m, byLayer, P, enableThird, S));
+    if (!blk) return null;
+    const far = new paper.Path.Rectangle(blk.bounds.expand(1e5));
+    const c = far.subtract(blk);
+    far.remove();
+    blk.remove();
+    return c;
+  });
+  if (!comp) return region;
+  const r = region.intersect(comp);
+  comp.remove();
+  region.remove();
+  return r;
 }
 
 // Subtract the rendered geometry of each named layer from `region`, IN ORDER.
@@ -2398,17 +2885,23 @@ function defaultSubtracted(s, o, byLayer) {
   return o.layer_name === secondName ? [firstName] : [];
 }
 
-// Faithful port of draw_mask_strand_shadow (shader_utils.py:179). PORT-FOR-
-// COMPLETENESS / UNMEASURED — no mask fixture in the corpus exercises this at the
-// pixel level (the two masks in overhand_knot are themselves casters/receivers in
-// the regular shadow loop, gated out by maskPairs). first = top, second = bottom.
-// The call site passes canvas.max_blur_radius = 30 (NOT the 29.99 signature
-// default), so widths are 15/30 and alphas 150/75 — the same table as the regular
-// faded loop. No separate unclipped solid-core pass for masks (unlike strands);
-// only the clipped faded strokes plus a clipped inner-core fill.
+// Faithful port of draw_mask_strand_shadow (shader_utils.py:179), measured
+// against the Qt oracle through shadow-only renders of the overhand_knot masks.
+// first = top, second = bottom. The call site passes canvas.max_blur_radius
+// (MAX_BLUR), not the 29.99 signature default, so the width/alpha table is the
+// regular faded loop's. No separate unclipped solid-core pass for masks (unlike
+// strands); only the clipped faded strokes plus a clipped inner-core fill.
+// masked_strand.py's zoomed/panned _draw_direct path passes a 1px ring of the
+// first outline instead of the outline itself; this follows draw(), the path the
+// canvas takes at zoom 1 with no pan (and the one the oracle renders).
 function drawMaskShadow(ms, first, second, fw, fsw, sw, ssw, P, enableThird, S) {
-  const firstPath = strandFootprintAtWidth(first, P, enableThird, S, fw + 2 * fsw);
-  const secondPath = strandFootprintAtWidth(second, P, enableThird, S, sw + 2 * ssw);
+  // first_path / second_path = get_stroked_path_for_strand: the component
+  // footprint at (w+2sw) PLUS its visible attached start circle, the same
+  // outline the mask body's stroke layer uses (shared memo entries).
+  const firstPath = cachedGeom(`mcomp|${first.layer_name}|${fw + 2 * fsw}`,
+    () => maskComponentPath(first, P, enableThird, S, fw + 2 * fsw));
+  const secondPath = cachedGeom(`mcomp|${second.layer_name}|${sw + 2 * ssw}`,
+    () => maskComponentPath(second, P, enableThird, S, sw + 2 * ssw));
   if (!firstPath || !secondPath) {
     firstPath && firstPath.remove();
     secondPath && secondPath.remove();
@@ -2430,9 +2923,10 @@ function drawMaskShadow(ms, first, second, fw, fsw, sw, ssw, P, enableThird, S) 
       items.push(item);
     }
   }
-  // inner-core = stroke(first centerline, fw+2fsw) ∩ second_path, filled SOLID at
-  // full alpha 150. (Same stroke width as firstPath here, so == firstPath ∩ second.)
-  const innerStroke = strandFootprintAtWidth(first, P, enableThird, S, fw + 2 * fsw);
+  // inner-core = stroke(first.get_path(), fw+2fsw) ∩ second_path, filled SOLID at
+  // full alpha 150. Qt strokes the plain centerline here — no start circle and no
+  // styled-end footprint — so it is the bare body outline, not firstPath.
+  const innerStroke = bodyOutline(first, P, enableThird, (fw + 2 * fsw) * S);
   if (innerStroke) {
     let core = innerStroke.intersect(secondPath);
     core = subtractDeletions(core, ms, P, S);
@@ -2473,8 +2967,7 @@ function drawMasked(ms, byLayer, P, enableThird, S, shadowOnly) {
   const sw = second.width || 0, ssw = second.stroke_width || 0;
 
   // Crossing shadow (only when shadows are on). Faithful port of
-  // draw_mask_strand_shadow (PORT-FOR-COMPLETENESS — no mask fixture exercises
-  // this at the pixel level, so it is UNMEASURED). first = top, second = bottom:
+  // draw_mask_strand_shadow. first = top, second = bottom:
   //   first_path  = first body @ (fw+2fsw)   (NO blur inflation)
   //   second_path = second body @ (sw+2ssw)
   //   shading_path = (second_path ∩ first_path) minus deletion rects
@@ -2484,7 +2977,12 @@ function drawMasked(ms, byLayer, P, enableThird, S, shadowOnly) {
   //     alpha 150 (no separate unclipped solid-core pass for masks).
   // hide_shadow also suppresses the mask's own crossing shadow (OSS
   // masked_strand.py:516,665 gate draw_mask_strand_shadow on it).
-  if (SHADOW_ENABLED && ms.hide_shadow !== true) {
+  // The crossing shading is the mask's shadow on its second component, so the
+  // shadow editor's (mask -> second) visibility toggle hides it too (Qt
+  // _intersection_shadow_visible -> get_shadow_visibility; default true).
+  const crossOv = (SHADOW_OVERRIDES[ms.layer_name] || {})[second.layer_name] || null;
+  const crossVisible = !(crossOv && crossOv.visibility === false);
+  if (SHADOW_ENABLED && ms.hide_shadow !== true && crossVisible) {
     drawMaskShadow(ms, first, second, fw, fsw, sw, ssw, P, enableThird, S);
   }
 
@@ -2746,11 +3244,12 @@ window.renderFixture = function (strands, meta, target) {
   // it in the Port phase without threading a new param. Inert until that phase.
   SHADOW_OVERRIDES = meta.shadow_overrides || {};
 
-  // Pairs that are the two components of a mask don't shadow each other (the
-  // mask owns that crossing).
+  // Pairs that are the two components of a VISIBLE mask don't shadow each other
+  // (the mask owns that crossing). A hidden mask owns nothing, so its components
+  // shadow each other normally (Qt part_of_same_visible_mask, shader_utils.py:649).
   const maskPairs = new Set();
   for (const s of strands) {
-    if (s.type !== 'MaskedStrand') continue;
+    if (s.type !== 'MaskedStrand' || s.is_hidden === true) continue;
     const p = (s.layer_name || '').split('_');
     if (p.length >= 4) {
       maskPairs.add(p[0] + '_' + p[1] + '|' + p[2] + '_' + p[3]);

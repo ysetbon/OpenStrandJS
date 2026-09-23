@@ -13,5 +13,35 @@
     "match_pct": 100,
     "width": 1176,
     "height": 1362
+  },
+  "fid_mask_cross_toggle": {
+    "match_pct": 99.79,
+    "width": 800,
+    "height": 682
+  },
+  "fid_mask_hidden": {
+    "match_pct": 99.79,
+    "width": 800,
+    "height": 682
+  },
+  "fid_mask_full_nosub": {
+    "match_pct": 99.79,
+    "width": 800,
+    "height": 682
+  },
+  "fid_mask_shadow_only": {
+    "match_pct": 100,
+    "width": 800,
+    "height": 682
+  },
+  "fid_mask_curved_shadow_only": {
+    "match_pct": 100,
+    "width": 1134,
+    "height": 966
+  },
+  "fid_attached_locked_center": {
+    "match_pct": 100,
+    "width": 1358,
+    "height": 1050
   }
 }
