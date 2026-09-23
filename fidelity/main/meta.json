@@ -4,12 +4,12 @@
   "pr": null,
   "branch": "main",
   "title": "Canonical dashboard (latest main)",
-  "sha": "c0b13dfe75",
-  "updated": "2026-09-22T20:11:20.316Z",
+  "sha": "3f5efe67c7",
+  "updated": "2026-09-23T18:23:30.381Z",
   "summary": {
-    "fixtures": 3,
-    "perfect": 3,
-    "lowest": 100
+    "fixtures": 9,
+    "perfect": 6,
+    "lowest": 99.79
   },
   "results": [
     {
@@ -22,6 +22,30 @@
     },
     {
       "fixture": "fid_unfold_chain",
+      "match_pct": 100
+    },
+    {
+      "fixture": "fid_mask_cross_toggle",
+      "match_pct": 99.79
+    },
+    {
+      "fixture": "fid_mask_hidden",
+      "match_pct": 99.79
+    },
+    {
+      "fixture": "fid_mask_full_nosub",
+      "match_pct": 99.79
+    },
+    {
+      "fixture": "fid_mask_shadow_only",
+      "match_pct": 100
+    },
+    {
+      "fixture": "fid_mask_curved_shadow_only",
+      "match_pct": 100
+    },
+    {
+      "fixture": "fid_attached_locked_center",
       "match_pct": 100
     }
   ],
@@ -49,6 +73,42 @@
       "fixture": "fid_unfold_chain",
       "file": "snaps/fid_unfold_chain.png",
       "w": 311,
+      "h": 360
+    },
+    {
+      "fixture": "fid_mask_cross_toggle",
+      "file": "snaps/fid_mask_cross_toggle.png",
+      "w": 422,
+      "h": 360
+    },
+    {
+      "fixture": "fid_mask_hidden",
+      "file": "snaps/fid_mask_hidden.png",
+      "w": 422,
+      "h": 360
+    },
+    {
+      "fixture": "fid_mask_full_nosub",
+      "file": "snaps/fid_mask_full_nosub.png",
+      "w": 422,
+      "h": 360
+    },
+    {
+      "fixture": "fid_mask_shadow_only",
+      "file": "snaps/fid_mask_shadow_only.png",
+      "w": 422,
+      "h": 360
+    },
+    {
+      "fixture": "fid_mask_curved_shadow_only",
+      "file": "snaps/fid_mask_curved_shadow_only.png",
+      "w": 423,
+      "h": 360
+    },
+    {
+      "fixture": "fid_attached_locked_center",
+      "file": "snaps/fid_attached_locked_center.png",
+      "w": 466,
       "h": 360
     }
   ]
