@@ -4,11 +4,11 @@
   "pr": null,
   "branch": "main",
   "title": "Canonical dashboard (latest main)",
-  "sha": "3f5efe67c7",
-  "updated": "2026-09-23T18:23:30.381Z",
+  "sha": "b4f7f85272",
+  "updated": "2026-09-25T10:07:20.211Z",
   "summary": {
-    "fixtures": 9,
-    "perfect": 6,
+    "fixtures": 10,
+    "perfect": 7,
     "lowest": 99.79
   },
   "results": [
@@ -46,6 +46,10 @@
     },
     {
       "fixture": "fid_attached_locked_center",
+      "match_pct": 100
+    },
+    {
+      "fixture": "fid_mask_panned_shadow_only",
       "match_pct": 100
     }
   ],
@@ -109,6 +113,12 @@
       "fixture": "fid_attached_locked_center",
       "file": "snaps/fid_attached_locked_center.png",
       "w": 466,
+      "h": 360
+    },
+    {
+      "fixture": "fid_mask_panned_shadow_only",
+      "file": "snaps/fid_mask_panned_shadow_only.png",
+      "w": 422,
       "h": 360
     }
   ]
