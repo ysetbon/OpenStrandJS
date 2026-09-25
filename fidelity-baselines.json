@@ -43,5 +43,10 @@
     "match_pct": 100,
     "width": 1358,
     "height": 1050
+  },
+  "fid_mask_panned_shadow_only": {
+    "match_pct": 100,
+    "width": 800,
+    "height": 682
   }
 }

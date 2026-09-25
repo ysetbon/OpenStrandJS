@@ -147,6 +147,13 @@ def main():
     canvas.zoom_factor = 1.0
     canvas.pan_offset_x = 0
     canvas.pan_offset_y = 0
+    # Optional "oss_pan": [x, y] in the fixture renders the canvas PANNED. OSS
+    # switches masks to MaskedStrand._draw_direct whenever the view is zoomed or
+    # panned; a tiny pan (e.g. 1e-4) exercises that path without moving pixels.
+    oss_pan = data.get("oss_pan") if isinstance(data, dict) else None
+    if oss_pan:
+        canvas.pan_offset_x = float(oss_pan[0])
+        canvas.pan_offset_y = float(oss_pan[1])
     canvas.setFixedSize(image_width, image_height)
 
     # The app renders at supersampling_factor then downsamples (default 2). We do
@@ -248,6 +255,8 @@ def main():
         # with no user_settings.txt runs at max_blur_radius 29.99, not 30).
         "num_steps": int(getattr(canvas, "num_steps", 2)),
         "max_blur_radius": float(getattr(canvas, "max_blur_radius", 29.99)),
+        # Tells the JS renderer the oracle painted masks through _draw_direct.
+        "mask_direct": bool(canvas.pan_offset_x or canvas.pan_offset_y or canvas.zoom_factor != 1.0),
         "shadow_color": (
             {
                 "r": canvas.default_shadow_color.red(),

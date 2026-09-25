@@ -108,6 +108,9 @@ export function buildMeta(
     y_offset: view.panY,
     supersample: view.supersample,
     zoom: view.zoom,
+    // OSS draws masks differently once the view is zoomed or panned (see
+    // RenderMeta.mask_direct). Omitted at the default view, like OSS's draw().
+    ...(view.zoom !== 1 || view.panX !== 0 || view.panY !== 0 ? { mask_direct: true } : {}),
     shadow_enabled: doc.shadow_enabled,
     shadow_overrides: doc.shadow_overrides,
     // Shadow Path preview. Defaulted to [] and omitted entirely when empty, so

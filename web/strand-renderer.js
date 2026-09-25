@@ -189,6 +189,11 @@ let NUM_STEPS = 2; // loaded reference setting (user_settings.txt NumSteps:2)
 // mask's outline (masked_strand.py:1228-1231).
 const HIGHLIGHT_COLOR_DEFAULT = { r: 255, g: 0, b: 0, a: 255 };
 let HIGHLIGHT_COLOR = HIGHLIGHT_COLOR_DEFAULT;
+// OSS routes a masked strand through MaskedStrand._draw_direct instead of draw()
+// whenever the canvas is zoomed or panned (masked_strand.py:668). meta.mask_direct
+// says which of the two paths this frame mirrors; absent => draw(), which is what
+// the oracle renders at zoom 1 with no pan.
+let MASK_DIRECT = false;
 
 // Apply the shadow/highlight settings carried on `meta`, falling back to the oracle
 // constants for any key the caller omits. Called at EVERY render entry point so a
@@ -201,6 +206,7 @@ function applyPaintSettings(meta) {
   // bounded to 1..10 (settings_dialog.py), so a 0 would make every width NaN.
   NUM_STEPS = Number.isFinite(m.num_steps) && m.num_steps >= 1 ? Math.round(m.num_steps) : 2;
   HIGHLIGHT_COLOR = m.highlight_color && m.highlight_color.a != null ? m.highlight_color : HIGHLIGHT_COLOR_DEFAULT;
+  MASK_DIRECT = !!m.mask_direct;
   ARROW_PARAMS = Object.assign({}, ARROW_DEFAULTS, m.arrow_params || {});
   EXTENSION_PARAMS = Object.assign({}, EXTENSION_DEFAULTS, m.extension_params || {});
   // Absent => true => the strand's own colour, which is what the oracle renders.
@@ -2891,15 +2897,24 @@ function defaultSubtracted(s, o, byLayer) {
 // (MAX_BLUR), not the 29.99 signature default, so the width/alpha table is the
 // regular faded loop's. No separate unclipped solid-core pass for masks (unlike
 // strands); only the clipped faded strokes plus a clipped inner-core fill.
-// masked_strand.py's zoomed/panned _draw_direct path passes a 1px ring of the
-// first outline instead of the outline itself; this follows draw(), the path the
-// canvas takes at zoom 1 with no pan (and the one the oracle renders).
+// draw() (zoom 1, no pan) passes the first component's stroked outline as
+// first_path. The zoomed/panned _draw_direct path (MASK_DIRECT) passes
+// QPainterPathStroker().createStroke(outline) instead: the stroker's default
+// width of 1 (setWidth(0) is clamped to 1), so a 1px ring straddling the outline.
 function drawMaskShadow(ms, first, second, fw, fsw, sw, ssw, P, enableThird, S) {
   // first_path / second_path = get_stroked_path_for_strand: the component
   // footprint at (w+2sw) PLUS its visible attached start circle, the same
   // outline the mask body's stroke layer uses (shared memo entries).
-  const firstPath = cachedGeom(`mcomp|${first.layer_name}|${fw + 2 * fsw}`,
+  let firstPath = cachedGeom(`mcomp|${first.layer_name}|${fw + 2 * fsw}`,
     () => maskComponentPath(first, P, enableThird, S, fw + 2 * fsw));
+  if (MASK_DIRECT && firstPath) {
+    // The ring is built from the memoized outline, so it goes in its own entry
+    // and the outline itself is left untouched for the mask body.
+    const outline = firstPath;
+    firstPath = cachedGeom(`mring|${first.layer_name}|${fw + 2 * fsw}`,
+      () => strokedRegionOutline(outline, 1 * S));
+    outline.remove();
+  }
   const secondPath = cachedGeom(`mcomp|${second.layer_name}|${sw + 2 * ssw}`,
     () => maskComponentPath(second, P, enableThird, S, sw + 2 * ssw));
   if (!firstPath || !secondPath) {
@@ -3024,9 +3039,10 @@ function drawMasked(ms, byLayer, P, enableThird, S, shadowOnly) {
   // region (buildMaskPath) — ON TOP of the body with a semi-transparent red outline.
   // Faithful to draw_highlight (masked_strand.py:1187-1215): width 6px, RoundCap/
   // RoundJoin, NoBrush (fill null), color = highlight_color with alpha forced to 128
-  // (rgba(255,0,0,128)). That is the default-zoom click highlight routed via
-  // draw_highlighted_masked_strand; the 2px variant at masked_strand.py:763-775 is
-  // only the zoomed/panned _draw_direct fallback. NOTE the intentional asymmetry vs
+  // (rgba(255,0,0,128)), routed via draw_highlighted_masked_strand. When zoomed or
+  // panned (MASK_DIRECT), _draw_direct has already stroked the same path at 2px
+  // (masked_strand.py, `if self.is_selected` in _draw_direct) before the canvas
+  // adds the 6px one, so both are drawn, 2px first. NOTE the intentional asymmetry vs
   // drawStrand — regular strands draw the halo UNDER the body, but a mask strokes its
   // outline OVER the body (OSS draws the mask body then draw_highlight last). Gated on
   // ms.is_selected so oracle fixtures (which never set it) are unaffected. buildMaskPath
@@ -3034,6 +3050,15 @@ function drawMasked(ms, byLayer, P, enableThird, S, shadowOnly) {
   // the returned path is LEFT on the canvas to be painted (not removed).
   if (ms.is_selected) {
     const hl = buildMaskPath(ms, byLayer, P, enableThird, S);
+    if (hl && MASK_DIRECT) {
+      const thin = hl.clone();
+      thin.fillColor = null;
+      thin.strokeColor = toColor({ r: HIGHLIGHT_COLOR.r, g: HIGHLIGHT_COLOR.g, b: HIGHLIGHT_COLOR.b, a: 128 });
+      thin.strokeWidth = 2 * S;
+      thin.strokeCap = 'round';
+      thin.strokeJoin = 'round';
+      hl.bringToFront();
+    }
     if (hl) {
       hl.fillColor = null;
       hl.strokeColor = toColor({ r: HIGHLIGHT_COLOR.r, g: HIGHLIGHT_COLOR.g, b: HIGHLIGHT_COLOR.b, a: 128 });
