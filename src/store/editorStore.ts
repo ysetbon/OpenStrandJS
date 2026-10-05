@@ -69,7 +69,9 @@ export function emptyDocument(): EditorDocument {
 const DEFAULT_SETTINGS: Settings = {
   curve_params: { base_fraction: 1.0, dist_multiplier: 2.0, exponent: 2.0 },
   grid_size: 28,
-  show_grid: false,
+  // OSS canvas.show_grid starts True on every launch (strand_drawing_canvas.py)
+  // and is never written to user_settings.txt; loadSettings re-applies this.
+  show_grid: true,
   snap_to_grid_enabled: true,   // OSS default; new strands draw free-angle, endpoints quantized to grid_size
   default_strand_color: DEFAULT_STRAND_COLOR,   // 200,170,230,255
   default_stroke_color: DEFAULT_STROKE_COLOR,   // 0,0,0,255
@@ -125,7 +127,7 @@ const SETTINGS_KEY = 'openstrandjs.settings';
 function loadSettings(): Settings {
   try {
     const raw = typeof localStorage !== 'undefined' && localStorage.getItem(SETTINGS_KEY);
-    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw), show_grid: DEFAULT_SETTINGS.show_grid };
   } catch { /* ignore */ }
   return { ...DEFAULT_SETTINGS };
 }

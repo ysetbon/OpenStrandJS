@@ -4,17 +4,26 @@ import { requestRender } from '../renderer/renderScheduler';
 import { fitPan, viewCenter, zoomAbout, ZOOM_PERCENTAGE } from '../interaction/viewTransform';
 import { STRINGS, isRTL, t } from './i18n';
 import { ossIcon } from './icons';
-import type { Language } from '../model/types';
+import type { Language, Theme } from '../model/types';
 import { historyShortLabel } from '../store/historyMeta';
 
 // OSS left control column (main_window.py) — sits at the top of the layer panel.
 // Four rows of 40×40 circular buttons. Colors are theme-independent literals
-// (UI_PORT_PLAN.md §2.3). Every button is functional.
+// (UI_PORT_PLAN.md §2.3) except Undo/Redo, which follow the theme. Every button
+// is functional.
 
-interface V { bg: string; bgh: string; bgp: string; bd: string; gc: string; gs: number; }
+// bdh/bdp: hover/pressed border (2px); bgd/bdd: disabled fill/border; dis: the
+// theme whose pre-made disabled icon (<icon>_disabled_<theme>.png) to show.
+// Only the themed Undo/Redo set them.
+interface V {
+  bg: string; bgh: string; bgp: string; bd: string; gc: string; gs: number;
+  bdh?: string; bdp?: string; bgd?: string; bdd?: string; dis?: Theme;
+}
 const vars = (v: V): React.CSSProperties => ({
   ['--bg' as string]: v.bg, ['--bgh' as string]: v.bgh, ['--bgp' as string]: v.bgp,
   ['--bd' as string]: v.bd, ['--gc' as string]: v.gc, ['--gs' as string]: `${v.gs}px`,
+  ...(v.bdh && { ['--bdh' as string]: v.bdh }), ...(v.bdp && { ['--bdp' as string]: v.bdp }),
+  ...(v.bgd && { ['--bgd' as string]: v.bgd }), ...(v.bdd && { ['--bdd' as string]: v.bdd }),
 });
 
 // Append the recorded provenance of the state an undo/redo would land on, e.g.
@@ -23,7 +32,17 @@ const vars = (v: V): React.CSSProperties => ({
 const withWhat = (tooltip: string, what: string): string => (what ? `${tooltip}\n${what}` : tooltip);
 
 const PURPLE: V = { bg: '#8A2BE2', bgh: '#DA70D6', bgp: '#663399', bd: '#6A1B9A', gc: '#fff', gs: 20 };
-const BLUE:   V = { bg: '#4387c2', bgh: '#2c5c8a', bgp: '#10253a', bd: '#3c77a5', gc: '#fff', gs: 24 };
+// Undo/Redo: the StrokeTextButton theme_colors table undo_redo_manager.py sets
+// on both buttons — blue (default), dark blue (dark), green (light), each with
+// its own disabled grey. A disabled StrokeTextButton paints its icon in
+// QIcon.Disabled mode, which Qt derives from the button's disabled fill; the
+// *_disabled_<theme>.png icons are that exact pixmap, made with Qt
+// (QStyle.generatedIconPixmap over undo.png / redo.png).
+const UNDO_REDO: Record<Theme, V> = {
+  default: { bg: '#4387c2', bgh: '#2c5c8a', bgp: '#10253a', bd: '#3c77a5', bdh: '#1d4168', bdp: '#ffffff', bgd: '#8a8a8a', bdd: '#696969', dis: 'default', gc: '#fff', gs: 24 },
+  dark:    { bg: '#3d5d78', bgh: '#5179a0', bgp: '#081a2f', bd: '#2c4e69', bdh: '#c8deec', bdp: '#7dbdff', bgd: '#4a4a4a', bdd: '#3d3d3d', dis: 'dark', gc: '#fff', gs: 24 },
+  light:   { bg: '#4d9958', bgh: '#286335', bgp: '#102513', bd: '#3c7745', bdh: '#1d4121', bdp: '#ffffff', bgd: '#acacac', bdd: '#9c9c9c', dis: 'light', gc: '#fff', gs: 24 },
+};
 const GOLD:   V = { bg: '#FFD700', bgh: '#FFA500', bgp: '#FF8C00', bd: '#B8860B', gc: '#000', gs: 20 };
 const RED:    V = { bg: '#8B0000', bgh: '#DC143C', bgp: '#400000', bd: '#4B0000', gc: '#fff', gs: 24 };
 const GREEN:  V = { bg: '#32CD32', bgh: '#00FF00', bgp: '#228B22', bd: '#228B22', gc: '#fff', gs: 20 };
@@ -55,7 +74,7 @@ function CCBtn(props: {
   // click instead).
   return (
     <button
-      className={`cc-btn${props.checked ? ' checked' : ''}${props.disabled ? ' disabled' : ''}`}
+      className={`cc-btn${props.v.bdh ? ' cc-themed' : ''}${props.checked ? ' checked' : ''}${props.disabled ? ' disabled' : ''}`}
       style={vars(props.v)}
       aria-label={props.tip}
       aria-disabled={props.disabled || undefined}
@@ -63,7 +82,7 @@ function CCBtn(props: {
       onMouseDown={(e) => { if (e.button === 2) props.onTip(props.tip); }}
       onContextMenu={(e) => e.preventDefault()}
     >
-      <img className="cc-icon" src={ossIcon(props.icon)} alt="" draggable={false} />
+      <img className="cc-icon" src={ossIcon(props.disabled && props.v.dis ? `${props.icon}_disabled_${props.v.dis}` : props.icon)} alt="" draggable={false} />
     </button>
   );
 }
@@ -92,6 +111,7 @@ export function ControlColumn() {
   const multiSel = useEditorStore((s) => s.multiSelectMode);
   const toggleMulti = useEditorStore((s) => s.toggleMultiSelect);
   const lang = useEditorStore((s) => s.settings.language);
+  const undoRedo = UNDO_REDO[useEditorStore((s) => s.settings.theme)];
 
   // The right-click tip currently held open (null = none). OSS hides it on the
   // right-button release; we also drop it if the release happens off the button
@@ -149,8 +169,8 @@ export function ControlColumn() {
     <div className="control-column">
       <div className="cc-row cc-row-top">
         <CCBtn v={PURPLE} icon="home" tip={tip('reset_tooltip', 'Reset states', lang)} onTip={setHeldTip} onClick={resetStates} />
-        <CCBtn v={BLUE} icon="undo" tip={undoTip} onTip={setHeldTip} disabled={!canUndo} onClick={() => { undo(); requestRender(); }} />
-        <CCBtn v={BLUE} icon="redo" tip={redoTip} onTip={setHeldTip} disabled={!canRedo} onClick={() => { redo(); requestRender(); }} />
+        <CCBtn v={undoRedo} icon="undo" tip={undoTip} onTip={setHeldTip} disabled={!canUndo} onClick={() => { undo(); requestRender(); }} />
+        <CCBtn v={undoRedo} icon="redo" tip={redoTip} onTip={setHeldTip} disabled={!canRedo} onClick={() => { redo(); requestRender(); }} />
       </div>
       <div className="cc-row cc-row-mid">
         <CCBtn v={GOLD} icon="zoom_in" tip={tip('zoom_in_tooltip', 'Zoom in', lang)} onTip={setHeldTip} onClick={() => zoomBy(1 + ZOOM_PERCENTAGE)} />

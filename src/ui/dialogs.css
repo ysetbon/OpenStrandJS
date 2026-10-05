@@ -68,7 +68,8 @@
 .gd-angle-xrow > button {
   background: var(--dialog-btn-bg, #e8e8e8);
   color: var(--text);
-  border: 1px solid var(--dialog-btn-border, #b0b0b0);
+  /* QDialog QPushButton: 2px solid border (#B0B0B0 / #CCCCCC / #000000). */
+  border: 2px solid var(--dialog-btn-border, #b0b0b0);
   border-radius: 4px;
   padding: 4px 12px;
   min-height: 28px;
@@ -77,11 +78,14 @@
 .modal-footer > button:not(.set-btn):hover,
 .gd-row > button:hover,
 .gd-angle-table button:hover,
-.gd-angle-xrow > button:hover { background: var(--button-hover, #dadada); }
+.gd-angle-xrow > button:hover { background: var(--dialog-btn-hover, #dadada); }
 .modal-footer > button:not(.set-btn):active,
 .gd-row > button:active,
 .gd-angle-table button:active,
-.gd-angle-xrow > button:active { background: var(--button-pressed, #c8c8c8); }
+.gd-angle-xrow > button:active {
+  background: var(--dialog-btn-pressed, #c8c8c8);
+  border-color: var(--dialog-btn-pressed-border, #a0a0a0);
+}
 .modal-footer > button:not(.set-btn):disabled,
 .gd-row > button:disabled,
 .gd-angle-table button:disabled,
@@ -497,7 +501,178 @@
   width: 54px;
   height: 24px;
   padding: 0;
-  border: 1px solid rgba(0, 0, 0, 0.35);
+  border: 1px solid #666666;  /* end_style_dialog.py swatch: #666666, dark #888888 */
   border-radius: 3px;
   cursor: pointer;
 }
+
+
+/* ======================================================================
+ * Per-dialog OSS theme colours. Each OSS dialog that sets its own sheet
+ * overrides the app-wide QDialog look; the selectors below scope those
+ * colours to the matching dialog via its root class. Sources:
+ * shadow_editor_dialog.py, group_shadow_editor_dialog.py, end_style_dialog.py,
+ * mask_grid_dialog.py, group_layers.py (rename / select / angle editor),
+ * numbered_layer_button.py (width config, colour dialog).
+ * ==================================================================== */
+
+/* Dialog backgrounds. */
+.theme-light .modal:has(.gd-shadow-editor),
+.theme-default .modal:has(.es-section),
+.theme-light .modal:has(.es-section),
+.theme-default .modal:has(.gd-maskgrid),
+.theme-light .modal:has(.gd-maskgrid),
+.theme-default .modal:has(.gd-angle-editor),
+.theme-light .modal:has(.gd-angle-editor) { background: #F5F5F5; }
+.theme-dark .modal:has(.gd-angle-editor) { background: #1C1C1C; }
+.theme-default .modal:has(:is(.gd-name-input, .gd-select-list)) { background: #FFFFFF; }
+
+/* Bold #F0F0F0 / 1px #BBBBBB buttons: shadow editors (light), end style
+ * (default + light); bold 2px #000 on #252525 in dark. */
+.theme-light .modal:has(.gd-shadow-editor) .modal-footer > button:not(.set-btn),
+.theme-default .modal:has(.es-section) .modal-footer > button:not(.set-btn),
+.theme-light .modal:has(.es-section) .modal-footer > button:not(.set-btn) {
+  background: #F0F0F0; border: 1px solid #BBBBBB; border-radius: 5px; font-weight: bold;
+}
+.theme-light .modal:has(.gd-shadow-editor) .modal-footer > button:not(.set-btn):hover,
+.theme-default .modal:has(.es-section) .modal-footer > button:not(.set-btn):hover,
+.theme-light .modal:has(.es-section) .modal-footer > button:not(.set-btn):hover { background: #E0E0E0; }
+.theme-light .modal:has(.gd-shadow-editor) .modal-footer > button:not(.set-btn):active,
+.theme-default .modal:has(.es-section) .modal-footer > button:not(.set-btn):active,
+.theme-light .modal:has(.es-section) .modal-footer > button:not(.set-btn):active { background: #D0D0D0; border-color: #BBBBBB; }
+.theme-dark .modal:has(:is(.gd-shadow-editor, .es-section)) .modal-footer > button:not(.set-btn) { font-weight: bold; }
+
+/* Rename / main-strand select (group_layers.py): bold, hover/press darken the border. */
+.theme-default .modal:has(.gd-name-input) :is(.modal-footer, .gd-row) > button,
+.theme-light .modal:has(.gd-name-input) :is(.modal-footer, .gd-row) > button {
+  background: #F0F0F0; border: 1px solid #BBBBBB; font-weight: bold;
+}
+.theme-default .modal:has(.gd-name-input) :is(.modal-footer, .gd-row) > button:hover,
+.theme-light .modal:has(.gd-name-input) :is(.modal-footer, .gd-row) > button:hover { background: #E0E0E0; border-color: #999999; }
+.theme-default .modal:has(.gd-name-input) :is(.modal-footer, .gd-row) > button:active,
+.theme-light .modal:has(.gd-name-input) :is(.modal-footer, .gd-row) > button:active { background: #D0D0D0; border-color: #888888; }
+.theme-dark .modal:has(.gd-name-input) :is(.modal-footer, .gd-row) > button:hover { border-color: #666666; }
+
+/* Mask grid buttons. */
+.modal:has(.gd-maskgrid) .modal-footer > button:not(.set-btn) {
+  background: #FFFFFF; border: 2px solid #CCCCCC; font-weight: bold;
+}
+.modal:has(.gd-maskgrid) .modal-footer > button:not(.set-btn):hover { background: #E8E8E8; border-color: #A0C0E0; }
+.modal:has(.gd-maskgrid) .modal-footer > button:not(.set-btn):active { background: #D0D0D0; }
+.theme-dark .modal:has(.gd-maskgrid) .modal-footer > button:not(.set-btn) { background: #252525; border-color: #000000; }
+.theme-dark .modal:has(.gd-maskgrid) .modal-footer > button:not(.set-btn):hover { background: #353535; border-color: #4A6FA5; }
+.theme-dark .modal:has(.gd-maskgrid) .modal-footer > button:not(.set-btn):active { background: #1A1A1A; }
+
+/* Blue 20px checkbox (mask_grid_dialog / shadow editors / end style: the
+ * _style_checkbox sheet with a white painted checkmark). The settings page's
+ * green boxes and the main-strand select list keep their own. */
+.modal input[type='checkbox']:not(.set-toggle):not(.gd-select-row > input),
+.modal .es-check input[type='checkbox'] {
+  -webkit-appearance: none; appearance: none;
+  width: 20px; height: 20px; margin: 0; flex: 0 0 auto;
+  border: 2px solid #AAAAAA; border-radius: 4px; background-color: #FFFFFF;
+  cursor: pointer;
+}
+.modal input[type='checkbox']:not(.set-toggle):not(.gd-select-row > input):hover,
+.modal .es-check input[type='checkbox']:hover { border-color: #888888; background-color: #F8F8F8; }
+.modal input[type='checkbox']:not(.set-toggle):not(.gd-select-row > input):checked,
+.modal .es-check input[type='checkbox']:checked {
+  background: #A0C0E0 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 70% no-repeat; border-color: #7090C0;
+}
+.modal input[type='checkbox']:not(.set-toggle):not(.gd-select-row > input):checked:hover,
+.modal .es-check input[type='checkbox']:checked:hover { background-color: #B0D0F0; border-color: #8AA0D0; }
+.modal input[type='checkbox']:not(.set-toggle):not(.gd-select-row > input):disabled,
+.modal .es-check input[type='checkbox']:disabled { background-color: #F0F0F0; border-color: #BBBBBB; cursor: default; }
+.theme-dark .modal input[type='checkbox']:not(.set-toggle):not(.gd-select-row > input),
+.theme-dark .modal .es-check input[type='checkbox'] { border-color: #666666; background-color: #2A2A2A; }
+.theme-dark .modal input[type='checkbox']:not(.set-toggle):not(.gd-select-row > input):hover,
+.theme-dark .modal .es-check input[type='checkbox']:hover { border-color: #888888; background-color: #454545; }
+.theme-dark .modal input[type='checkbox']:not(.set-toggle):not(.gd-select-row > input):checked,
+.theme-dark .modal .es-check input[type='checkbox']:checked { background-color: #4A6FA5; border-color: #6A9FD5; }
+.theme-dark .modal input[type='checkbox']:not(.set-toggle):not(.gd-select-row > input):checked:hover,
+.theme-dark .modal .es-check input[type='checkbox']:checked:hover { background-color: #5A7FB5; border-color: #7AAFF5; }
+.theme-dark .modal input[type='checkbox']:not(.set-toggle):not(.gd-select-row > input):disabled,
+.theme-dark .modal .es-check input[type='checkbox']:disabled { background-color: #1F1F1F; border-color: #444444; }
+
+/* Sliders: app QSlider (6px #E0E0E0 groove, 14px #CCCCCC handle) in default and
+ * light; end style / group move-rotate's #555555 / #AAAAAA in dark. */
+.modal input[type='range'] {
+  -webkit-appearance: none; appearance: none;
+  height: 6px; border-radius: 3px; background: #E0E0E0;
+}
+.modal input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 14px; height: 14px; border-radius: 7px; background: #CCCCCC; border: none;
+}
+.modal input[type='range']::-moz-range-thumb { width: 14px; height: 14px; border-radius: 7px; background: #CCCCCC; border: none; }
+.theme-dark .modal input[type='range'] { background: #555555; }
+.theme-dark .modal input[type='range']::-webkit-slider-thumb { background: #AAAAAA; }
+.theme-dark .modal input[type='range']::-moz-range-thumb { background: #AAAAAA; }
+.theme-dark .modal input[type='range']:hover::-webkit-slider-thumb { background: #CCCCCC; }
+.theme-dark .modal input[type='range']:hover::-moz-range-thumb { background: #CCCCCC; }
+
+/* Text / number fields (QLineEdit / QSpinBox in the group + width dialogs). */
+.modal input:is([type='number'], [type='text']):not(.set-num) {
+  background: #FFFFFF; color: #000000; border: 1px solid #CCCCCC; border-radius: 4px;
+}
+.theme-dark .modal input:is([type='number'], [type='text']):not(.set-num) {
+  background: #2B2B2B; color: #FFFFFF; border-color: #555555;
+}
+
+/* Shadow editors: toggle buttons, the "All" row, list frame, rows. */
+.gd-toggle-btn { background: #F0F0F0; border-color: #BBBBBB; font-weight: bold; }
+.gd-toggle-btn:hover { background: #E0E0E0; }
+.gd-toggle-btn.active { background: #A0C0E0; border-color: #7090C0; color: #000000; }
+.gd-toggle-btn.active:hover { background: #B0D0F0; }
+.theme-dark .gd-toggle-btn { background: #252525; border-color: #555555; }
+.theme-dark .gd-toggle-btn:hover { background: #505050; }
+.theme-dark .gd-toggle-btn.active { background: #4A6FA5; border-color: #6A9FD5; color: #FFFFFF; }
+.theme-dark .gd-toggle-btn.active:hover { background: #5A7FB5; }
+.gd-shadow-toggle-row { background: #EAEAEA; border: none; border-radius: 3px; }
+.theme-dark .gd-shadow-toggle-row { background: #353535; }
+.gd-shadow-toggle-row .gd-member-name { color: #333333; }
+.theme-dark .gd-shadow-toggle-row .gd-member-name { color: #DDDDDD; }
+.gd-shadow-scroll {
+  background: #FFFFFF; border-color: #CCCCCC; border-radius: 3px;
+  scrollbar-color: #BBBBBB #F0F0F0;
+}
+.theme-dark .gd-shadow-scroll { background: #3D3D3D; border-color: #555555; scrollbar-color: #666666 #2C2C2C; }
+.theme-light .gd-shadow-row { background: #FFFFFF; border: 1px solid #DDDDDD; border-radius: 3px; }
+.theme-dark .gd-shadow-row { background: #3D3D3D; border-radius: 3px; }
+.gd-swatch { border-color: #888888; }
+
+/* Mask grid: diagonal cells and grid lines. */
+.gd-maskgrid-diag { background: #E0E0E0; }
+.theme-dark .gd-maskgrid-diag { background: #404040; }
+.gd-maskgrid-scroll,
+.gd-maskgrid-table th,
+.gd-maskgrid-table td { border-color: #CCCCCC; }
+.theme-dark .gd-maskgrid-scroll,
+.theme-dark .gd-maskgrid-table th,
+.theme-dark .gd-maskgrid-table td { border-color: #555555; }
+
+/* Angle editor table (group_layers.py: the table's own sheet wins). */
+.gd-angle-table th { background: #E0E0E0; border: 1px solid #CCCCCC; }
+.gd-angle-table td { background: #FFFFFF; border: 1px solid #CCCCCC; }
+.theme-dark .gd-angle-table th { background: #3C3C3C; border-color: #555555; }
+.theme-dark .gd-angle-table td { background: #2B2B2B; border-color: #555555; }
+.theme-dark .gd-angle-table button,
+.theme-dark .gd-angle-xrow > button { background: #2B2B2B; border: 1px solid #777777; border-radius: 3px; }
+.theme-dark .gd-angle-table button:hover,
+.theme-dark .gd-angle-xrow > button:hover { background: #3C3C3C; border-color: #999999; }
+.theme-dark .gd-angle-table button:active,
+.theme-dark .gd-angle-xrow > button:active { background: #1C1C1C; border-color: #AAAAAA; }
+.theme-default .gd-angle-table button,
+.theme-default .gd-angle-xrow > button,
+.theme-light .gd-angle-table button,
+.theme-light .gd-angle-xrow > button { background: #F0F0F0; border: 1px solid #BBBBBB; }
+.theme-default .gd-angle-table button:hover,
+.theme-default .gd-angle-xrow > button:hover,
+.theme-light .gd-angle-table button:hover,
+.theme-light .gd-angle-xrow > button:hover { background: #E0E0E0; border-color: #AAAAAA; }
+.theme-default .gd-angle-table button:active,
+.theme-default .gd-angle-xrow > button:active,
+.theme-light .gd-angle-table button:active,
+.theme-light .gd-angle-xrow > button:active { background: #D0D0D0; border-color: #999999; }
+
+.theme-dark .gd-row > button.gd-color-well { border-color: #888888; }

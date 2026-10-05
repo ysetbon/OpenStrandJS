@@ -20,32 +20,34 @@ type ActionId = 'save' | 'load' | 'image';
 interface Btn {
   key: string;
   label?: string;                 // override when no translation key exists
-  c: [string, string, string];    // [normal, hover, pressed]
+  // [normal, hover, pressed, checked] — main_window.setup_button_styles; the
+  // 4th is the :checked fill (its 'disabled' column), absent on one-shot buttons.
+  c: [string, string, string, string?];
   mode?: ModeName;                 // exclusive mode button (checked == active mode)
   toggle?: ToggleId;              // checkable toggle bound to a flag
   action?: ActionId;             // one-shot, non-checkable
 }
 
 const BTNS: Btn[] = [
-  { key: 'view_mode',   c: ['#ccbaba', '#E2C4C4', '#B88A8A'], mode: 'view' },
+  { key: 'view_mode',   c: ['#ccbaba', '#E2C4C4', '#B88A8A', '#B88A8A'], mode: 'view' },
   // No Mask Mode button: masks are made from the layer panel's Masks tab (New
   // Mask), OSS 2.0 main_window.py (commit 9fc7cbd removed mask_button).
-  { key: 'select_mode', c: ['#F1C40F', '#F9E287', '#BB9A0C'], mode: 'select' },
-  { key: 'attach_mode', c: ['#9B59B6', '#D5A6E6', '#703D80'], mode: 'attach' },
-  { key: 'move_mode',   c: ['#D35400', '#FFA366', '#A84300'], mode: 'move' },
-  { key: 'rotate_mode', c: ['#3498DB', '#92C9F0', '#216B97'], mode: 'rotate' },
-  { key: 'toggle_grid', c: ['#E93E3E', '#FF7070', '#ab2e2e'], toggle: 'grid' },
-  { key: 'angle_adjust_mode', c: ['#B89EE6', '#D4C2F2', '#9B84C9'], mode: 'angle' },
+  { key: 'select_mode', c: ['#F1C40F', '#F9E287', '#BB9A0C', '#BB9A0C'], mode: 'select' },
+  { key: 'attach_mode', c: ['#9B59B6', '#D5A6E6', '#703D80', '#703D80'], mode: 'attach' },
+  { key: 'move_mode',   c: ['#D35400', '#FFA366', '#A84300', '#A84300'], mode: 'move' },
+  { key: 'rotate_mode', c: ['#3498DB', '#92C9F0', '#216B97', '#216B97'], mode: 'rotate' },
+  { key: 'toggle_grid', c: ['#E93E3E', '#FF7070', '#ab2e2e', '#ab2e2e'], toggle: 'grid' },
+  { key: 'angle_adjust_mode', c: ['#B89EE6', '#D4C2F2', '#9B84C9', '#7D6AA6'], mode: 'angle' },
   { key: 'save',        c: ['#E75480', '#FF9FBB', '#B64064'], action: 'save' },
   { key: 'load',        c: ['#8D6E63', '#BEA499', '#8D6E63'], action: 'load' },
   { key: 'save_image',  c: ['#7D344D', '#B36E89', '#7D344D'], action: 'image' },
-  { key: 'toggle_control_points', c: ['#4CAF50', '#81C784', '#388E3C'], toggle: 'points' },
-  { key: 'toggle_shadow', c: ['rgba(176,190,197,.7)', 'rgba(196,207,212,.7)', 'rgba(156,173,182,.7)'], toggle: 'shadow' },
-  { key: 'tabs', label: 'Tabs', c: ['#a34d92', '#b85baa', '#833a75'], toggle: 'tabs' },
+  { key: 'toggle_control_points', c: ['#4CAF50', '#81C784', '#388E3C', '#388E3C'], toggle: 'points' },
+  { key: 'toggle_shadow', c: ['rgba(176,190,197,.7)', 'rgba(196,207,212,.7)', 'rgba(156,173,182,.7)', 'rgba(136,156,167,.7)'], toggle: 'shadow' },
+  { key: 'tabs', label: 'Tabs', c: ['#a34d92', '#b85baa', '#833a75', '#b85baa'], toggle: 'tabs' },
 ];
 
-const btnVars = (c: [string, string, string]): React.CSSProperties =>
-  ({ ['--bg' as string]: c[0], ['--bgh' as string]: c[1], ['--bgp' as string]: c[2] });
+const btnVars = (c: Btn['c']): React.CSSProperties =>
+  ({ ['--bg' as string]: c[0], ['--bgh' as string]: c[1], ['--bgp' as string]: c[2], ['--bgc' as string]: c[3] ?? c[0] });
 
 export function Toolbar() {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -167,7 +169,10 @@ export function Toolbar() {
 
   const checked = (b: Btn): boolean => {
     if (b.mode) return mode === b.mode;
-    if (b.toggle === 'grid') return showGrid;
+    // OSS toggle_grid_button is checkable but starts unchecked while the grid
+    // shows (canvas.show_grid = True); each click flips both, so the button
+    // reads checked exactly when the grid is hidden.
+    if (b.toggle === 'grid') return !showGrid;
     if (b.toggle === 'points') return showCP;
     if (b.toggle === 'shadow') return shadowEnabled;
     if (b.toggle === 'tabs') return showTabs;

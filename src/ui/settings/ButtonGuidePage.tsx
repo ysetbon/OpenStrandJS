@@ -2,6 +2,30 @@ import type { ReactNode } from 'react';
 import { t, isRTL } from '../i18n';
 import { guideIconUrl, guideSvgUrl } from './assets';
 import type { PageProps } from './types';
+import { useEditorStore } from '../../store/editorStore';
+import type { RGBA } from '../../model/types';
+
+// Selection indicator icon, as settings_dialog.indicator_icon_data_url paints
+// it: the translucent canvas fill flattened (opaque) onto the canvas ground —
+// white, or #2C2C2C in the dark theme (canvas_ground_color) — inside a 2px
+// black outline, inset 2px on a size×size tile.
+function SelIcon({ shape, color, alpha, size = 29, dark }: {
+  shape: 'circle' | 'square'; color: [number, number, number]; alpha: number; size?: number; dark: boolean;
+}) {
+  const ground = dark ? 0x2c : 0xff;
+  const w = alpha / 255;
+  const mix = (c: number) => Math.round(c * w + ground * (1 - w));
+  const fill = `rgb(${mix(color[0])},${mix(color[1])},${mix(color[2])})`;
+  const inner = size - 4;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ verticalAlign: 'middle' }} aria-hidden>
+      {shape === 'circle'
+        ? <ellipse cx={2 + inner / 2} cy={2 + inner / 2} rx={inner / 2} ry={inner / 2} fill={fill} stroke="#000" strokeWidth={2} />
+        : <rect x={2} y={2} width={inner} height={inner} fill={fill} stroke="#000" strokeWidth={2} />}
+    </svg>
+  );
+}
+const rgb = (c: RGBA): [number, number, number] => [c.r, c.g, c.b];
 
 // Faithful port of the OpenStrand Studio settings "Button Guide" page
 // (settings_dialog.py: build around lines 2965-3254, rebuilt in
@@ -40,6 +64,8 @@ export function ButtonGuidePage({ lang }: PageProps) {
       ? '#000000'
       : '#333';
   const headStyle = { color: titleColor };
+  const dark = root?.classList.contains('theme-dark') ?? false;
+  const highlight = rgb(useEditorStore.getState().settings.highlight_color ?? { r: 255, g: 0, b: 0, a: 255 });
 
   // A description row rendered as a bold name + remainder, from a "*_desc" key.
   const descLi = (key: string): ReactNode => {
@@ -113,13 +139,16 @@ export function ButtonGuidePage({ lang }: PageProps) {
     { svg: 'bias_circle.svg', size: 24, nameKey: 'bias_circle_name', descKey: 'bias_circle_desc' },
   ];
 
-  // Selection indicators: [glyph, glyph color, name key, desc key].
-  const selectionRows: Array<{ glyph: string; color: string; nameKey: string; descKey: string }> = [
-    { glyph: '●', color: '#FF0000', nameKey: 'red_circle_name', descKey: 'red_circle_desc' },
-    { glyph: '●', color: '#0000FF', nameKey: 'blue_circle_name', descKey: 'blue_circle_desc' },
-    { glyph: '■', color: 'rgba(255, 0, 0, 1)', nameKey: 'red_square_name', descKey: 'red_square_desc' },
-    { glyph: '■', color: 'rgba(34,139,34, 1)', nameKey: 'green_square_name', descKey: 'green_square_desc' },
-    { glyph: '■', color: 'rgba(255, 222, 23, 1)', nameKey: 'yellow_square_name', descKey: 'yellow_square_desc' },
+  // Selection indicators, the five OSS rows (settings_dialog.py _sel_icon):
+  // the exact colours/alphas the canvas uses in move and attach modes. The red
+  // ones follow the user's highlight colour; control-point squares are 20px.
+  const YELLOW: [number, number, number] = [255, 230, 160];
+  const selectionRows: Array<{ icons: ReactNode; nameKey: string; descKey: string }> = [
+    { icons: <SelIcon shape="circle" color={highlight} alpha={60} dark={dark} />, nameKey: 'red_circle_name', descKey: 'red_circle_desc' },
+    { icons: <SelIcon shape="circle" color={[0, 0, 255]} alpha={60} dark={dark} />, nameKey: 'blue_circle_name', descKey: 'blue_circle_desc' },
+    { icons: <SelIcon shape="circle" color={YELLOW} alpha={140} dark={dark} />, nameKey: 'yellow_circle_name', descKey: 'yellow_circle_desc' },
+    { icons: <><SelIcon shape="square" color={highlight} alpha={38} dark={dark} />{' '}<SelIcon shape="square" color={YELLOW} alpha={70} dark={dark} /></>, nameKey: 'start_end_squares_name', descKey: 'start_end_squares_desc' },
+    { icons: <><SelIcon shape="square" color={[0, 100, 0]} alpha={38} size={20} dark={dark} />{' '}<SelIcon shape="square" color={YELLOW} alpha={70} size={20} dark={dark} /></>, nameKey: 'control_point_squares_name', descKey: 'control_point_squares_desc' },
   ];
 
   const mainWindowKeys = [
@@ -180,13 +209,13 @@ export function ButtonGuidePage({ lang }: PageProps) {
         <h2 style={headStyle}>{t('layer_context_menu_title', lang)}</h2>
         <p>{t('layer_context_menu_info', lang)}</p>
 
-        <h3 style={headStyle}>{t('main_strand_menu_title', lang)}</h3>
+        <h3>{t('main_strand_menu_title', lang)}</h3>
         <ul>{sharedCtx('ctx_stylize_end_side_desc')}</ul>
 
-        <h3 style={headStyle}>{t('attached_strand_menu_title', lang)}</h3>
+        <h3>{t('attached_strand_menu_title', lang)}</h3>
         <ul>{sharedCtx('ctx_stylize_end_side_attached_desc')}</ul>
 
-        <h3 style={headStyle}>{t('mask_strand_menu_title', lang)}</h3>
+        <h3>{t('mask_strand_menu_title', lang)}</h3>
         <ul>
           {ctxLi(['hide_layer', 'show_layer'], 'ctx_hide_show_desc')}
           {ctxLi(['shadow_only'], 'ctx_shadow_only_desc')}
@@ -207,7 +236,7 @@ export function ButtonGuidePage({ lang }: PageProps) {
         {/* Canvas indicators */}
         <h2 style={headStyle}>{t('canvas_indicators_title', lang)}</h2>
 
-        <h3 style={headStyle}>{t('control_points_title', lang)}</h3>
+        <h3>{t('control_points_title', lang)}</h3>
         <table>
           <tbody>
             {controlPointRows.map(({ svg, size, nameKey, descKey }) => (
@@ -225,11 +254,11 @@ export function ButtonGuidePage({ lang }: PageProps) {
           </tbody>
         </table>
 
-        <h3 style={headStyle}>{t('selection_indicators_title', lang)}</h3>
+        <h3>{t('selection_indicators_title', lang)}</h3>
         <ul>
-          {selectionRows.map(({ glyph, color, nameKey, descKey }) => (
+          {selectionRows.map(({ icons, nameKey, descKey }) => (
             <li key={nameKey} style={{ marginBottom: 12 }}>
-              <span style={{ color, fontSize: 18, fontWeight: 'bold' }}>{glyph}</span>{' '}
+              {icons}{' '}
               <span className="button-name">{t(nameKey, lang)}</span>
               {` - ${t(descKey, lang)}`}
             </li>

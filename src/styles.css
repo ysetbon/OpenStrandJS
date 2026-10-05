@@ -45,7 +45,8 @@ body {
 
 .splitter-handle {
   flex: 0 0 1px; width: 1px;
-  background: var(--panel-border); cursor: col-resize; position: relative;
+  /* Invisible like the OSS splitter handle: no line between canvas and panel. */
+  background: transparent; cursor: col-resize; position: relative;
 }
 .splitter-handle::after { content: ''; position: absolute; top: 0; bottom: 0; left: -3px; right: -3px; }
 
@@ -80,7 +81,8 @@ body {
   width: var(--panel-w, 260px); flex: 0 0 var(--panel-w, 260px);
   /* Both vars come from App.tsx; the min is the content floor (see there). */
   min-width: var(--panel-min-w, 260px);
-  border-inline-start: 1px solid var(--panel-border);
+  /* OSS panels are borderless (apply_theme: QWidget, QFrame { border: none }). */
+  border-inline-start: 1px solid transparent;
   background: var(--panel-bg); color: var(--text);
   display: flex; flex-direction: row; overflow: hidden;
 }
@@ -98,7 +100,7 @@ body {
 .lp-right {
   flex: 0 0 var(--group-panel-w, 113px); min-width: var(--group-panel-w, 113px);
   display: flex; flex-direction: column; overflow: hidden;
-  border-inline-start: 1px solid var(--panel-border);
+  border-inline-start: 1px solid transparent;
 }
 .lp-right .gp-panel { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 /* The column is exactly the button; the panel's own 220px floor must not push
@@ -215,16 +217,21 @@ body {
 .layer-state-title-row { display: flex; align-items: center; gap: 8px; }
 .layer-state-info-btn {
   width: 40px; height: 40px; flex: 0 0 auto;
-  border: 1px solid var(--panel-border); border-radius: 4px;
-  background: var(--panel-bg); color: var(--text); font-size: 16px; cursor: pointer;
+  /* A plain QDialog QPushButton in OSS (app sheet). */
+  border: 2px solid var(--dialog-btn-border); border-radius: 4px;
+  background: var(--dialog-btn-bg); color: var(--text); font-size: 16px; cursor: pointer;
 }
-.layer-state-info-btn:hover { background: var(--hover-bg, rgba(127, 127, 127, .15)); }
+.layer-state-info-btn:hover { background: var(--dialog-btn-hover); }
+.layer-state-info-btn:active { background: var(--dialog-btn-pressed); border-color: var(--dialog-btn-pressed-border); }
 .layer-state-text {
   width: 100%; box-sizing: border-box; height: 440px; resize: vertical;
   font: inherit; font-size: 13px; line-height: 1.35; white-space: pre; overflow: auto;
   background: var(--panel-bg); color: var(--text);
   border: 1px solid var(--panel-border); border-radius: 3px; padding: 6px;
 }
+/* The default and dark app sheets strip frame borders (light keeps one). */
+.theme-default .layer-state-text,
+.theme-dark .layer-state-text { border: none; }
 .layer-state-info { max-width: 520px; font-size: 13px; }
 
 /* ---- settings modal ---- */

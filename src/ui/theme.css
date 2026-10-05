@@ -15,12 +15,18 @@
   color-scheme: light;
   --window-bg: #ECECEC;
   --text: #000000;
-  --canvas-bg: #FFFFFF;
+  /* The OSS canvas paints no backdrop of its own: it shows the QWidget
+   * stylesheet background (#ECECEC here), not white. */
+  --canvas-bg: #ECECEC;
   --button-bg: #E8E8E8;
   --button-hover: #DADADA;
   --button-pressed: #C8C8C8;
   --dialog-btn-bg: #E8E8E8;
   --dialog-btn-border: #B0B0B0;
+  /* QDialog QPushButton :hover / :pressed (main_window.apply_theme). */
+  --dialog-btn-hover: #DADADA;
+  --dialog-btn-pressed: #C8C8C8;
+  --dialog-btn-pressed-border: #A0A0A0;
   --scrollbar-track: #DADADA;
   --scrollbar-handle: #BFBFBF;
   --scrollbar-handle-hover: #A0A0A0;
@@ -58,8 +64,8 @@
   --set-btn-pressed: #C8C8C8;
   --set-list-bg: #F5F5F5;
   --set-list-border: #CCCCCC;
-  --set-list-sel: #D0D0D0;
-  --set-list-hover: #E0E0E0;
+  --set-list-sel: Highlight;   /* no ::item:selected rule: platform Highlight */
+  --set-list-hover: transparent;  /* no ::item:hover rule */
   --set-combo-bg: #F5F5F5;
   --set-combo-border: #CCCCCC;
   --set-swatch-bg: #E8E8E8;
@@ -71,6 +77,23 @@
   --set-check-bg: #ffffff;
   --set-check-on: #28a745;
   --set-check-on-hover: #218838;
+  /* Combo arrow + popup (settings_dialog.py get_dropdown_arrow_css, the
+   * QAbstractItemView selection-background-color). */
+  --set-combo-arrow: #666666;
+  --set-pop-sel: #666666;
+  --set-pop-bg: #ECECEC;
+  /* Segmented spin box (segmented_spin_box.py _THEME_COLORS). */
+  --set-spin-bg: #FFFFFF;
+  --set-spin-border: #ADADAD;
+  --set-spin-btn: #F5F5F5;
+  --set-spin-btn-hover: #E4E4E4;
+  --set-spin-btn-pressed: #D0D0D0;
+  --set-spin-sep: #D5D5D5;
+  --set-check-hover-border: #999999;
+  --set-check-hover-bg: #f5f5f5;
+  --set-list-sel-text: HighlightText;
+  --set-scroll-handle: var(--scrollbar-handle);
+  --set-scroll-track: var(--scrollbar-track);
 }
 
 .theme-light {
@@ -83,6 +106,10 @@
   --button-pressed: #D0D0D0;
   --dialog-btn-bg: #F0F0F0;
   --dialog-btn-border: #CCCCCC;
+  /* QDialog QPushButton :hover / :pressed (main_window.apply_theme). */
+  --dialog-btn-hover: #E0E0E0;
+  --dialog-btn-pressed: #D0D0D0;
+  --dialog-btn-pressed-border: #B0B0B0;
   --scrollbar-track: #F5F5F5;
   --scrollbar-handle: #D4D4D4;
   --scrollbar-handle-hover: #B0B0B0;
@@ -119,8 +146,8 @@
   --set-btn-pressed: #D0D0D0;
   --set-list-bg: #FFFFFF;
   --set-list-border: #CCCCCC;
-  --set-list-sel: #E0E0E0;
-  --set-list-hover: #F0F0F0;
+  --set-list-sel: Highlight;   /* no ::item:selected rule: platform Highlight */
+  --set-list-hover: transparent;  /* no ::item:hover rule */
   --set-combo-bg: #FFFFFF;
   --set-combo-border: #CCCCCC;
   --set-swatch-bg: #F0F0F0;
@@ -132,6 +159,23 @@
   --set-check-bg: #ffffff;
   --set-check-on: #28a745;
   --set-check-on-hover: #218838;
+  /* Combo arrow + popup (settings_dialog.py get_dropdown_arrow_css, the
+   * QAbstractItemView selection-background-color). */
+  --set-combo-arrow: #333333;
+  --set-pop-sel: #666666;
+  --set-pop-bg: #FFFFFF;
+  /* Segmented spin box (segmented_spin_box.py _THEME_COLORS). */
+  --set-spin-bg: #FFFFFF;
+  --set-spin-border: #CCCCCC;
+  --set-spin-btn: #F5F5F5;
+  --set-spin-btn-hover: #E4E4E4;
+  --set-spin-btn-pressed: #D0D0D0;
+  --set-spin-sep: #D5D5D5;
+  --set-check-hover-border: #999999;
+  --set-check-hover-bg: #f5f5f5;
+  --set-list-sel-text: HighlightText;
+  --set-scroll-handle: var(--scrollbar-handle);
+  --set-scroll-track: var(--scrollbar-track);
 }
 
 .theme-dark {
@@ -144,6 +188,10 @@
   --button-pressed: #2D2D2D;
   --dialog-btn-bg: #252525;
   --dialog-btn-border: #000000;
+  /* QDialog QPushButton :hover / :pressed (main_window.apply_theme). */
+  --dialog-btn-hover: #505050;
+  --dialog-btn-pressed: #151515;
+  --dialog-btn-pressed-border: #000000;
   --scrollbar-track: #1A1A1A;
   --scrollbar-handle: #2D2D2D;
   --scrollbar-handle-hover: #4A4A4A;
@@ -183,7 +231,7 @@
   --set-list-sel: #505050;
   --set-list-hover: #4D4D4D;
   --set-combo-bg: #3D3D3D;
-  --set-combo-border: #505050;
+  --set-combo-border: #CCCCCC;  /* combo's own sheet: 1px solid #cccccc */
   --set-swatch-bg: #3D3D3D;
   --set-swatch-border: #505050;
   --set-swatch-hover-bg: #4D4D4D;
@@ -193,4 +241,21 @@
   --set-check-bg: #2d2d2d;
   --set-check-on: #28a745;
   --set-check-on-hover: #218838;
+  /* Combo arrow + popup (settings_dialog.py get_dropdown_arrow_css, the
+   * QAbstractItemView selection-background-color). */
+  --set-combo-arrow: #CCCCCC;
+  --set-pop-sel: #222222;
+  --set-pop-bg: #3D3D3D;
+  /* Segmented spin box (segmented_spin_box.py _THEME_COLORS). */
+  --set-spin-bg: #3D3D3D;
+  --set-spin-border: #505050;
+  --set-spin-btn: #333333;
+  --set-spin-btn-hover: #454545;
+  --set-spin-btn-pressed: #222222;
+  --set-spin-sep: #505050;
+  --set-check-hover-border: #888888;
+  --set-check-hover-bg: #3d3d3d;
+  --set-list-sel-text: #FFFFFF;
+  --set-scroll-handle: #505050;
+  --set-scroll-track: #2C2C2C;
 }

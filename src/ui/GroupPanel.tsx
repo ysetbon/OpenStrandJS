@@ -458,6 +458,7 @@ export function GroupPanel(props: GroupPanelProps): JSX.Element {
 
       {menu && (
         <ContextMenu
+          variant="group"
           items={menuItems(menu.group)}
           x={menu.x}
           y={menu.y}

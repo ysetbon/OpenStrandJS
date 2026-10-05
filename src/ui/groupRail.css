@@ -40,7 +40,7 @@
 }
 .gp-rail-create:hover:not(:disabled) { background: var(--create-group-hover); }
 .gp-rail-create:active:not(:disabled) { background: var(--create-group-pressed); }
-.gp-rail-create:disabled { cursor: default; opacity: 0.5; }
+.gp-rail-create:disabled { cursor: default; }  /* no visual change, like Create Group */
 
 /* Vertical-only scroller for the group tiles, no visible scrollbar. */
 .gp-rail-tiles {

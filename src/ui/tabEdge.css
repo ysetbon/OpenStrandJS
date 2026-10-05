@@ -147,4 +147,4 @@
 .tab-confirm-icon { flex: 0 0 auto; }
 .tab-confirm-text { display: flex; flex-direction: column; gap: 14px; }
 .tab-confirm-title { white-space: pre-wrap; }
-.tab-confirm-save { font-weight: 600; }
+.tab-confirm-save { font-weight: normal; }  /* QDialog QPushButton: font-weight normal */
