@@ -121,7 +121,9 @@ try {
           const raf = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
           const S = window.__store;
           const st = S.getState();
-          st.setSettings({ show_grid: false, show_hover_highlights: true, theme: 'default', language: 'en' });
+          // Light theme: the edge measurements assume a white canvas, and the
+          // default theme's canvas is #ECECEC like OSS.
+          st.setSettings({ show_grid: false, show_hover_highlights: true, theme: 'light', language: 'en' });
           if (!S.getState().doc.order.includes('1_1')) {
             const doc = window.__io.loadProject(fixture);
             doc.shadow_enabled = false;

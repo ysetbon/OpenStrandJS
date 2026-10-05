@@ -58,6 +58,9 @@ try {
   await page.waitForFunction(() => !!window.__store && !!window.__io, null, { timeout: 30000 });
   await page.evaluate(({ project }) => {
     const st = window.__store.getState();
+    // The grid shows by default (as in OSS); keep it off so the ink span
+    // measures the strands alone.
+    st.setSettings({ show_grid: false });
     st.loadDocument(window.__io.loadProject(project));
     st.setMode('move');
   }, { project });

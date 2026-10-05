@@ -122,7 +122,7 @@ const RUN = async (page, project, g) => page.evaluate(async ({ project, g }) => 
 
   // Deterministic starting state for every gesture.
   store.getState().loadDocument(window.__io.loadProject(project));
-  store.getState().setSettings({ show_grid: false, snap_to_grid_enabled: true, theme: 'default' });
+  store.getState().setSettings({ show_grid: false, snap_to_grid_enabled: true, theme: 'light' });  // white canvas in both trees
   store.getState().setMode(g.mode);
   store.getState().setSelection({ layerName: null, handle: null });
   await settle(20);
