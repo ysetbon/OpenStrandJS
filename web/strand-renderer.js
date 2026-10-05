@@ -586,7 +586,7 @@ function capEndQuad(center, angle, swpx, wpx) {
 
 // Collect end-cap pieces (pixel-space paper paths) for one strand, split into the
 // stroke-color layer and the fill-color layer.
-function collectCaps(s, strands, centerline, P, S) {
+function collectCaps(s, strands, centerline, P, S, startCapLowered = false) {
   const stroke = [], fill = [];
   const w = s.width || 0, sw = s.stroke_width || 0;
   const td = (w + 2 * sw) * S, wpx = w * S, swpx = sw * S;
@@ -613,8 +613,10 @@ function collectCaps(s, strands, centerline, P, S) {
       // but that flag is never serialized — the start_circle_stroke_color setter
       // derives it as (alpha == 0) on load (strand.py:534-541) — so with
       // startA === 0 it is always true for loaded OSS files; only an explicit
-      // false (editor-supplied) suppresses it.
-      fill.push(capInner(cStart, wpx));
+      // false (editor-supplied) suppresses it. A lowered cap is painted by the
+      // parent instead (shader_utils.lowered_start_cap, attached_strand.py
+      // `_start_cap_lowered`).
+      if (!startCapLowered) fill.push(capInner(cStart, wpx));
     }
     // end — half-circle only when a child attaches there (no alpha gate, per Qt)
     if (hc[1] && childEnd) {
@@ -1301,35 +1303,6 @@ function buildShadowCasterCore(s, P, enableThird, S) {
   return strandFootprintAtWidth(s, P, enableThird, S, w + 2 * sw);
 }
 
-// Cut the caster CORE at every UNFOLDED end. Faithful port of the transparent-
-// circle subtraction in draw_strand_shadow (shader_utils.py:528-556): for each end
-// idx that is has_circles[idx] AND has a transparent circle stroke (alpha 0), Qt
-// subtracts a FULL circle of radius adj_radius = (w+2sw)/1.5 centred at start
-// (idx 0) / end (idx 1) from the square-capped body core, so the unfolded end (an
-// unfolded plain strand OR an unfolded AttachedStrand start) casts a rounded, cut-
-// back footprint instead of a square end-cap halo. Returns the (possibly new,
-// possibly empty) core; the caller removes it. Radius uses the *S convention.
-function subtractTransparentEndCaps(core, s, P, S) {
-  const hc = s.has_circles || [false, false];
-  if (!hc[0] && !hc[1]) return core;
-  const w = s.width || 0, sw = s.stroke_width || 0;
-  const r = ((w + 2 * sw) / 1.5) * S;
-  const startA = circleStrokeAlpha(effStartStroke(s));
-  const endA = circleStrokeAlpha(effEndStroke(s));
-  let out = core;
-  const cut = (centre) => {
-    if (!out) return;
-    const c = new paper.Path.Circle(centre, r);
-    const d = out.subtract(c);
-    c.remove();
-    out.remove();
-    out = d;
-  };
-  if (hc[0] && startA === 0) cut(P(s.start));
-  if (hc[1] && endA === 0) cut(P(s.end));
-  return out;
-}
-
 // build_shadow_circle_geometry(strand): caster end-circles only, radius
 // ((w+2sw)/2 + 2)*S (the +2 IS scaled). The MAX_BLUR vs MAX_BLUR+2 arg distinction
 // is moot — the builder always uses (w+2sw)/2+2 for the radius. Qt
@@ -1380,28 +1353,17 @@ function shadowBlurSteps() {
   return steps;
 }
 
-// Cast strand `s` (at list index `i`) onto every already-drawn lower strand
-// (j < i). Faithful port of draw_strand_shadow:
-//   • caster CORE  = build_shadow_geometry(s, 0, include_circles=False)
-//   • caster CIRCLES = build_shadow_circle_geometry(s)  (radius (w+2sw)/2+2)
-//   For each receiver o (gated by §3): region = (core ∪ circles) ∩ rendered(o).
-//     Accumulate non-empty survivors into `combined` (UNION), keep each one's
-//     own outline for Pass B, and grow `clip` from the receiver geometry the
-//     way Qt grows clip_path (union while winding, XOR once even-odd).
-//   PASS A: fill `combined` SOLID at alpha 150, SourceOver, UNCLIPPED.
-//   PASS B: in a Group clipped to `clip`, run NUM_STEPS stroke passes over every
-//     survivor outline plus the caster's circle outlines, NOT united (Qt's
-//     total_shadow_path is built with addPath), FlatCap / RoundJoin, with the
-//     computed width/alpha table.
-// Drawn BEFORE the caster's own body so the body covers the inner shadow and
-// only the fringe over lower strands shows.
-// Per-pair survivor region for caster `s` (rank i) onto receiver `o` (rank j):
-// receiver rendered geometry, caster∩receiver, then the renderer's subtractions
-// IN ORDER (Qt: subtracted_layers -> mask-blocking -> intermediate). Shared by
-// castStrandShadow and the auto_shadow probe so the two can never diverge.
+// The pre-2.0 per-pair shadow region, kept ONLY as auto_shadow.py's legacy
+// measure (_surviving_shadow, 407728c): caster ∩ receiver rendered geometry,
+// then IN ORDER the subtracted layers, the shadow blockers of the visible masks
+// above the caster, the blockers of the visible masks the receiver is a
+// component of (_subtract_visible_component_mask_coverage), and the strands in
+// between. AUTO_HIDE_SURVIVAL_RATIO was tuned on it, so the pairs auto_shadow
+// hides stay the same; the renderer itself no longer cuts mask blockers (see the
+// 2.0 pipeline: pairShadow / collectShadow).
 // Returns {region, recv, clipBlocker} — any may be null; the CALLER removes all
 // three paths. `rejectBounds` (optional) short-circuits far-away receivers.
-function buildPairShadowRegion(s, i, o, j, strands, byLayer, P, enableThird, S, casterFootprint, ov, allowFull, rejectBounds) {
+function legacySurvivingRegion(s, i, o, j, strands, byLayer, P, enableThird, S, casterFootprint, ov, allowFull, rejectBounds) {
   // A mask receiver uses its crossing FILL region (get_proper_masked_strand_path
   // = get_mask_path); a regular/attached receiver uses its rendered body+circles.
   // Memoized per render: the same receiver is visited once per caster above it,
@@ -1525,244 +1487,108 @@ function buildArrowShadowPath(s, P, enableThird, S) {
   return out;
 }
 
-// The caster half of castStrandShadow, lifted out verbatim so the Shadow Path
-// preview overlay computes its geometry through exactly this code rather than a
-// second copy of it. A preview that can disagree with the shadow it previews is
-// worse than no preview, and a copy WOULD drift: this block already carries four
-// separate Qt quirks (mask casters drop their circles, transparent end caps are
-// cut, the arrow unites in, the reject bounds are the CORE's).
-// Returns null when the caster has no drawable footprint. The caller owns both
-// returned paths and must remove() them.
-function buildCasterFootprint(s, byLayer, P, enableThird, S) {
-  let core, circles = null;
-  if (s.type === 'MaskedStrand') {
-    core = buildMaskPath(s, byLayer, P, enableThird, S);
-    if (!core) return;
+// OSS's Shadow Path preview (strand_drawing_canvas.py, "Draw visible shadow
+// path(s)"; shader_utils.shadow_preview, 407728c): for each pair the shadow
+// editor has toggled on, the area the canvas shades — the pair's filled area and
+// its soft edge as far as it reaches — in translucent blue, with the outline of
+// the whole area, clipped like the shadow itself (the receiver's clip, the
+// "subtracted layers", and the pieces of masks drawn over it later). It comes
+// from the very code the canvas draws with (pairShadow / collectShadow), so the
+// preview cannot disagree with the shadow. A mask's row previews the shadow the
+// mask paints on its second strand (its first strand's lift shadow). Drawn last,
+// over the finished image, and never persisted.
+function shadowPreview(castName, recvName) {
+  const sCast = FC.byLayer[castName], oRecv = FC.byLayer[recvName];
+  if (!sCast || !oRecv || !SHADOW_ENABLED) return null;
+  const ci = rankOf(castName), ri = rankOf(recvName);
+  if (ci < 0 || ri < 0) return null;
+  let clips, fill, col, liftedLayer;
+  if (isMask(sCast)) {
+    const parts = maskParts(sCast);
+    if (!parts || parts.second.layer_name !== recvName || sCast.is_hidden === true
+        || !intersectionShadowVisible(sCast)) return null;
+    col = collectShadow(parts.first);
+    if (!col || !col.lifts.length) return null;
+    const clip = maskLiftClip(sCast);
+    if (!clip) return null;
+    clips = [clip];
+    fill = unionOf(col.lifts);
+    liftedLayer = parts.first.layer_name;
   } else {
-    core = buildShadowCasterCore(s, P, enableThird, S);
-    if (!core) return;
-    // Unfolded (transparent-circle) ends cast NO square end-cap halo: Qt
-    // draw_strand_shadow subtracts a full circle of radius (w+2sw)/1.5 from the
-    // caster CORE at every end that is has_circles[idx] AND transparent (circle
-    // stroke alpha 0) BEFORE the receiver intersection (shader_utils.py:528-556).
-    // Cut here — inside the render path only, NOT in buildShadowCasterCore — so
-    // the auto_shadow probe (computeShadowPairAreas) keeps OSS's un-cut raw
-    // footprint (auto_shadow.py) and the two never desync.
-    core = subtractTransparentEndCaps(core, s, P, S);
-    if (!core) return;
-    // OSS unites the full arrow into the caster when arrow_casts_shadow is on
-    // (strand.py:2281). Added AFTER the transparent-end-cap subtraction so the
-    // arrow is not clipped by a cut that describes the body's own end.
-    const arrow = buildArrowShadowPath(s, P, enableThird, S);
-    if (arrow) {
-      const u = core.unite(arrow);
-      core.remove(); arrow.remove();
-      core = u;
+    if (sCast.is_hidden === true && !(sCast.full_arrow_visible === true && sCast.arrow_casts_shadow === true)) return null;
+    if (sCast.hide_shadow === true || ri >= ci) return null;
+    col = collectShadow(sCast);
+    if (!col) return null;
+    const cs = casterShadowPath(sCast);
+    const near = masksNear(sCast);
+    const b = boundsOf(sCast);
+    const pair = pairShadow(sCast, oRecv, {
+      shadowPath: cs.shadowPath, joints: cs.joints, circles: cs.circles, footprint: cs.footprint, near,
+      lifted: liftedNear(sCast, near), lowered: loweredNear(sCast, near),
+      reach: b ? b.expand(2 * ((sCast.width || 0) + 2 * (sCast.stroke_width || 0) + MAX_BLUR) * FC.S) : null,
+    });
+    if (!pair || pair.lift || pEmpty(pair.clip)) return null;
+    clips = [pair.clip];
+    if (!pEmpty(pair.clipBlocker)) clips.push(outsidePath(pair.clipBlocker, pair.clip.bounds));
+    fill = pair.fill || pair.outline;
+    liftedLayer = castName;
+  }
+  const rect = clips[0].bounds;
+  // _outside_covering_pieces: the pieces of the masks drawn after the caster.
+  for (const m of FC.strands.slice(ci + 1)) {
+    if (!isMask(m) || m.is_hidden === true) continue;
+    const parts = maskParts(m);
+    if (parts && parts.first.layer_name === liftedLayer) continue;
+    const piece = piecePath(m);
+    if (!pEmpty(piece) && piece.bounds.intersects(rect)) clips.push(outsidePath(piece, rect));
+  }
+  // The area: the fill plus the soft edge's reach (the stroke source stroked at
+  // the blur width, round joins) — every outline's band of half the blur.
+  const sources = col.outlines.map((x) => x.path).concat(col.lifts, col.circles ? [col.circles] : [])
+    .filter((p) => !pEmpty(p) && p.bounds.expand(2 * (MAX_BLUR / 2 + 2) * FC.S).intersects(rect));
+  const half = (MAX_BLUR / 2) * FC.S;
+  const sets = [pathRings(fill)];
+  for (const src of sources) {
+    const rings = pathRings(src);
+    sets.push(rings, rings.map((r) => offsetRing(r, half)), rings.map((r) => offsetRing(r, -half)));
+  }
+  const area = cyclesToPath(ringRegion(sets, (w) => {
+    if (w[0] > 0) return true;
+    for (let k = 1; k + 2 < w.length; k += 3) {
+      const inside = w[k] > 0;
+      if ((inside || w[k + 1] > 0) && !(inside && w[k + 2] > 0)) return true;
     }
-    circles = buildShadowCasterCircles(s, P, S);
-  }
-
-  // The caster's combined casting footprint (core ∪ circles), used both for the
-  // intersection with each receiver and as the boundary stroked in Pass B.
-  let casterFootprint = core.clone();
-  if (circles) {
-    const u = casterFootprint.unite(circles);
-    casterFootprint.remove();
-    casterFootprint = u;
-  }
-
-  // Inflated-bbox quick reject bound: the caster core's bounds grown by MAX_BLUR*S
-  // (mirrors shader_utils.py:688-702). A receiver whose bounds don't overlap this
-  // can't receive any blur fringe, so the pair is skipped before the boolean ops.
-  const rejectBounds = core.bounds.expand(2 * MAX_BLUR * S);
-  return { core, circles, casterFootprint, rejectBounds };
+    return false;
+  }));
+  return area ? { area, clips } : null;
 }
-
-// OSS's Shadow Path preview (strand_drawing_canvas.py:2794-2822): for each pair
-// the shadow editor has toggled on, paint that pair's computed shadow region as a
-// translucent blue overlay so the user can see WHERE a shadow actually lands.
-// Drawn last, over the finished image, and never persisted — it is an inspection
-// aid, not part of the drawing.
-//
-// The geometry comes from buildPairShadowRegion, the same function the real
-// shadow uses. OSS instead has a parallel implementation for the preview
-// (shader_utils.py calculate_shadow_for_layer_pair, :1936) which re-derives the
-// same pipeline and has already drifted from the renderer in one place — it
-// inflates the caster's circle geometry by max_blur_radius+2 where the render
-// path uses max_blur_radius. Sharing the one function is the point of a preview:
-// a preview that can disagree with the shadow it previews is worse than none.
-//
-// Visibility is gated exactly as castStrandShadow gates it, so a pair the port
-// would not draw previews as nothing — which is also what OSS does (:1986).
+// _outside: a clip for the part of `rect` (grown by 2) outside `path`.
+function outsidePath(path, rect) {
+  const box = new paper.Path.Rectangle({ rectangle: rect.expand(4 * FC.S), insert: false });
+  const kids = path.children && path.children.length ? path.children.map((k) => k.clone({ insert: false })) : [path.clone({ insert: false })];
+  return new paper.CompoundPath({ children: [box, ...kids], fillRule: 'evenodd', insert: false });
+}
 function drawVisibleShadowPaths(strands, byLayer, P, enableThird, S) {
-  if (!VISIBLE_SHADOW_PATHS.length) return;
-  const rank = new Map();
-  for (let k = 0; k < strands.length; k++) rank.set(strands[k].layer_name, k);
-
+  if (!VISIBLE_SHADOW_PATHS.length || !FC) return;
+  const seen = new Set();
   for (const pair of VISIBLE_SHADOW_PATHS) {
     if (!Array.isArray(pair) || pair.length < 2) continue;
-    const castName = pair[0], recvName = pair[1];
-    const i = rank.get(castName), j = rank.get(recvName);
-    // Shadow only falls downward, so a receiver at or above the caster has no
-    // region to show (OSS returns an empty path for it, :1957).
-    if (i == null || j == null || j >= i) continue;
-    const sCast = strands[i], oRecv = strands[j];
-    if (sCast.is_hidden === true || oRecv.is_hidden === true) continue;
-
-    const ov = (SHADOW_OVERRIDES[castName] || {})[recvName] || null;
-    if (ov && ov.visibility != null) {
-      if (ov.visibility === false) continue;
-    } else if (defaultShadowVisibilityFalse(sCast, oRecv)) {
-      continue;
-    }
-
-    const fp = buildCasterFootprint(sCast, byLayer, P, enableThird, S);
-    if (!fp) continue;
-    const pr = buildPairShadowRegion(
-      sCast, i, oRecv, j, strands, byLayer, P, enableThird, S,
-      fp.casterFootprint, ov, !!(ov && ov.allow_full_shadow), fp.rejectBounds);
-
-    if (pr.region && pr.region.area && Math.abs(pr.region.area) > 0.5) {
-      pr.region.fillColor = new paper.Color(0, 120 / 255, 1, 100 / 255);
-      pr.region.strokeColor = new paper.Color(0, 120 / 255, 1, 200 / 255);
-      // Scale by S like every other stroke here, so the 2px Qt pen stays 2px on
-      // screen instead of thinning as the supersample rises.
-      pr.region.strokeWidth = 2 * S;
-    } else if (pr.region) {
-      pr.region.remove();
-    }
-    if (pr.recv) pr.recv.remove();
-    fp.casterFootprint.remove();
-    fp.core.remove();
-    fp.circles && fp.circles.remove();
+    const key = pair[0] + '|' + pair[1];
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const pv = shadowPreview(pair[0], pair[1]);
+    if (!pv) continue;
+    const fillItem = pv.area.clone({ insert: false });
+    fillItem.fillColor = new paper.Color(0, 120 / 255, 1, 100 / 255);
+    fillItem.strokeColor = null;
+    // The outline of the whole area, not of each overlapping part. Scaled by S
+    // like every other stroke, so the 2px Qt pen stays 2px on screen.
+    const outline = pv.area.clone({ insert: false });
+    outline.fillColor = null;
+    outline.strokeColor = new paper.Color(0, 120 / 255, 1, 200 / 255);
+    outline.strokeWidth = 2 * S;
+    paintClipped([fillItem, outline], pv.clips, null);
   }
-}
-
-function castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i) {
-  // Caster footprint. A MaskedStrand caster uses its mask-crossing region as the
-  // core and casts NO circles (Qt get_proper_masked_strand_path excludes circles);
-  // a body strand uses the stroked body core + visible end circles.
-  const fp = buildCasterFootprint(s, byLayer, P, enableThird, S);
-  if (!fp) return;
-  const { core, circles, casterFootprint, rejectBounds } = fp;
-
-  let combined = null;          // PASS A survivor union (caster ∩ receivers)
-  const pieces = [];            // PASS B: every survivor's own outline (not united)
-  let clip = null;              // PASS B clip = ⋃ receiver rendered geometry
-  let clipEvenOdd = false;      // Qt clip_path.fillRule() == OddEvenFill
-  for (let j = 0; j < i; j++) {
-    const o = strands[j];
-    // A hidden strand paints nothing, so it receives nothing (Qt
-    // draw_strand_shadow skips hidden receivers, shader_utils.py:623). Absent/
-    // false on every fixture, so the oracle is unchanged.
-    if (o.is_hidden === true) continue;
-    // A mask CAN receive a shadow from a higher strand (Qt draw_strand_shadow uses
-    // other_stroke_path = get_proper_masked_strand_path when the receiver has
-    // get_mask_path, shader_utils.py:718-722) — including from one of its own
-    // components layered above it: Qt's same-mask skip only fires when BOTH
-    // layers are components, which a mask layer never is.
-    if (maskPairs.has(s.layer_name + '|' + o.layer_name)) continue; // same-mask component pair
-
-    // Per-pair shadow override (keyed [caster][receiver]). allow_full_shadow gates
-    // mask-blocking + intermediate.
-    const ov = (SHADOW_OVERRIDES[s.layer_name] || {})[o.layer_name] || null;
-    // Effective visibility: an explicit `visibility` key wins; otherwise the Qt
-    // default (get_default_shadow_visibility) — false ONLY for a masked caster onto
-    // its FIRST component (so a mask never casts a regular shadow on its source).
-    if (ov && ov.visibility != null) {
-      if (ov.visibility === false) continue;
-    } else if (defaultShadowVisibilityFalse(s, o)) {
-      continue;
-    }
-    const allowFull = !!(ov && ov.allow_full_shadow);
-
-    const { region, recv, clipBlocker } = buildPairShadowRegion(
-      s, i, o, j, strands, byLayer, P, enableThird, S, casterFootprint, ov, allowFull, rejectBounds);
-    if (!recv) continue;
-
-    if (region && region.area && Math.abs(region.area) > 0.5) {
-      pieces.push(region.clone({ insert: false }));
-      // survivor — accumulate into combined (union)
-      if (!combined) { combined = region; }
-      else { const u = combined.unite(region); combined.remove(); region.remove(); combined = u; }
-      // Pass B clip, grown the way Qt grows clip_path (shader_utils.py:986-995): a
-      // copy of the first receiver's path, then addPath for each later one, so it
-      // keeps that first path's FILL RULE until subtracted() hands back a resolved
-      // even-odd path. Under winding, addPath of same-orientation outlines (every
-      // Qt strand and mask outline is) is a union; under even-odd each receiver's
-      // own subpaths (outline, end circles) are XORed in instead.
-      if (!clip) {
-        clip = recv;
-        clipEvenOdd = o.type === 'MaskedStrand' && qtMaskPathOddEven(o, byLayer, P, enableThird, S);
-      } else if (!clipEvenOdd) {
-        const u = clip.unite(recv); clip.remove(); recv.remove(); clip = u;
-      } else {
-        recv.remove();
-        const recvPieces = o.type === 'MaskedStrand'
-          ? [buildMaskPath(o, byLayer, P, enableThird, S)].filter(Boolean)
-          : (buildShadowReceiverPieces(o, strands, P, enableThird, S) || []);
-        for (const piece of recvPieces) {
-          const x = clip.exclude(piece); clip.remove(); piece.remove(); clip = x;
-        }
-      }
-      // Qt subtracts this pair's subtracted-layer geometry from the accumulated
-      // clip so the faded Pass B stroke can't bleed into it (shader_utils.py:991-995).
-      // QPathClipper hands the subject back untouched when the bounds miss;
-      // otherwise the result is a resolved even-odd path. An emptied clip is
-      // re-seeded by the next receiver, exactly like clip_path.isEmpty().
-      if (clipBlocker && clip && clip.bounds.intersects(clipBlocker.bounds)) {
-        const c = clip.subtract(clipBlocker); clip.remove(); clip = c;
-        clipEvenOdd = true;
-        if (!clip || !clip.area || Math.abs(clip.area) <= 0.5) { clip && clip.remove(); clip = null; }
-      }
-    } else {
-      region && region.remove();
-      recv.remove();
-    }
-    if (clipBlocker) clipBlocker.remove();
-  }
-
-  if (combined) {
-    // PASS A — solid core, unclipped, full alpha (SourceOver = paper default).
-    const solid = combined.clone();
-    solid.fillColor = SHADOW_PAINT;
-    solid.strokeColor = null;
-
-    // PASS B — faded blur, clipped to the union of receiver geometries. Qt
-    // strokes total_shadow_path, which it builds with addPath, not a union: each
-    // survivor's own outline plus the caster's end-circle outlines, so edges that
-    // lie inside another survivor (overlapping receivers, the mask blocker's
-    // lattice, a circle over the body) are stroked too (shader_utils.py:1015-1024,
-    // 1367-1370, 1429). One compound path, so the steps don't double-darken where
-    // the outlines' strokes overlap, exactly like a single strokePath.
-    const total = passBOutline(pieces, circles, combined);
-    for (const piece of pieces) piece.remove();
-    const strokeItems = [];
-    for (const st of shadowBlurSteps()) {
-      const item = total.clone();
-      item.fillColor = null;
-      item.strokeColor = new paper.Color(SHADOW_COLOR.r / 255, SHADOW_COLOR.g / 255, SHADOW_COLOR.b / 255, st.alpha / 255);
-      item.strokeWidth = st.width * S;
-      // Closed outlines take no caps (Qt FlatCap never shows); the open interior
-      // runs end where Qt's closed outline turns onto the union outline through a
-      // RoundJoin, so they end round.
-      item.strokeCap = 'round';
-      item.strokeJoin = 'round'; // Qt RoundJoin
-      strokeItems.push(item);
-    }
-    total.remove();
-    // A clipped Group: first child is the clip mask, the rest are clipped to it.
-    // A clip a subtraction emptied is never set, so Qt strokes unclipped.
-    if (clip) new paper.Group({ children: [clip, ...strokeItems], clipped: true });
-    combined.remove();
-  } else {
-    if (clip) clip.remove();
-    for (const piece of pieces) piece.remove();
-  }
-
-  casterFootprint.remove();
-  core.remove();
-  circles && circles.remove();
 }
 
 // The edges Qt's Pass B strokes (every survivor outline plus the caster's circle
@@ -1824,6 +1650,1065 @@ function passBOutline(pieces, circles, combined) {
   }
   union.remove();
   return out;
+}
+
+// ============================================================================
+// OSS 2.0 shadow pipeline (shader_utils.py at 3e1b02f). One paint of the canvas
+// works out, per caster, every shadow it casts (draw_strand_shadow /
+// _pair_shadow), keeps the result for the masks drawn later in the same paint
+// (the painter's _frame_cache), and a mask casts nothing of its own: it paints
+// its first strand's shadow on its second strand again on top
+// (draw_mask_lift_shadow), its piece, and the shadows the piece covers
+// (draw_mask_restored_shadows). Near a mask the strands are restacked as at a
+// genuine crossing (_mask_sides). Unfolded joints whose cap must lie under the
+// strands crossing the joint are drawn by the parent (lowered_start_cap).
+//
+// Geometry is PIXEL space (world * S). Every helper below returns a DETACHED
+// paper item that the caller owns (boolean ops on detached operands stay
+// detached), so nothing is painted unless it is added to the layer on purpose.
+// ============================================================================
+
+// The frame cache (shader_utils._frame_cache): built at the start of a paint,
+// dropped at its end. Holds the strands in layer order and the memoised geometry.
+let FC = null;
+
+function fcBegin(strands, byLayer, P, enableThird, S) {
+  const rank = new Map();
+  strands.forEach((s, k) => rank.set(s.layer_name, k));
+  FC = { strands, byLayer, P, enableThird, S, rank, memo: new Map(), highlights: [] };
+  return FC;
+}
+function fcEnd() { FC = null; }
+
+const det = (it) => { if (it) it.remove(); return it; };
+const dclone = (it) => (it ? it.clone({ insert: false }) : null);
+const pArea = (p) => (p ? Math.abs(p.area || 0) : 0);
+// QPainterPath.isEmpty() after a boolean op: no area left.
+const pEmpty = (p) => !p || pArea(p) <= 1e-6;
+// World-unit area thresholds (OSS compares path areas in canvas units).
+const wArea = (a) => a * FC.S * FC.S;
+function fcMemo(key, build) {
+  if (FC.memo.has(key)) return FC.memo.get(key);
+  const v = build();
+  FC.memo.set(key, v);
+  return v;
+}
+// A memoised path, handed out as a fresh detached clone.
+function fcPath(key, build) {
+  const m = fcMemo(key, () => { const p = build(); return p ? det(p) : null; });
+  return dclone(m);
+}
+const pInter = (a, b) => (a && b ? det(a.intersect(b, { insert: false })) : null);
+const pSub = (a, b) => (a ? (b ? det(a.subtract(b, { insert: false })) : dclone(a)) : null);
+const pUnite = (a, b) => (a ? (b ? det(a.unite(b, { insert: false })) : dclone(a)) : dclone(b));
+// QPainterPath.intersects(path): the fills overlap or the outlines cross.
+function pIntersects(a, b) {
+  if (!a || !b || !a.bounds.intersects(b.bounds)) return false;
+  const i = pInter(a, b);
+  if (!pEmpty(i)) return true;
+  return a.getIntersections(b).length > 0;
+}
+function circlePath(c, r) { return new paper.Path.Circle({ center: c, radius: r, insert: false }); }
+
+const isMask = (t) => t && t.type === 'MaskedStrand';
+const rankOf = (name) => (FC.rank.has(name) ? FC.rank.get(name) : -1);
+function maskParts(m) {
+  const p = (m.layer_name || '').split('_');
+  if (p.length < 4) return null;
+  const first = FC.byLayer[p[0] + '_' + p[1]], second = FC.byLayer[p[2] + '_' + p[3]];
+  return first && second ? { first, second } : null;
+}
+function maskOf(name) {
+  // byLayer of the mask layers whose components are (first, second), visible ones.
+  return fcMemo('masksByPair', () => {
+    const m = new Map();
+    for (const t of FC.strands) {
+      if (!isMask(t) || t.is_hidden === true) continue;
+      const parts = maskParts(t);
+      if (!parts) continue;
+      const key = parts.first.layer_name + '|' + parts.second.layer_name;
+      if (!m.has(key)) m.set(key, t);
+    }
+    return m;
+  }).get(name);
+}
+function overrideOf(c, r) { return (SHADOW_OVERRIDES[c] || {})[r] || null; }
+// layer_state_manager.get_shadow_visibility (with get_default_shadow_visibility).
+function shadowVisible(c, r) {
+  const ov = overrideOf(c, r);
+  if (ov && 'visibility' in ov) return !!ov.visibility;
+  const cs = FC.byLayer[c];
+  if (isMask(cs)) { const parts = maskParts(cs); if (parts && parts.first.layer_name === r) return false; }
+  return true;
+}
+// layer_state_manager.get_subtracted_layers (with its masked-caster default).
+function subtractedLayersOf(c, r) {
+  const ov = overrideOf(c, r);
+  if (ov && 'subtracted_layers' in ov) return ov.subtracted_layers || [];
+  const cs = FC.byLayer[c];
+  if (isMask(cs)) {
+    const parts = maskParts(cs);
+    if (parts && parts.second.layer_name === r) return [parts.first.layer_name];
+  }
+  return [];
+}
+// MaskedStrand._intersection_shadow_visible: the (mask -> second) row.
+function intersectionShadowVisible(m) {
+  const parts = maskParts(m);
+  return !parts || shadowVisible(m.layer_name, parts.second.layer_name);
+}
+// _shadow_shown_for: the strand's draw paints its shadow pass.
+function shadowShownFor(t) { return SHADOW_ENABLED && t.hide_shadow !== true; }
+// _ends_at: a visible strand (not a mask) with an end on `pt` (world).
+function endsAt(t, pt) {
+  if (!t || isMask(t) || t.is_hidden === true) return false;
+  for (const e of [t.start, t.end]) if (e && Math.abs(e.x - pt.x) < 0.5 && Math.abs(e.y - pt.y) < 0.5) return true;
+  return false;
+}
+// _joined: `item` continues one of `strands` at a joint.
+function joinedTo(item, strands) {
+  for (const s of strands) for (const pt of [s.start, s.end]) if (pt && endsAt(item, pt)) return true;
+  return false;
+}
+
+// ---- geometry -----------------------------------------------------------------
+// _build_rendered_geometry (body + visible circles; a mask's get_mask_path).
+function geomRaw(t) {
+  return fcPath('raw|' + t.layer_name, () => det(isMask(t)
+    ? buildMaskPath(t, FC.byLayer, FC.P, FC.enableThird, FC.S)
+    : buildShadowReceiverGeom(t, FC.strands, FC.P, FC.enableThird, FC.S)));
+}
+// build_rendered_geometry: plus the lowered start caps the strand paints.
+function geomRendered(t) {
+  if (isMask(t)) return geomRaw(t);
+  const lowered = loweredCapsOf(t);
+  if (!lowered.length) return geomRaw(t);
+  return fcPath('rend|' + t.layer_name, () => {
+    if (lowered.length === 1) return dclone(lowered[0].info.parentGeometry);
+    let g = geomRaw(t);
+    for (const { info } of lowered) g = pUnite(g, info.cap);
+    return g;
+  });
+}
+// get_body_selection_path: the body at full width (styled footprint when styled).
+function bodySelection(t) {
+  const w = t.width || 0, sw = t.stroke_width || 0;
+  return fcPath('body|' + t.layer_name, () => det(strandFootprintAtWidth(t, FC.P, FC.enableThird, FC.S, w + 2 * sw)));
+}
+// get_selection_path: the body plus what draw() paints at each end (the cap
+// circle, else the side-line band, else an attached strand's inner cap fill).
+function selectionPath(t) {
+  if (isMask(t)) return piecePath(t);
+  return fcPath('sel|' + t.layer_name, () => {
+    let g = bodySelection(t);
+    if (!g) return null;
+    const S = FC.S;
+    const w = t.width || 0, sw = t.stroke_width || 0;
+    const td = (w + 2 * sw) * S;
+    const cl = det(buildCenterline(t, FC.P, FC.enableThird));
+    const len = cl.length;
+    const hc = t.has_circles || [false, false];
+    const cc = t.closed_connections || [false, false];
+    const attached = t.type === 'AttachedStrand';
+    for (const side of [0, 1]) {
+      const alpha = circleStrokeAlpha(side === 0 ? effStartStroke(t) : effEndStroke(t));
+      const pt = side === 0 ? t.start : t.end;
+      const centre = FC.P(pt);
+      let deco = null;
+      const junction = hasAttachedChildAt(pt, FC.strands, t) || !!cc[side];
+      const circleVisible = hc[side] && alpha > 0 && ((attached && side === 0) || junction);
+      if (attached && side === 0 && hc[0] && alpha === 0 && t.is_setting_staring_circle !== false) {
+        deco = circlePath(centre, (w * S) / 2);
+      } else if (circleVisible) {
+        deco = circlePath(centre, td / 2);
+      } else if (!hc[side] && !(attached && side === 0)
+                 && (side === 0 ? t.start_line_visible !== false : t.end_line_visible !== false)
+                 && !esActiveStyle(t, side)) {
+        // the side-line band: stroke_width thick, the full visible width, just
+        // outside the flat end (update_side_line)
+        const a = tangentAngle(cl, side === 0 ? 0 : len);
+        const shift = (sw * S) / 2 * (side === 0 ? -1 : 1);
+        const c = { x: centre.x + Math.cos(a) * shift, y: centre.y + Math.sin(a) * shift };
+        deco = det(localRect(c, -(sw * S) / 2, -td / 2, sw * S, td, a));
+      } else if (attached && side === 1 && hc[1]) {
+        deco = circlePath(centre, (w * S) / 2);
+      }
+      if (deco) g = pUnite(g, deco);
+    }
+    return g;
+  });
+}
+// _drawn_footprint
+function drawnFootprint(t) {
+  if (!isMask(t) && loweredStartCap(t)) return geomRaw(t);
+  return selectionPath(t);
+}
+// get_mask_path / get_mask_path_stroke / _mask_footprint (the piece).
+function maskFillPath(m) { return fcPath('mfill|' + m.layer_name, () => det(buildMaskPath(m, FC.byLayer, FC.P, FC.enableThird, FC.S))); }
+function maskStrokePath(m) { return fcPath('mstroke|' + m.layer_name, () => det(buildMaskStrokePath(m, FC.byLayer, FC.P, FC.enableThird, FC.S))); }
+function piecePath(m) {
+  return fcPath('piece|' + m.layer_name, () => {
+    const f = maskFillPath(m), s = maskStrokePath(m);
+    return f && s ? pUnite(s, f) : (f || s);
+  });
+}
+// _erased_area
+function erasedPath(m) {
+  return fcPath('erased|' + m.layer_name, () => {
+    let area = null;
+    for (const rect of m.deletion_rectangles || []) {
+      const rp = det(deletionPath(rect, FC.P, FC.S));
+      if (rp) area = area ? pUnite(area, rp) : rp;
+    }
+    return area;
+  });
+}
+const wholeMask = (m) => !(m.deletion_rectangles && m.deletion_rectangles.length);
+// _zone_of: the piece grown by the blur radius, minus the erased parts.
+function zonePath(m) {
+  return fcPath('zone|' + m.layer_name, () => {
+    const piece = piecePath(m);
+    if (pEmpty(piece)) return null;
+    let zone = grownPath(piece, MAX_BLUR * FC.S);
+    const erased = erasedPath(m);
+    if (zone && erased) zone = pSub(zone, erased);
+    return zone;
+  });
+}
+// strand.boundingRect() (mask: its strands' rects intersected), for _may_touch.
+function boundsOf(t) {
+  return fcMemo('bounds|' + t.layer_name, () => {
+    if (isMask(t)) {
+      const parts = maskParts(t);
+      if (!parts) return null;
+      const a = boundsOf(parts.first), b = boundsOf(parts.second);
+      return a && b ? a.intersect(b) : null;
+    }
+    // The rendered body (+ circles) and a stroke width more for the side lines
+    // just past the flat ends: cheaper than the selection path, and conservative.
+    const g = geomRaw(t);
+    return g ? g.bounds.expand(2 * ((t.stroke_width || 0) + 1) * FC.S) : null;
+  });
+}
+// _may_touch: cheap and conservative.
+function mayTouch(t, rect) {
+  const b = boundsOf(t);
+  if (!b || !rect) return true;
+  const owner = isMask(t) ? (maskParts(t) || {}).first || t : t;
+  const margin = ((owner.width || 0) + 2 * (owner.stroke_width || 0) + 4) * FC.S;
+  return b.expand(2 * margin).intersects(rect);
+}
+
+// ---- lowered start caps (shader_utils.lowered_start_cap) ----------------------
+function loweredStartCap(t) {
+  if (isMask(t) || t.type !== 'AttachedStrand') return null;
+  return fcMemo('lowered|' + t.layer_name, () => computeLoweredStartCap(t));
+}
+function computeLoweredStartCap(t) {
+  const parent = FC.byLayer[t.attached_to];
+  if (!parent || isMask(parent) || t.is_hidden === true || parent.is_hidden === true) return null;
+  const hc = t.has_circles || [false, false];
+  if (!hc[0] || circleStrokeAlpha(effStartStroke(t)) !== 0 || t.is_setting_staring_circle === false) return null;
+  const low = rankOf(parent.layer_name), high = rankOf(t.layer_name);
+  if (low < 0 || high < 0 || high - low < 2) return null;
+  const candidates = FC.strands.slice(low + 1, high).filter((c) => !isMask(c) && c.is_hidden !== true);
+  if (!candidates.length) return null;
+  const S = FC.S, w = t.width || 0, sw = t.stroke_width || 0;
+  const start = FC.P(t.start);
+  const cap = circlePath(start, (w * S) / 2);   // unfolded_start_cap (circular)
+  const capRect = cap.bounds;
+  const near = circlePath(start, (w * S) / 2 + 2 * S);   // _grown(cap, 2.0)
+  const nearJoint = pInter(bodySelection(parent), near);
+  const ownNearJoint = pInter(geomRaw(t), near);
+  const crossers = [];
+  for (const item of candidates) {
+    const b = boundsOf(item);
+    if (b && !b.expand(8 * S).intersects(capRect)) continue;
+    const fp = selectionPath(item);
+    if (pEmpty(fp) || !pIntersects(fp, cap)) continue;
+    if (pArea(pInter(fp, nearJoint)) > wArea(1.0) && pArea(pInter(fp, ownNearJoint)) <= wArea(1.0)) {
+      crossers.push({ item, fp });
+    }
+  }
+  if (!crossers.length) return null;
+  let covered = null;
+  for (const c of crossers) covered = covered ? pUnite(covered, c.fp) : dclone(c.fp);
+  const cl = det(buildCenterline(t, FC.P, FC.enableThird));
+  const angle = tangentAngle(cl, 0);
+  const strip = det(localRect(start, -2.5 * S, -(w * S) / 2, 5 * S, w * S, angle));
+  const patch = pSub(strip, covered);
+  const own = pUnite(geomRaw(t), strip);
+  const reach = circlePath(start, (w + 2 * sw) * S);
+  let shadeZone = null;
+  if (SHADOW_ENABLED) {
+    shadeZone = pSub(pInter(own, reach), covered);
+    for (const c of crossers) {
+      const over = pInter(pInter(c.fp, own), reach);
+      if (pArea(over) > wArea(1.0)) shadeZone = pSub(shadeZone, grownPath(over, (MAX_BLUR / 2 + 2) * S));
+    }
+  }
+  const parentGeometry = pUnite(geomRaw(parent), cap);
+  return { parent, cap, crossers: crossers.map((c) => c.item), patch, shadeZone, parentGeometry };
+}
+// lowered_caps_of: the lowered caps `t` paints for its attached strands.
+function loweredCapsOf(t) {
+  if (isMask(t)) return [];
+  return fcMemo('loweredOf|' + t.layer_name, () => {
+    const res = [];
+    for (const c of FC.strands) {
+      if (c.type !== 'AttachedStrand' || c.attached_to !== t.layer_name) continue;
+      const info = loweredStartCap(c);
+      if (info && info.parent === t) res.push({ child: c, info });
+    }
+    return res;
+  });
+}
+
+// ---- local restacking near masks (_mask_sides and friends) --------------------
+function liftedPairs() {
+  return fcMemo('liftedPairs', () => {
+    const set = new Set();
+    for (const t of FC.strands) {
+      if (!isMask(t) || t.is_hidden === true) continue;
+      const parts = maskParts(t);
+      if (parts) set.add(parts.first.layer_name + '|' + parts.second.layer_name);
+    }
+    return set;
+  });
+}
+// _overlap_within
+function overlapWithin(a, b, zone) {
+  if (!a || !b || !a.bounds.intersects(b.bounds)) return false;
+  const shared = pInter(a, b);
+  if (pEmpty(shared)) return false;
+  return pArea(pInter(shared, zone)) > wArea(1.0);
+}
+function maskSides(m) {
+  return fcMemo('sides|' + m.layer_name, () => {
+    const parts = maskParts(m);
+    if (!parts || m.is_hidden === true) return null;
+    const { first, second } = parts;
+    const fi = rankOf(first.layer_name), si = rankOf(second.layer_name);
+    if (fi < 0 || si < 0) return null;
+    if (pEmpty(piecePath(m))) return null;
+    const zone = zonePath(m);
+    if (!zone) return null;
+    const zoneRect = zone.bounds;
+    const firstGeom = geomRendered(first), secondGeom = geomRendered(second);
+    const lifted = liftedPairs();
+    const upper = new Set([first.layer_name]), lower = new Set([second.layer_name]), between = new Set();
+    for (const other of FC.strands) {
+      const name = other.layer_name;
+      if (other === first || other === second || isMask(other) || other.is_hidden === true) continue;
+      const idx = rankOf(name);
+      if ((idx <= fi && idx >= si) || !mayTouch(other, zoneRect)) continue;
+      const g = geomRendered(other);
+      const overFirst = idx > fi && !lifted.has(first.layer_name + '|' + name) && overlapWithin(g, firstGeom, zone);
+      const underSecond = idx < si && !lifted.has(name + '|' + second.layer_name) && overlapWithin(g, secondGeom, zone);
+      if (overFirst && underSecond) between.add(name);
+      else if (overFirst) upper.add(name);
+      else if (underSecond) lower.add(name);
+    }
+    return { mask: m, zone: det(zone), zoneRect, upper, lower, between,
+      first: first.layer_name, second: second.layer_name, whole: wholeMask(m) };
+  });
+}
+const sortByRank = (names) => [...names].sort((a, b) => rankOf(a) - rankOf(b));
+// _masks_near
+function masksNear(t) {
+  const b = boundsOf(t);
+  const reach = b ? b.expand(2 * MAX_BLUR * FC.S) : null;
+  const near = [];
+  for (const m of FC.strands) {
+    if (!isMask(m) || m.is_hidden === true) continue;
+    const sides = maskSides(m);
+    if (sides && (!reach || sides.zoneRect.intersects(reach))) near.push(sides);
+  }
+  return near;
+}
+// _lifted_near_masks
+function liftedNear(t, near) {
+  const out = [];
+  for (const sd of near) {
+    if (!sd.lower.has(t.layer_name)) continue;
+    const upper = new Set(sd.upper);
+    if (t.layer_name === sd.second && sd.whole) { out.push({ zone: null, names: new Set([sd.first]) }); upper.delete(sd.first); }
+    if (upper.size) out.push({ zone: sd.zone, names: upper });
+  }
+  return out;
+}
+// _sunk_near_masks
+function sunkNear(recv, near) {
+  const out = [];
+  for (const sd of near) {
+    if (!sd.upper.has(recv)) continue;
+    const lower = new Set(sd.lower);
+    if (recv === sd.first && sd.whole) { out.push({ zone: null, names: new Set([sd.second]) }); lower.delete(sd.second); }
+    if (lower.size) out.push({ zone: sd.zone, names: lower });
+  }
+  return out;
+}
+const restackedAbove = (u, l, near) => near.some((sd) => sd.upper.has(u) && sd.lower.has(l));
+// _raised_near_masks
+function raisedNear(recv, caster, near) {
+  const out = [];
+  const ri = rankOf(recv), ci = rankOf(caster);
+  if (!near.length || ri < 0 || ci < 0) return out;
+  for (const sd of near) {
+    if (!sd.lower.has(recv) || sd.lower.has(caster)) continue;
+    for (const name of sortByRank(sd.upper)) {
+      const idx = rankOf(name);
+      if (name === caster || idx >= ri || idx >= ci || restackedAbove(name, caster, near)) continue;
+      const everywhere = sd.whole && recv === sd.second && name === sd.first;
+      out.push({ area: everywhere ? null : sd.zone, name });
+    }
+  }
+  return out;
+}
+// _lowered_near_masks
+function loweredNear(t, near) {
+  const out = [];
+  const ti = rankOf(t.layer_name);
+  if (!near.length || ti < 0) return out;
+  for (const sd of near) {
+    if (!sd.upper.has(t.layer_name)) continue;
+    const below = [];
+    for (const name of sortByRank(sd.lower)) {
+      if (rankOf(name) <= ti) continue;
+      const everywhere = sd.whole && t.layer_name === sd.first && name === sd.second;
+      below.push({ name, idx: rankOf(name), area: everywhere ? null : sd.zone });
+    }
+    if (below.length) out.push({ upper: sd.upper, below });
+  }
+  return out;
+}
+// _mask_lift_zone: {zone (null = everywhere), mask} when a visible mask lifts
+// `first` over `second`.
+function maskLiftZone(first, second) {
+  const m = maskOf(first + '|' + second);
+  if (!m || pEmpty(piecePath(m))) return null;
+  return { zone: wholeMask(m) ? null : zonePath(m), mask: m };
+}
+
+// ---- subtractions --------------------------------------------------------------
+// _subtract_named_layer_paths -> {region, blocker}
+function subtractNamed(region, names) {
+  let blocker = null;
+  if (pEmpty(region) || !names || !names.length) return { region, blocker };
+  for (const name of names) {
+    const t = FC.byLayer[name];
+    if (!t || t.is_hidden === true) continue;
+    const sub = isMask(t) ? maskFillPath(t) : geomRendered(t);
+    if (pEmpty(sub)) continue;
+    region = pSub(region, sub);
+    blocker = blocker ? pUnite(blocker, sub) : sub;
+    if (pEmpty(region)) break;
+  }
+  return { region, blocker };
+}
+// _subtract_intermediates -> {outline, fill}
+function subtractIntermediates(region, names, exemptions) {
+  const exempt = new Map();
+  if (exemptions && exemptions.length) {
+    const between = new Set(names);
+    for (const { zone, names: set } of exemptions) for (const name of set) {
+      if (!between.has(name)) continue;
+      if (!exempt.has(name)) exempt.set(name, []);
+      exempt.get(name).push(zone);
+    }
+  }
+  if (!exempt.size) return { outline: subtractNamed(region, names).region, fill: null };
+  let cover = null;
+  const rect = region ? region.bounds : null;
+  for (const name of names) {
+    const t = FC.byLayer[name];
+    if (!t || t.is_hidden === true || !mayTouch(t, rect)) continue;
+    let g = isMask(t) ? maskFillPath(t) : geomRendered(t);
+    if (pEmpty(g)) continue;
+    for (const zone of exempt.get(name) || []) {
+      let covered;
+      if (zone === null) { g = null; covered = drawnFootprint(t); }
+      else { g = pSub(g, zone); covered = pInter(drawnFootprint(t), zone); }
+      cover = cover ? pUnite(cover, covered) : covered;
+      if (pEmpty(g)) break;
+    }
+    if (!pEmpty(g)) region = pSub(region, g);
+  }
+  const fill = cover && !pEmpty(cover) ? pSub(region, cover) : dclone(region);
+  return { outline: region, fill };
+}
+// _clip_off_lifted_strands -> {clip, changed}
+function clipOffLifted(recvPath, lifted, between) {
+  if (!lifted.length || !between.length) return { clip: dclone(recvPath), changed: false };
+  let keepOff = null;
+  const rect = recvPath.bounds;
+  for (const { zone, names } of lifted) {
+    for (const name of between) {
+      if (!names.has(name)) continue;
+      const t = FC.byLayer[name];
+      if (!t || !mayTouch(t, rect)) continue;
+      let piece = drawnFootprint(t);
+      if (zone) piece = pInter(piece, zone);
+      if (!pEmpty(piece)) keepOff = keepOff ? pUnite(keepOff, piece) : piece;
+    }
+  }
+  if (!keepOff) return { clip: dclone(recvPath), changed: false };
+  return { clip: pSub(recvPath, keepOff), changed: true };
+}
+// _clip_off_hidden_rows
+function clipOffHiddenRows(clip, caster, between) {
+  let changed = false;
+  if (!between.length || pEmpty(clip)) return { clip, changed };
+  const rect = clip.bounds;
+  for (const name of between) {
+    if (shadowVisible(caster, name)) continue;
+    const t = FC.byLayer[name];
+    if (!t || t.is_hidden === true || !mayTouch(t, rect)) continue;
+    const fp = isMask(t) ? piecePath(t) : drawnFootprint(t);
+    if (pEmpty(fp)) continue;
+    clip = pSub(clip, fp);
+    changed = true;
+  }
+  return { clip, changed };
+}
+
+// ---- the caster ----------------------------------------------------------------
+// _seam_slab: a 2*depth band across the flat end `idx`, a little past both edges.
+function seamSlab(t, idx, cl, depth = 2.0) {
+  const S = FC.S;
+  const len = cl.length;
+  if (len <= 0) return null;
+  const step = Math.min(1.0 * S, len / 2);
+  const end = cl.getPointAt(idx === 0 ? 0 : len);
+  const inner = cl.getPointAt(idx === 0 ? step : len - step);
+  if (!end || !inner) return null;
+  const along = Math.atan2(inner.y - end.y, inner.x - end.x);
+  const half = ((t.width || 0) + 2 * (t.stroke_width || 0)) / 2 + 2.0;
+  return det(localRect(end, -depth * S, -half * S, 2 * depth * S, 2 * half * S, along));
+}
+// _caster_shadow_path -> {shadowPath, joints: [{centre (world), disc}]}
+function casterShadowPath(t) {
+  return fcMemo('caster|' + t.layer_name, () => {
+    const S = FC.S;
+    let shadowPath = det(buildShadowCasterCore(t, FC.P, FC.enableThird, S));
+    const joints = [];
+    if (shadowPath) {
+      const hc = t.has_circles || [false, false];
+      const w = t.width || 0, sw = t.stroke_width || 0;
+      const radius = ((w + 2 * sw) / 1.5) * S;
+      let cl = null;
+      for (const idx of [0, 1]) {
+        if (!hc[idx] || circleStrokeAlpha(idx === 0 ? effStartStroke(t) : effEndStroke(t)) !== 0) continue;
+        const centre = idx === 0 ? t.start : t.end;
+        const disc = circlePath(FC.P(centre), radius);
+        if (FC.strands.some((o) => o !== t && endsAt(o, centre))) {
+          joints.push({ centre, disc });
+          if (!cl) cl = det(buildCenterline(t, FC.P, FC.enableThird));
+          const slab = seamSlab(t, idx, cl);
+          if (slab) shadowPath = pSub(shadowPath, slab);
+        } else {
+          shadowPath = pSub(shadowPath, disc);
+        }
+      }
+      // A full arrow that casts unites into the caster (strand.py:2281), after the
+      // end cuts, which describe the body's own ends.
+      const arrow = det(buildArrowShadowPath(t, FC.P, FC.enableThird, S));
+      if (arrow) shadowPath = pUnite(shadowPath, arrow);
+    }
+    const circles = det(buildShadowCasterCircles(t, FC.P, S));
+    const footprint = shadowPath && circles ? pUnite(shadowPath, circles) : shadowPath;
+    return { shadowPath, joints, circles, footprint };
+  });
+}
+
+// _pair_shadow: the shadow `s` casts on `o`, or null.
+function pairShadow(s, o, cc) {
+  if (o === s || !o.layer_name) return null;
+  if (o.is_hidden === true && o.full_arrow_visible !== true) return null;
+  const ti = rankOf(s.layer_name), oi = rankOf(o.layer_name);
+  if (ti < 0 || oi < 0) return null;
+  const shouldBeAbove = ti > oi;
+  const maskLift = maskLiftZone(s.layer_name, o.layer_name);
+  let lift = maskLift;
+  if (maskLift && shouldBeAbove && maskLift.zone === null) lift = null;
+  if (!shouldBeAbove && !lift) return null;
+  // Both strands are components of the same visible mask: the mask owns their crossing.
+  const sameMask = maskOf(s.layer_name + '|' + o.layer_name) !== undefined
+    || maskOf(o.layer_name + '|' + s.layer_name) !== undefined;
+  if (sameMask && !maskLift) return null;
+  // Quick reject (conservative).
+  const ob = boundsOf(o);
+  if (ob && cc.reach && !cc.reach.intersects(ob.expand(2 * ((o.width || 0) + 2 * (o.stroke_width || 0) + MAX_BLUR) * FC.S))) return null;
+
+  let recv = isMask(o) ? maskFillPath(o) : geomRendered(o);
+  const lowered = loweredCapsOf(o);
+  if (!isMask(o) && lowered.length && lowered.some(({ info }) => !info.crossers.includes(s))) {
+    recv = geomRaw(o);
+    for (const { info } of lowered) if (info.crossers.includes(s)) recv = pUnite(recv, info.cap);
+  }
+  if (pEmpty(recv)) return null;
+  // The caster's shadow area plus its circles; a strand that continues the
+  // caster at a hidden joint gets no halo around the joint (the disc).
+  let inter;
+  const discs = cc.joints.filter((j) => endsAt(o, j.centre));
+  if (discs.length) {
+    inter = dclone(cc.shadowPath);
+    for (const j of discs) inter = pSub(inter, j.disc);
+    if (cc.circles) inter = pUnite(inter, cc.circles);
+  } else {
+    inter = cc.footprint;
+  }
+  inter = pInter(inter, recv);
+  if (lift && lift.zone) inter = pInter(inter, lift.zone);
+  if (pEmpty(inter)) return null;
+
+  let ov = null;
+  if (lift) {
+    if (!intersectionShadowVisible(lift.mask)) return null;
+  } else {
+    ov = overrideOf(s.layer_name, o.layer_name);
+    if (!shadowVisible(s.layer_name, o.layer_name)) return null;
+  }
+  const allowFull = !!(ov && ov.allow_full_shadow);
+  const sub = subtractNamed(inter, subtractedLayersOf(s.layer_name, o.layer_name));
+  let outline = sub.region, fill = null;
+  if (!allowFull && !pEmpty(outline)) {
+    const names = lift ? [] : FC.strands.slice(Math.min(ti, oi) + 1, Math.max(ti, oi)).map((x) => x.layer_name);
+    const r = subtractIntermediates(outline, names, cc.lifted.concat(sunkNear(o.layer_name, cc.near)));
+    outline = r.outline; fill = r.fill;
+  }
+  if (!pEmpty(outline)) {
+    const cuts = [];
+    for (const { upper, below } of cc.lowered) {
+      if (upper.has(o.layer_name)) continue;
+      for (const b of below) {
+        if (oi < b.idx && !restackedAbove(o.layer_name, b.name, cc.near)) cuts.push({ area: b.area, name: b.name });
+      }
+    }
+    for (const c of raisedNear(o.layer_name, s.layer_name, cc.near)) cuts.push(c);
+    for (const { area, name } of cuts) {
+      let cut = geomRendered(FC.byLayer[name]);
+      if (area) cut = pInter(cut, area);
+      if (pEmpty(cut)) continue;
+      outline = pSub(outline, cut);
+      if (fill) fill = pSub(fill, cut);
+    }
+  }
+  if (pEmpty(outline)) return null;
+  let clip = null, plain = false;
+  if (!lift) {
+    const between = FC.strands.slice(Math.min(ti, oi) + 1, Math.max(ti, oi)).map((x) => x.layer_name);
+    const a = clipOffLifted(recv, cc.lifted, between);
+    const b = clipOffHiddenRows(a.clip, s.layer_name, between);
+    clip = b.clip;
+    plain = !a.changed && !b.changed && !loweredCapsOf(o).length;
+  }
+  return { outline, fill, lift: lift ? lift.mask : null, recv, clip, plain, clipBlocker: sub.blocker, o };
+}
+
+// draw_strand_shadow(collect_only=True), once per paint: every shadow `s` casts.
+// Returns null when it casts none, else {fills, outlines: [{recv, path}],
+// lifts: [path], circles, clip, total (the stroked outline, see passBOutline)}.
+function collectShadow(s) {
+  if (!SHADOW_ENABLED || isMask(s) || s.hide_shadow === true) return null;
+  if (s.is_hidden === true && !(s.full_arrow_visible === true && s.arrow_casts_shadow === true)) return null;
+  return fcMemo('collected|' + s.layer_name, () => {
+    const cs = casterShadowPath(s);
+    if (pEmpty(cs.shadowPath)) return null;
+    const near = masksNear(s);
+    const b = boundsOf(s);
+    const cc = {
+      shadowPath: cs.shadowPath, joints: cs.joints, circles: cs.circles, footprint: cs.footprint, near,
+      lifted: liftedNear(s, near), lowered: loweredNear(s, near),
+      reach: b ? b.expand(2 * ((s.width || 0) + 2 * (s.stroke_width || 0) + MAX_BLUR) * FC.S) : null,
+    };
+    const fills = [], outlines = [], lifts = [];
+    let clip = null, plainClip = true, clipOddEven = false;
+    for (const o of FC.strands) {
+      const pair = pairShadow(s, o, cc);
+      if (!pair) continue;
+      if (pair.lift) { lifts.push(pair.outline); continue; }
+      if (!clip) {
+        clip = pair.clip;
+        plainClip = pair.plain;
+        clipOddEven = pair.plain && isMask(o) && qtMaskPathOddEven(o, FC.byLayer, FC.P, FC.enableThird, FC.S);
+      } else if (plainClip && pair.plain && clipOddEven) {
+        // An odd-even mask path seeded the clip: addPath XORs each receiver in.
+        const pieces = isMask(o) ? [maskFillPath(o)]
+          : (buildShadowReceiverPieces(o, FC.strands, FC.P, FC.enableThird, FC.S) || []).map(det);
+        for (const piece of pieces) if (piece) clip = det(clip.exclude(piece, { insert: false }));
+      } else {
+        clip = pUnite(clip, pair.clip);
+        if (!(plainClip && pair.plain)) plainClip = false;
+      }
+      if (!pEmpty(pair.clipBlocker) && clip) {
+        if (clip.bounds.intersects(pair.clipBlocker.bounds)) clip = pSub(clip, pair.clipBlocker);
+        plainClip = false;
+      }
+      if (pEmpty(clip)) clip = null;
+      fills.push(pair.fill || pair.outline);
+      outlines.push({ recv: o.layer_name, path: pair.outline });
+    }
+    if (!outlines.length && !lifts.length) return null;
+    const res = { fills, outlines, lifts, circles: cs.circles, clip };
+    res.total = strokeTotal(outlines.map((x) => x.path).concat(lifts), cs.circles);
+    return res;
+  });
+}
+// The stroke source of a collected shadow (total_shadow_path): every outline,
+// the lift outlines and the caster's circles, drawn with each edge once.
+function strokeTotal(paths, circles) {
+  const pieces = paths.filter((p) => !pEmpty(p));
+  if (!pieces.length && !circles) return null;
+  let union = null;
+  for (const p of pieces) union = union ? pUnite(union, p) : dclone(p);
+  if (!union) union = dclone(circles);
+  const out = passBOutline(pieces, circles, union);
+  det(out);
+  return out;
+}
+function unionOf(paths) {
+  let u = null;
+  for (const p of paths) if (!pEmpty(p)) u = u ? pUnite(u, p) : dclone(p);
+  return u;
+}
+// The blur strokes of a stroke source (Pass B / _paint_collected_shadow).
+function blurStrokeItems(total) {
+  const items = [];
+  if (!total) return items;
+  for (const st of shadowBlurSteps()) {
+    const item = total.clone({ insert: false });
+    item.fillColor = null;
+    item.strokeColor = new paper.Color(SHADOW_COLOR.r / 255, SHADOW_COLOR.g / 255, SHADOW_COLOR.b / 255, st.alpha / 255);
+    item.strokeWidth = st.width * FC.S;
+    item.strokeCap = 'round';
+    item.strokeJoin = 'round';
+    items.push(item);
+  }
+  return items;
+}
+// Paint `items` with the painter clipped to every path in `clips` in turn (the
+// painter intersects them) and off `clipOut` (a compound path, see
+// highlightClipOut). Adds one nested clipped group to the active layer.
+function paintClipped(items, clips, clipOut) {
+  let children = items.filter(Boolean);
+  if (!children.length) return null;
+  const all = clips.filter((c) => c !== undefined);
+  if (clipOut) all.push(clipOut);
+  for (let k = all.length - 1; k >= 0; k--) {
+    const c = all[k];
+    if (!c) { for (const it of children) it.remove(); return null; }
+    children = [new paper.Group({ children: [dclone(c), ...children], clipped: true, insert: false })];
+  }
+  const g = children.length === 1 ? children[0] : new paper.Group({ children, insert: false });
+  paper.project.activeLayer.addChild(g);
+  return g;
+}
+// _paint_collected_shadow: the fill, then the same faded edge, clipped.
+function paintCollected(total, clips, fill, clipOut) {
+  const items = [];
+  if (fill && !pEmpty(fill)) {
+    const f = fill.clone({ insert: false });
+    f.fillColor = SHADOW_PAINT;
+    f.strokeColor = null;
+    items.push(f);
+  }
+  items.push(...blurStrokeItems(total));
+  return paintClipped(items, clips, clipOut);
+}
+
+// The strand's own shadow pass (draw_strand_shadow, painting): Pass A, the
+// filled areas, unclipped; Pass B, the faded edge, clipped to the receivers.
+function castStrandShadow(s) {
+  const col = collectShadow(s);
+  if (!col || !col.outlines.length) return;
+  const combined = unionOf(col.fills);
+  if (combined) {
+    combined.fillColor = SHADOW_PAINT;
+    combined.strokeColor = null;
+    paper.project.activeLayer.addChild(combined);
+  }
+  if (!col.clip) return;   // only a mask partner receives it; the mask paints it
+  paintClipped(blurStrokeItems(col.total), [col.clip], null);
+}
+
+// ---- selection outlines a mask keeps clear of (note_painted_highlight) ----------
+// The pixels (device = this render's offscreen) Qt's combined_highlight paints:
+// the body outline stroked 10 px (MiterJoin, FlatCap), the side-line bars and
+// the C-shape rings. Drawn on a scratch canvas from the paper items.
+function noteHighlight(s, items) {
+  if (FC) FC.highlights.push({ strand: s, items: items.map((it) => it.clone({ insert: false })) });
+}
+// _highlight_region as a clip path: everything but the touched pixels, or null.
+function highlightClipOut(m) {
+  const parts = maskParts(m);
+  if (!parts || !FC.highlights.length) return null;
+  return fcMemo('hlregion|' + m.layer_name, () => {
+    const above = Math.max(rankOf(parts.first.layer_name), rankOf(parts.second.layer_name));
+    const kept = FC.highlights.filter(({ strand }) => rankOf(strand.layer_name) > above && !isMask(strand)
+      && !joinedTo(strand, [parts.first, parts.second]));
+    if (!kept.length) return null;
+    const piece = piecePath(m);
+    if (!piece) return null;
+    const margin = (MAX_BLUR + 8) * FC.S;
+    const reach = piece.bounds.expand(2 * margin);
+    let bounds = null;
+    for (const { items } of kept) for (const it of items) {
+      const b = it.strokeBounds || it.bounds;
+      bounds = bounds ? bounds.unite(b) : b;
+    }
+    if (!bounds) return null;
+    bounds = bounds.intersect(reach);
+    if (bounds.width <= 0 || bounds.height <= 0) return null;
+    const x0 = Math.floor(bounds.x) - 1, y0 = Math.floor(bounds.y) - 1;
+    const W = Math.ceil(bounds.x + bounds.width) + 1 - x0, H = Math.ceil(bounds.y + bounds.height) + 1 - y0;
+    const cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    const ctx = cv.getContext('2d');
+    ctx.translate(-x0, -y0);
+    ctx.fillStyle = '#000'; ctx.strokeStyle = '#000';
+    for (const { items } of kept) for (const it of items) {
+      const p2 = new Path2D(it.pathData);
+      if (it.strokeWidth && it.strokeColor) {
+        ctx.lineWidth = it.strokeWidth;
+        ctx.lineCap = it.strokeCap || 'butt';
+        ctx.lineJoin = it.strokeJoin || 'miter';
+        ctx.miterLimit = it.miterLimit || 10;
+        ctx.stroke(p2);
+      }
+      if (it.fillColor) ctx.fill(p2, 'nonzero');
+    }
+    const data = ctx.getImageData(0, 0, W, H).data;
+    // Runs of touched pixels per row, merged into rectangles (QRegion bands).
+    const rects = [];
+    for (let y = 0; y < H; y++) {
+      let x = 0;
+      while (x < W) {
+        while (x < W && data[(y * W + x) * 4 + 3] === 0) x++;
+        if (x >= W) break;
+        const sx = x;
+        while (x < W && data[(y * W + x) * 4 + 3] !== 0) x++;
+        rects.push([x0 + sx, y0 + y, x - sx, 1]);
+      }
+    }
+    if (!rects.length) return null;
+    const big = new paper.Path.Rectangle({ point: [x0 - 1e5, y0 - 1e5], size: [W + 2e5, H + 2e5], insert: false });
+    const children = [big, ...rects.map(([x, y, w, h]) => new paper.Path.Rectangle({ point: [x, y], size: [w, h], insert: false }))];
+    return new paper.CompoundPath({ children, fillRule: 'evenodd', insert: false });
+  });
+}
+
+// ---- the mask -------------------------------------------------------------------
+// _mask_lift_clip: the part of the second strand that shows (only near the mask
+// when part of it is erased).
+function maskLiftClip(m) {
+  const parts = maskParts(m);
+  if (!parts || pEmpty(piecePath(m))) return null;
+  const { second } = parts;
+  let visible = geomRendered(second);
+  if (!visible) return null;
+  const si = rankOf(second.layer_name), mi = rankOf(m.layer_name);
+  if (si >= 0 && mi >= 0) {
+    const area = visible.bounds;
+    const covering = FC.strands.slice(Math.min(si, mi) + 1, Math.max(si, mi))
+      .filter((t) => mayTouch(t, area)).map((t) => t.layer_name);
+    visible = subtractNamed(visible, covering).region;
+  }
+  if (pEmpty(visible)) return null;
+  if (!wholeMask(m)) visible = pInter(visible, zonePath(m));
+  return pEmpty(visible) ? null : visible;
+}
+// _opaque_cover
+function opaqueCover(t, fp) {
+  if (t.shadow_only === true || t.full_arrow_visible === true) return null;
+  const sw = t.stroke_width || 0;
+  const strokeA = t.stroke_color ? (t.stroke_color.a == null ? 255 : t.stroke_color.a) : 255;
+  if (sw > 0 && strokeA === 255) return fp;
+  const fillA = t.color ? (t.color.a == null ? 255 : t.color.a) : 255;
+  if (fillA < 255) return null;
+  if (sw <= 0) return fp;
+  return erodedPath(fp, sw * FC.S);
+}
+// _covering_strands
+function coveringStrands(m) {
+  return fcMemo('covering|' + m.layer_name, () => {
+    const out = [];
+    const parts = maskParts(m);
+    if (!parts) return out;
+    const piece = piecePath(m);
+    if (pEmpty(piece)) return out;
+    const mi = rankOf(m.layer_name), above = Math.max(rankOf(parts.first.layer_name), rankOf(parts.second.layer_name));
+    if (mi < 0 || above < 0) return out;
+    const area = piece.bounds;
+    for (const t of FC.strands) {
+      const idx = rankOf(t.layer_name);
+      if (!(above < idx && idx < mi) || isMask(t) || t.is_hidden === true || !mayTouch(t, area)
+          || joinedTo(t, [parts.first, parts.second])) continue;
+      const solid = opaqueCover(t, drawnFootprint(t));
+      if (solid && pArea(pInter(solid, piece)) > wArea(1.0)) out.push({ t, solid: det(solid) });
+    }
+    return out;
+  });
+}
+// _piece_keep: where the piece may paint, or null for everywhere.
+function pieceKeep(m) {
+  return fcMemo('keep|' + m.layer_name, () => {
+    const covering = coveringStrands(m);
+    if (!covering.length) return null;
+    const stroke = maskStrokePath(m), piece = piecePath(m);
+    let b = piece.bounds;
+    if (stroke) b = b.unite(stroke.bounds);
+    let keep = new paper.Path.Rectangle({ rectangle: b.expand(8 * FC.S), insert: false });
+    for (const { solid } of covering) keep = pSub(keep, solid);
+    return keep;
+  });
+}
+// _runs_under
+function runsUnder(t, fp, piece) {
+  const shared = pInter(fp, piece);
+  if (pEmpty(shared)) return false;
+  const reach = Math.max(2.0, ((t.width || 0) + 2 * (t.stroke_width || 0)) / 4.0) * FC.S;
+  const d = reach * 0.7071;
+  let core = shared;
+  for (const [dx, dy] of [[reach, 0], [-reach, 0], [0, reach], [0, -reach], [d, d], [d, -d], [-d, d], [-d, -d]]) {
+    const moved = shared.clone({ insert: false });
+    moved.translate(new paper.Point(dx, dy));
+    core = pInter(core, moved);
+    if (pEmpty(core)) return false;
+  }
+  return pArea(core) > wArea(0.5);
+}
+// _cut_on_receiver: the collected shadow with its outlines on `recv` cut by `cut`.
+function cutOnReceiver(col, recv, cut, key) {
+  return fcMemo('cuton|' + key, () => {
+    if (!col.outlines.some((x) => x.recv === recv)) return { fill: unionOf(col.outlines.map((x) => x.path)), total: col.total };
+    const outlines = col.outlines.map((x) => (x.recv === recv && pIntersects(x.path, cut) ? pSub(x.path, cut) : x.path));
+    return { fill: unionOf(outlines), total: strokeTotal(outlines.concat(col.lifts), col.circles) };
+  });
+}
+// draw_mask_restored_shadows
+function drawRestoredShadows(m, clipOut) {
+  const parts = maskParts(m);
+  if (!parts || !SHADOW_ENABLED) return;
+  const { first, second } = parts;
+  const mi = rankOf(m.layer_name), fi = rankOf(first.layer_name);
+  if (mi < 0 || fi < 0) return;
+  const piece = piecePath(m);
+  if (pEmpty(piece)) return;
+  const area = piece.bounds;
+  const reach = area.expand(2 * MAX_BLUR * FC.S);
+  const uncovered = new Set(coveringStrands(m).map((c) => c.t));
+  const keep = pieceKeep(m);
+  for (const item of FC.strands) {
+    if (item === m || item === first || item === second) continue;
+    const idx = rankOf(item.layer_name);
+    if (idx < 0 || idx > mi) continue;
+    let total, fill, zone = null;
+    if (isMask(item)) {
+      const ip = maskParts(item);
+      if (!ip || ip.second !== first || item.is_hidden === true) continue;
+      if (!shadowShownFor(item) || !intersectionShadowVisible(item) || !mayTouch(item, reach)) continue;
+      const col = collectShadow(ip.first);
+      if (!col || !col.lifts.length) continue;
+      fill = unionOf(col.lifts);
+      total = col.total;
+      zone = wholeMask(item) ? null : zonePath(item);
+    } else {
+      if (idx < fi) continue;
+      if (!shadowShownFor(item) || !mayTouch(item, reach)) continue;
+      const col = collectShadow(item);
+      if (!col || !col.outlines.some((x) => x.recv === first.layer_name)) continue;
+      if (!uncovered.has(item) && mayTouch(item, area)) {
+        const fp = drawnFootprint(item);
+        if (joinedTo(item, [first, second])) {
+          if (pIntersects(fp, piece)) continue;
+        } else if (runsUnder(item, fp, piece)) {
+          continue;
+        }
+      }
+      const r = cutOnReceiver(col, second.layer_name, piece, item.layer_name + '|' + m.layer_name);
+      fill = r.fill;
+      total = r.total;
+    }
+    if (!fill && !total) continue;
+    const near = area.expand(2 * (MAX_BLUR / 2 + 2) * FC.S);
+    if ((!fill || !fill.bounds.intersects(area)) && (!total || !total.bounds.intersects(near))) continue;
+    const clips = [piece];
+    if (zone !== null) clips.push(zone);
+    if (keep) clips.push(keep);
+    paintCollected(total, clips, fill, clipOut);
+  }
+}
+// MaskedStrand.draw / _draw_direct (the mask paints at its own place in the order).
+function drawMask(m, shadowOnly) {
+  if (m.is_hidden === true) return;
+  const parts = maskParts(m);
+  if (!parts) return;
+  const { first } = parts;
+  const clipOut = highlightClipOut(m);
+  // The first strand's shadow on the second strand, where the mask lifts it.
+  if (SHADOW_ENABLED && m.hide_shadow !== true && intersectionShadowVisible(m)) {
+    const col = collectShadow(first);
+    if (col && col.lifts.length) {
+      const clip = maskLiftClip(m);
+      if (clip) paintCollected(col.total, [clip], unionOf(col.lifts), clipOut);
+    }
+  }
+  if (shadowOnly) return;
+  // The piece: stroke layer under fill layer, kept off the strands above it.
+  const strokeRegion = maskStrokePath(m), fillRegion = maskFillPath(m);
+  if (strokeRegion) { strokeRegion.fillColor = toColor(first.stroke_color); strokeRegion.strokeColor = null; }
+  if (fillRegion) { fillRegion.fillColor = toColor(first.color); fillRegion.strokeColor = null; }
+  const keep = pieceKeep(m);
+  const items = [strokeRegion, fillRegion].filter(Boolean);
+  if (items.length) {
+    if (keep || clipOut) paintClipped(items, keep ? [keep] : [], clipOut);
+    else paper.project.activeLayer.addChild(new paper.Group({ children: items, insert: false }));
+  }
+  drawRestoredShadows(m, clipOut);
+  // Selected: _draw_direct strokes the mask path 2 px (inside the draw's clip)
+  // before the canvas's own 6 px highlight (masked_strand.py draw_highlight).
+  if (m.is_selected) {
+    const hl = maskFillPath(m);
+    if (hl) {
+      const color = toColor({ r: HIGHLIGHT_COLOR.r, g: HIGHLIGHT_COLOR.g, b: HIGHLIGHT_COLOR.b, a: 128 });
+      if (MASK_DIRECT) {
+        const thin = hl.clone({ insert: false });
+        thin.fillColor = null; thin.strokeColor = color; thin.strokeWidth = 2 * FC.S;
+        thin.strokeCap = 'round'; thin.strokeJoin = 'round';
+        if (clipOut) paintClipped([thin], [], clipOut); else paper.project.activeLayer.addChild(thin);
+      }
+      hl.fillColor = null; hl.strokeColor = color; hl.strokeWidth = 6 * FC.S;
+      hl.strokeCap = 'round'; hl.strokeJoin = 'round';
+      paper.project.activeLayer.addChild(hl);
+    }
+  }
+}
+
+// ---- unfolded joints whose cap is lowered (draw_with_lowered_cap) --------------
+// After the child's body: the seam strip in fill colour, then the crossers'
+// soft edges again over the child next to the joint (_draw_crosser_edges).
+function drawLoweredCapExtras(t, info) {
+  if (!pEmpty(info.patch)) {
+    const p = info.patch.clone({ insert: false });
+    p.fillColor = toColor(t.color); p.strokeColor = null;
+    paper.project.activeLayer.addChild(p);
+  }
+  if (!SHADOW_ENABLED || pEmpty(info.shadeZone)) return;
+  for (const crosser of info.crossers) {
+    if (!shadowShownFor(crosser) || !shadowVisible(crosser.layer_name, info.parent.layer_name)) continue;
+    const cs = casterShadowPath(crosser);
+    if (pEmpty(cs.shadowPath)) continue;
+    paintCollected(cs.shadowPath, [info.shadeZone], null, null);
+  }
+}
+// draw_lowered_caps: the caps `t` paints for its attached strands, in their colour.
+function drawLoweredCaps(t) {
+  for (const { child, info } of loweredCapsOf(t)) {
+    const c = info.cap.clone({ insert: false });
+    c.fillColor = toColor(child.color); c.strokeColor = null;
+    paper.project.activeLayer.addChild(c);
+  }
 }
 
 // Selection highlight — faithful port of strand.py::_draw_unified_highlight /
@@ -1951,6 +2836,35 @@ function drawHighlight(s, strands, P, enableThird, S) {
 
   cl.remove();
   if (items.length) new paper.Group(items);
+
+  // Masks drawn later in this paint keep clear of the outline Qt paints here
+  // (note_painted_highlight): combined_highlight is the body outline stroked
+  // 10 px (MiterJoin, FlatCap), plus the side-line bars and C-shapes. The band
+  // above is painted solid (the body covers its inside); the region is the ring.
+  if (FC) {
+    const region = [];
+    for (const it of items) {
+      if (it === band) {
+        let ring;
+        if (styledFootprint) {
+          ring = it.clone({ insert: false });
+          ring.fillColor = null;
+        } else {
+          ring = strokedOutline(it, td);
+          if (ring) ring.remove();
+        }
+        if (!ring) continue;
+        ring.strokeColor = red;
+        ring.strokeWidth = 10 * S;
+        ring.strokeJoin = 'miter';
+        ring.strokeCap = 'butt';
+        region.push(ring);
+      } else {
+        region.push(it);
+      }
+    }
+    noteHighlight(s, region);
+  }
 }
 
 // ---- Arrows (OSS 1.109 §7: strand.py start/end arrows + full strand arrow) --
@@ -2043,8 +2957,7 @@ function drawExtensions(s, P, enableThird, S) {
 //
 // PORT-FOR-COMPLETENESS / UNMEASURED: no fixture in the corpus sets arrow_texture
 // or arrow_shaft_style (both default to the plain value), so the Qt pixel oracle
-// never exercises these paths and cannot confirm them. Same standing as
-// drawMaskShadow above.
+// never exercises these paths and cannot confirm them.
 function tiledInside(shape, tilePx, emit) {
   // `shape` is consumed: it becomes the clip mask of the returned group.
   const b = shape.bounds;
@@ -2278,7 +3191,7 @@ function drawArrows(s, P, enableThird, S) {
   cl.remove();
 }
 
-function drawStrand(s, strands, P, enableThird, S) {
+function drawStrand(s, strands, P, enableThird, S, startCapLowered = false) {
   drawHighlight(s, strands, P, enableThird, S);   // under the body
   const centerline = buildCenterline(s, P, enableThird);
   const w = s.width || 0, sw = s.stroke_width || 0;
@@ -2294,7 +3207,7 @@ function drawStrand(s, strands, P, enableThird, S) {
     return;
   }
 
-  const caps = collectCaps(s, strands, centerline, P, S);
+  const caps = collectCaps(s, strands, centerline, P, S, startCapLowered);
   const sideLines = collectSideLines(s, centerline, P, S);
 
   // Stylized free ends (OSS 1.111 strand.py draw + _paint_body_paths): the
@@ -2404,7 +3317,7 @@ function subtractDeletions(region, ms, P, S) {
 
 // Intersection of a mask's two component bodies (stroked at the given widths)
 // minus deletion rects, EXCLUDING end circles. Shared core for Qt's two mask
-// geometries (these match drawMasked's fillRegion / strokeRegion exactly):
+// geometries (these match drawMask's piece exactly):
 //   'fill'   = get_mask_path()        = first@fw        ∩ second@(sw+2ssw+4)
 //   'stroke' = get_mask_path_stroke() = first@(fw+2fsw) ∩ second@(sw+2ssw)
 function maskRegion(ms, byLayer, P, enableThird, S, mode) {
@@ -2438,7 +3351,7 @@ function maskRegion(ms, byLayer, P, enableThird, S, mode) {
 
 // Qt get_proper_masked_strand_path -> get_mask_path() (the FILL region). Used as
 // the mask-as-caster footprint and the mask-as-subtractor so both agree with
-// drawMasked's fillRegion. Returns a paper path (caller removes) or null.
+// drawMask's fill layer. Returns a paper path (caller removes) or null.
 function buildMaskPath(ms, byLayer, P, enableThird, S) {
   return maskRegion(ms, byLayer, P, enableThird, S, 'fill');
 }
@@ -2772,6 +3685,282 @@ function evenOddFaces(rings) {
   return kept;
 }
 
+// ---- winding regions of ring sets (robust polygon booleans) ---------------
+// The region where `rule(w)` holds, w[k] being the winding number of ring set k
+// (sets: [[ring, ...], ...], ring = [[x, y], ...] implicitly closed), returned as
+// boundary cycles with the region on their left. Same planar-arrangement idea as
+// evenOddFaces, but generalised: every edge is split at every crossing and
+// T-junction (collinear overlaps included), the faces are traced, each face is
+// classified by its winding numbers, and only the edges with a kept face on one
+// side and a dropped face on the other are traced into the result. The output
+// therefore never has two coincident edges, which is what paper's own boolean
+// ops cannot promise for inputs that overlap themselves (a Qt stroker band, a
+// raw offset ring). Used for the grown/eroded shapes of the OSS 2.0 mask shadow
+// pipeline (_grown, _opaque_cover), which Qt builds with QPainterPathStroker.
+function ringRegion(sets, rule) {
+  const segs = [];
+  const ringBoxes = sets.map((rings) => rings.map((r) => {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of r) { if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0]; if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1]; }
+    return [x0, y0, x1, y1];
+  }));
+  for (const rings of sets) for (const r of rings) for (let i = 0; i < r.length; i++) {
+    const a = r[i], b = r[(i + 1) % r.length];
+    if (a[0] !== b[0] || a[1] !== b[1]) segs.push([a, b]);
+  }
+  const n = segs.length;
+  const cuts = segs.map(() => []);
+  const order = segs.map((sg, i) => i).sort((i, j) => Math.min(segs[i][0][0], segs[i][1][0]) - Math.min(segs[j][0][0], segs[j][1][0]));
+  const EPS = 1e-9;
+  for (let oi = 0; oi < n; oi++) {
+    const i = order[oi];
+    const [p1, p2] = segs[i];
+    const maxXi = Math.max(p1[0], p2[0]);
+    const minYi = Math.min(p1[1], p2[1]), maxYi = Math.max(p1[1], p2[1]);
+    for (let oj = oi + 1; oj < n; oj++) {
+      const j = order[oj];
+      const [q1, q2] = segs[j];
+      if (Math.min(q1[0], q2[0]) > maxXi) break;
+      if (Math.max(q1[1], q2[1]) < minYi || Math.min(q1[1], q2[1]) > maxYi) continue;
+      const rx = p2[0] - p1[0], ry = p2[1] - p1[1], sx = q2[0] - q1[0], sy = q2[1] - q1[1];
+      const den = rx * sy - ry * sx;
+      const qpx = q1[0] - p1[0], qpy = q1[1] - p1[1];
+      const lr = Math.hypot(rx, ry), ls = Math.hypot(sx, sy);
+      if (Math.abs(den) <= 1e-12 * lr * ls) {
+        // parallel: split collinear overlaps at each other's endpoints
+        if (Math.abs(qpx * ry - qpy * rx) > 1e-9 * lr) continue;
+        const rr = rx * rx + ry * ry, ss2 = sx * sx + sy * sy;
+        for (const q of [q1, q2]) {
+          const t = ((q[0] - p1[0]) * rx + (q[1] - p1[1]) * ry) / rr;
+          if (t > EPS && t < 1 - EPS) cuts[i].push([t, q]);
+        }
+        for (const p of [p1, p2]) {
+          const u = ((p[0] - q1[0]) * sx + (p[1] - q1[1]) * sy) / ss2;
+          if (u > EPS && u < 1 - EPS) cuts[j].push([u, p]);
+        }
+        continue;
+      }
+      const t = (qpx * sy - qpy * sx) / den, u = (qpx * ry - qpy * rx) / den;
+      if (t < -EPS || t > 1 + EPS || u < -EPS || u > 1 + EPS) continue;
+      const x = p1[0] + t * rx, y = p1[1] + t * ry;
+      if (t > EPS && t < 1 - EPS) cuts[i].push([t, [x, y]]);
+      if (u > EPS && u < 1 - EPS) cuts[j].push([u, [x, y]]);
+    }
+  }
+  const vid = new Map(), verts = [];
+  const V = (p) => {
+    const k = Math.round(p[0] * 1e6) + ',' + Math.round(p[1] * 1e6);
+    let id = vid.get(k);
+    if (id === undefined) { id = verts.length; verts.push(p); vid.set(k, id); }
+    return id;
+  };
+  const edges = new Set();
+  for (let i = 0; i < n; i++) {
+    const pts = [[0, segs[i][0]], ...cuts[i].sort((a, b) => a[0] - b[0]), [1, segs[i][1]]];
+    let prev = V(pts[0][1]);
+    for (let k = 1; k < pts.length; k++) {
+      const cur = V(pts[k][1]);
+      if (cur !== prev) edges.add(prev < cur ? prev + ':' + cur : cur + ':' + prev);
+      prev = cur;
+    }
+  }
+  const out = verts.map(() => []);
+  for (const key of edges) {
+    const [a, b] = key.split(':').map(Number);
+    out[a].push(b); out[b].push(a);
+  }
+  for (let v = 0; v < verts.length; v++) {
+    const [vx, vy] = verts[v];
+    out[v].sort((a, b) => Math.atan2(verts[a][1] - vy, verts[a][0] - vx) - Math.atan2(verts[b][1] - vy, verts[b][0] - vx));
+  }
+  const prevAround = (b, a) => { const nb = out[b]; const idx = nb.indexOf(a); return nb[(idx - 1 + nb.length) % nb.length]; };
+  // Faces: half-edge "a>b" -> face id; the walk keeps its face on the left.
+  const faceOf = new Map();
+  const faces = [];
+  for (let u = 0; u < verts.length; u++) for (const v0 of out[u]) {
+    if (faceOf.has(u + '>' + v0)) continue;
+    const id = faces.length;
+    const cyc = [];
+    let a = u, b = v0, guard = 0;
+    while (!faceOf.has(a + '>' + b) && guard++ < 1e7) {
+      faceOf.set(a + '>' + b, id);
+      cyc.push(a);
+      const c = prevAround(b, a);
+      a = b; b = c;
+    }
+    faces.push(cyc);
+  }
+  const winding = (x, y, rings, boxes) => {
+    let w = 0;
+    for (let k = 0; k < rings.length; k++) {
+      const bx = boxes[k];
+      if (y < bx[1] || y > bx[3] || x > bx[2]) continue;
+      const r = rings[k];
+      for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+        const [xi, yi] = r[i], [xj, yj] = r[j];
+        if (yj <= y) {
+          if (yi > y && (xi - xj) * (y - yj) - (x - xj) * (yi - yj) > 0) w++;
+        } else if (yi <= y && (xi - xj) * (y - yj) - (x - xj) * (yi - yj) < 0) w--;
+      }
+    }
+    return w;
+  };
+  const kept = faces.map((cyc) => {
+    if (cyc.length < 3) return false;
+    let area = 0;
+    for (let i = 0; i < cyc.length; i++) { const p = verts[cyc[i]], q = verts[cyc[(i + 1) % cyc.length]]; area += p[0] * q[1] - q[0] * p[1]; }
+    if (Math.abs(area) < 1e-12) return false;
+    let best = -1, bl = -1;
+    for (let i = 0; i < cyc.length; i++) {
+      const p = verts[cyc[i]], q = verts[cyc[(i + 1) % cyc.length]];
+      // only edges whose other side is a different face are true boundaries
+      const l = Math.hypot(q[0] - p[0], q[1] - p[1]);
+      if (l > bl && faceOf.get(cyc[(i + 1) % cyc.length] + '>' + cyc[i]) !== faceOf.get(cyc[i] + '>' + cyc[(i + 1) % cyc.length])) { bl = l; best = i; }
+    }
+    if (best < 0) return false;
+    const p = verts[cyc[best]], q = verts[cyc[(best + 1) % cyc.length]];
+    const mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2;
+    const nx = -(q[1] - p[1]) / bl, ny = (q[0] - p[0]) / bl;
+    const e = Math.min(1e-5, bl * 1e-3);
+    const x = mx + nx * e, y = my + ny * e;
+    return !!rule(sets.map((rings, k) => winding(x, y, rings, ringBoxes[k])));
+  });
+  // Boundary: half-edges with a kept face on the left and a dropped one on the right.
+  const isB = (a, b) => kept[faceOf.get(a + '>' + b)] && !kept[faceOf.get(b + '>' + a)];
+  const used = new Set();
+  const cycles = [];
+  for (let u = 0; u < verts.length; u++) for (const v0 of out[u]) {
+    if (used.has(u + '>' + v0) || !isB(u, v0)) continue;
+    const cyc = [];
+    let a = u, b = v0, guard = 0;
+    while (!used.has(a + '>' + b) && guard++ < 1e7) {
+      used.add(a + '>' + b);
+      cyc.push(verts[a]);
+      // next boundary half-edge out of b: rotate from a until one is found
+      let x = a, c, spin = 0;
+      do { c = prevAround(b, x); x = c; } while (!isB(b, c) && ++spin < out[b].length + 1);
+      a = b; b = c;
+    }
+    if (cyc.length >= 3) cycles.push(cyc);
+  }
+  return cycles;
+}
+
+// paper path from ringRegion cycles (detached; null when empty).
+function cyclesToPath(cycles) {
+  if (!cycles.length) return null;
+  return new paper.CompoundPath({
+    children: cycles.map((c) => new paper.Path({ segments: c, closed: true, insert: false })),
+    fillRule: 'nonzero',
+    insert: false,
+  });
+}
+
+// A paper region's boundary as closed rings ([[x, y], ...], not repeated), curves
+// flattened to `tol` px, oriented so the region (nonzero rule) lies on the left
+// of every ring.
+function pathRings(path, tol = 0.02) {
+  if (!path) return [];
+  const kids = path.children && path.children.length ? path.children : (path.segments ? [path] : []);
+  const rings = [];
+  for (const kid of kids) {
+    let src = kid;
+    if (kid.hasHandles && kid.hasHandles()) { src = kid.clone({ insert: false }); src.flatten(tol); }
+    const pts = [];
+    for (const sg of src.segments) {
+      const q = pts[pts.length - 1];
+      if (!q || q[0] !== sg.point.x || q[1] !== sg.point.y) pts.push([sg.point.x, sg.point.y]);
+    }
+    while (pts.length > 1 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) pts.pop();
+    if (pts.length >= 3) rings.push(pts);
+  }
+  // Orient: region on the left (+90deg of the direction, (-dy, dx)).
+  for (const r of rings) {
+    let best = 0, bl = -1;
+    for (let i = 0; i < r.length; i++) {
+      const p = r[i], q = r[(i + 1) % r.length];
+      const l = Math.hypot(q[0] - p[0], q[1] - p[1]);
+      if (l > bl) { bl = l; best = i; }
+    }
+    const p = r[best], q = r[(best + 1) % r.length];
+    const e = Math.min(1e-3, bl * 1e-3);
+    const x = (p[0] + q[0]) / 2 - (q[1] - p[1]) / bl * e, y = (p[1] + q[1]) / 2 + (q[0] - p[0]) / bl * e;
+    if (!path.contains(new paper.Point(x, y))) r.reverse();
+  }
+  return rings;
+}
+
+// The raw offset ring of `ring` (region on its left) pushed `r` px to its
+// RIGHT (r > 0: away from the region) — Clipper's construction: a round join
+// (arc to within `tol`) where the path turns away from the offset side, a pivot
+// through the corner where it turns into it. The positive-winding region of the
+// offset rings is the region grown (r > 0) or shrunk (r < 0) by |r|, exactly
+// what a round-joined QPainterPathStroker band adds or removes.
+function offsetRing(ring, r, tol = 0.02) {
+  const n = ring.length;
+  const out = [];
+  const ar = Math.abs(r);
+  const dirs = [];
+  for (let i = 0; i < n; i++) {
+    const a = ring[i], b = ring[(i + 1) % n];
+    const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1;
+    dirs.push([dx / l, dy / l]);
+  }
+  // right normal of direction d: (dy, -dx); left normal: (-dy, dx)
+  const sgn = r >= 0 ? 1 : -1;
+  const nrm = (d) => [d[1] * sgn, -d[0] * sgn];
+  const step = ar > tol ? 2 * Math.acos(Math.max(-1, 1 - tol / ar)) : Math.PI / 4;
+  for (let i = 0; i < n; i++) {
+    const v = ring[i];
+    const d1 = dirs[(i - 1 + n) % n], d2 = dirs[i];
+    const n1 = nrm(d1), n2 = nrm(d2);
+    const cross = d1[0] * d2[1] - d1[1] * d2[0];
+    const dot = d1[0] * d2[0] + d1[1] * d2[1];
+    // turning toward the left normal (cross > 0) opens a gap on the right side
+    const opens = sgn > 0 ? cross > 1e-12 : cross < -1e-12;
+    if (opens) {
+      const a1 = Math.atan2(n1[1], n1[0]);
+      let a2 = Math.atan2(n2[1], n2[0]);
+      let sweep = a2 - a1;
+      if (sgn > 0) { while (sweep < 0) sweep += 2 * Math.PI; while (sweep > 2 * Math.PI) sweep -= 2 * Math.PI; }
+      else { while (sweep > 0) sweep -= 2 * Math.PI; while (sweep < -2 * Math.PI) sweep += 2 * Math.PI; }
+      const k = Math.max(1, Math.ceil(Math.abs(sweep) / step));
+      for (let s = 0; s <= k; s++) {
+        const t = a1 + sweep * (s / k);
+        out.push([v[0] + Math.cos(t) * ar, v[1] + Math.sin(t) * ar]);
+      }
+    } else if (dot > 0 && Math.abs(cross) <= 1e-12) {
+      out.push([v[0] + n2[0] * ar, v[1] + n2[1] * ar]);
+    } else {
+      out.push([v[0] + n1[0] * ar, v[1] + n1[1] * ar]);
+      out.push([v[0], v[1]]);
+      out.push([v[0] + n2[0] * ar, v[1] + n2[1] * ar]);
+    }
+  }
+  return out;
+}
+
+// shader_utils._grown(path, radius): `path` grown by `rPx` on every side (the
+// union with a round-joined stroker band of width 2*r). Detached, or null.
+function grownPath(path, rPx) {
+  if (!path) return null;
+  const rings = pathRings(path);
+  if (!rings.length) return null;
+  if (rPx <= 0) return cyclesToPath(ringRegion([rings], (w) => w[0] > 0));
+  const off = rings.map((r) => offsetRing(r, rPx));
+  return cyclesToPath(ringRegion([rings, off], (w) => w[0] > 0 || w[1] > 0));
+}
+
+// `path` shrunk by `rPx` (what is left once a stroker band of width 2*r along
+// its outline is subtracted). Detached, or null.
+function erodedPath(path, rPx) {
+  if (!path) return null;
+  const rings = pathRings(path);
+  if (!rings.length) return null;
+  const off = rings.map((r) => offsetRing(r, -rPx));
+  return cyclesToPath(ringRegion([rings, off], (w) => w[0] > 0 && w[1] > 0));
+}
+
 // Port of get_shadow_blocker_path (shader_utils.py:1902). Qt builds
 //   blocker = QPainterPath(base); blocker.addPath(stroker.createStroke(base))
 // with base = _get_mask_visual_path (fill ∪ stroke region, simplified() => an
@@ -2871,18 +4060,6 @@ function subtractLayers(region, names, byLayer, strands, P, enableThird, S, bloc
   return region;
 }
 
-// Qt get_default_shadow_visibility: a masked caster does NOT cast a regular
-// shadow onto its own FIRST component by default (returns true otherwise). The
-// SECOND component still receives (with the first component subtracted — see
-// defaultSubtracted). Only consulted when no explicit `visibility` override.
-function defaultShadowVisibilityFalse(s, o) {
-  if (s.type !== 'MaskedStrand') return false;
-  const parts = (s.layer_name || '').split('_');
-  if (parts.length < 4) return false;
-  const firstName = parts[0] + '_' + parts[1];
-  return o.layer_name === firstName;
-}
-
 // Qt get_default_subtracted_layers: a masked caster's SECOND-component receiver
 // defaults to subtracting the FIRST component's geometry. Returns [] otherwise.
 function defaultSubtracted(s, o, byLayer) {
@@ -2892,184 +4069,6 @@ function defaultSubtracted(s, o, byLayer) {
   const firstName = parts[0] + '_' + parts[1];
   const secondName = parts[2] + '_' + parts[3];
   return o.layer_name === secondName ? [firstName] : [];
-}
-
-// Faithful port of draw_mask_strand_shadow (shader_utils.py:179), measured
-// against the Qt oracle through shadow-only renders of the overhand_knot masks.
-// first = top, second = bottom. The call site passes canvas.max_blur_radius
-// (MAX_BLUR), not the 29.99 signature default, so the width/alpha table is the
-// regular faded loop's. No separate unclipped solid-core pass for masks (unlike
-// strands); only the clipped faded strokes plus a clipped inner-core fill.
-// draw() (zoom 1, no pan) passes the first component's stroked outline as
-// first_path. The zoomed/panned _draw_direct path (MASK_DIRECT) passes
-// QPainterPathStroker().createStroke(outline) instead: the stroker's default
-// width of 1 (setWidth(0) is clamped to 1), so a 1px ring straddling the outline.
-function drawMaskShadow(ms, first, second, fw, fsw, sw, ssw, P, enableThird, S) {
-  // first_path / second_path = get_stroked_path_for_strand: the component
-  // footprint at (w+2sw) PLUS its visible attached start circle, the same
-  // outline the mask body's stroke layer uses (shared memo entries).
-  let firstPath = cachedGeom(`mcomp|${first.layer_name}|${fw + 2 * fsw}`,
-    () => maskComponentPath(first, P, enableThird, S, fw + 2 * fsw));
-  if (MASK_DIRECT && firstPath) {
-    // The ring is built from the memoized outline, so it goes in its own entry
-    // and the outline itself is left untouched for the mask body.
-    const outline = firstPath;
-    firstPath = cachedGeom(`mring|${first.layer_name}|${fw + 2 * fsw}`,
-      () => strokedRegionOutline(outline, 1 * S));
-    outline.remove();
-  }
-  const secondPath = cachedGeom(`mcomp|${second.layer_name}|${sw + 2 * ssw}`,
-    () => maskComponentPath(second, P, enableThird, S, sw + 2 * ssw));
-  if (!firstPath || !secondPath) {
-    firstPath && firstPath.remove();
-    secondPath && secondPath.remove();
-    return;
-  }
-  // shading_path = (second_path ∩ first_path) minus deletion rects.
-  let shading = secondPath.intersect(firstPath);
-  shading = subtractDeletions(shading, ms, P, S);
-
-  const items = [];
-  if (shading && shading.area && Math.abs(shading.area) > 0.5) {
-    for (const st of shadowBlurSteps()) {
-      const item = shading.clone();
-      item.fillColor = null;
-      item.strokeColor = new paper.Color(SHADOW_COLOR.r / 255, SHADOW_COLOR.g / 255, SHADOW_COLOR.b / 255, st.alpha / 255);
-      item.strokeWidth = st.width * S;
-      item.strokeCap = 'butt';   // Qt FlatCap
-      item.strokeJoin = 'round'; // Qt RoundJoin
-      items.push(item);
-    }
-  }
-  // inner-core = stroke(first.get_path(), fw+2fsw) ∩ second_path, filled SOLID at
-  // full alpha 150. Qt strokes the plain centerline here — no start circle and no
-  // styled-end footprint — so it is the bare body outline, not firstPath.
-  const innerStroke = bodyOutline(first, P, enableThird, (fw + 2 * fsw) * S);
-  if (innerStroke) {
-    let core = innerStroke.intersect(secondPath);
-    core = subtractDeletions(core, ms, P, S);
-    if (core && core.area && Math.abs(core.area) > 0.5) {
-      core.fillColor = SHADOW_PAINT;
-      core.strokeColor = null;
-      items.push(core);
-    } else {
-      core && core.remove();
-    }
-    innerStroke.remove();
-  }
-  // All shadow items clipped to second_path (the receiving strand's body).
-  if (items.length) {
-    new paper.Group({ children: [secondPath.clone(), ...items], clipped: true });
-  }
-  shading && shading.remove();
-  firstPath.remove();
-  secondPath.remove();
-}
-
-// Faithful port of masked_strand.py. The crossing of the top strand (`first`)
-// over the bottom (`second`) is painted as TWO regions filled directly:
-//   stroke-color layer = stroked(first, w+2sw) ∩ stroked(second, w+2sw)
-//   fill-color  layer  = stroked(first, w)     ∩ stroked(second, w+2sw+4)
-// each unioned with the components' visible start circles, minus deletions.
-function drawMasked(ms, byLayer, P, enableThird, S, shadowOnly) {
-  // A hidden mask draws nothing (Qt MaskedStrand.draw early-returns on is_hidden,
-  // masked_strand.py:465 — only a dashed edit-mode outline, absent in the offscreen
-  // reference). So neither its masked body nor its own crossing shadow is painted.
-  if (ms.is_hidden === true) return;
-  const parts = (ms.layer_name || '').split('_');
-  if (parts.length < 4) return;
-  const first = byLayer[parts[0] + '_' + parts[1]];
-  const second = byLayer[parts[2] + '_' + parts[3]];
-  if (!first || !second) return;
-  const fw = first.width || 0, fsw = first.stroke_width || 0;
-  const sw = second.width || 0, ssw = second.stroke_width || 0;
-
-  // Crossing shadow (only when shadows are on). Faithful port of
-  // draw_mask_strand_shadow. first = top, second = bottom:
-  //   first_path  = first body @ (fw+2fsw)   (NO blur inflation)
-  //   second_path = second body @ (sw+2ssw)
-  //   shading_path = (second_path ∩ first_path) minus deletion rects
-  //   clipped to second_path, run NUM_STEPS faded boundary strokes over
-  //     shading_path (15/30 widths, 150/75 alphas, FlatCap/RoundJoin); then
-  //   inner-core = stroke(first center, fw+2fsw) ∩ second_path filled SOLID at
-  //     alpha 150 (no separate unclipped solid-core pass for masks).
-  // hide_shadow also suppresses the mask's own crossing shadow (OSS
-  // masked_strand.py:516,665 gate draw_mask_strand_shadow on it).
-  // The crossing shading is the mask's shadow on its second component, so the
-  // shadow editor's (mask -> second) visibility toggle hides it too (Qt
-  // _intersection_shadow_visible -> get_shadow_visibility; default true).
-  const crossOv = (SHADOW_OVERRIDES[ms.layer_name] || {})[second.layer_name] || null;
-  const crossVisible = !(crossOv && crossOv.visibility === false);
-  if (SHADOW_ENABLED && ms.hide_shadow !== true && crossVisible) {
-    drawMaskShadow(ms, first, second, fw, fsw, sw, ssw, P, enableThird, S);
-  }
-
-  // shadow_only mask: it has cast its shadows (regular cast in the main loop +
-  // the crossing shadow above) but paints no visible body (OSS masked_strand.py
-  // skips all body rendering and returns early when self.shadow_only).
-  if (shadowOnly) return;
-
-  // stroke-color region: first@(w+2sw) ∩ second@(w+2sw)
-  // Component outlines come from the per-render memo: a strand that is a
-  // component of several masks is stroked once per width instead of once per
-  // mask, and the fill-region widths below are exactly the two the selection
-  // highlight's buildMaskPath asks for, so it reuses them for free.
-  const comp = (t, wpx) => cachedGeom(`mcomp|${t.layer_name}|${wpx}`,
-    () => maskComponentPath(t, P, enableThird, S, wpx));
-  const fStroke = comp(first, fw + 2 * fsw);
-  const sStroke = comp(second, sw + 2 * ssw);
-  let strokeRegion = fStroke && sStroke ? fStroke.intersect(sStroke) : null;
-  fStroke && fStroke.remove();
-  sStroke && sStroke.remove();
-  strokeRegion = subtractDeletions(strokeRegion, ms, P, S);
-
-  // fill-color region: first@w ∩ second@(w+2sw+4)
-  const fFill = comp(first, fw);
-  const sExt = comp(second, sw + 2 * ssw + 4);
-  let fillRegion = fFill && sExt ? fFill.intersect(sExt) : null;
-  fFill && fFill.remove();
-  sExt && sExt.remove();
-  fillRegion = subtractDeletions(fillRegion, ms, P, S);
-
-  if (strokeRegion) { strokeRegion.fillColor = toColor(first.stroke_color); strokeRegion.strokeColor = null; }
-  if (fillRegion) { fillRegion.fillColor = toColor(first.color); fillRegion.strokeColor = null; }
-  // Paint order: stroke layer under fill layer.
-  const layers = [strokeRegion, fillRegion].filter(Boolean);
-  if (layers.length) new paper.Group(layers);
-
-  // Selection highlight (OSS MaskedStrand). Clicking a masked layer reddens it on
-  // the canvas: stroke the mask intersection silhouette — get_mask_path() = the FILL
-  // region (buildMaskPath) — ON TOP of the body with a semi-transparent red outline.
-  // Faithful to draw_highlight (masked_strand.py:1187-1215): width 6px, RoundCap/
-  // RoundJoin, NoBrush (fill null), color = highlight_color with alpha forced to 128
-  // (rgba(255,0,0,128)), routed via draw_highlighted_masked_strand. When zoomed or
-  // panned (MASK_DIRECT), _draw_direct has already stroked the same path at 2px
-  // (masked_strand.py, `if self.is_selected` in _draw_direct) before the canvas
-  // adds the 6px one, so both are drawn, 2px first. NOTE the intentional asymmetry vs
-  // drawStrand — regular strands draw the halo UNDER the body, but a mask strokes its
-  // outline OVER the body (OSS draws the mask body then draw_highlight last). Gated on
-  // ms.is_selected so oracle fixtures (which never set it) are unaffected. buildMaskPath
-  // returns null when the components don't intersect (area<=0.5), so guard before use;
-  // the returned path is LEFT on the canvas to be painted (not removed).
-  if (ms.is_selected) {
-    const hl = buildMaskPath(ms, byLayer, P, enableThird, S);
-    if (hl && MASK_DIRECT) {
-      const thin = hl.clone();
-      thin.fillColor = null;
-      thin.strokeColor = toColor({ r: HIGHLIGHT_COLOR.r, g: HIGHLIGHT_COLOR.g, b: HIGHLIGHT_COLOR.b, a: 128 });
-      thin.strokeWidth = 2 * S;
-      thin.strokeCap = 'round';
-      thin.strokeJoin = 'round';
-      hl.bringToFront();
-    }
-    if (hl) {
-      hl.fillColor = null;
-      hl.strokeColor = toColor({ r: HIGHLIGHT_COLOR.r, g: HIGHLIGHT_COLOR.g, b: HIGHLIGHT_COLOR.b, a: 128 });
-      hl.strokeWidth = 6 * S;
-      hl.strokeCap = 'round';
-      hl.strokeJoin = 'round';
-    }
-  }
 }
 
 // Widget background + grid, in VIEWPORT space (no pan transform). Mirrors the
@@ -3158,6 +4157,20 @@ function compositeTo(vis, hi, W, H, ss, meta) {
     }
   }
   ctx.putImageData(out, 0, 0);
+}
+
+// Strand.draw: draw_with_lowered_cap around the strand's own drawing (its
+// shadow pass, highlight and body), then the lowered caps it paints for its
+// attached strands. Hidden strands cast nothing and paint no body (Qt
+// draw_strand_shadow / strand.py early-return on is_hidden); hide_shadow (OSS
+// 1.109 per-layer "Hide Shadow") casts nothing but still paints; shadow_only
+// casts but paints no body.
+function drawStrandWithCaps(s, strands, P, enableThird, S) {
+  const info = loweredStartCap(s);
+  if (SHADOW_ENABLED && s.is_hidden !== true && s.hide_shadow !== true) castStrandShadow(s);
+  if (s.is_hidden !== true && !s.shadow_only) drawStrand(s, strands, P, enableThird, S, !!info);
+  if (info) drawLoweredCapExtras(s, info);
+  drawLoweredCaps(s);
 }
 
 // Render `strands` (flat array) using `meta` into the canvas #c.
@@ -3272,60 +4285,23 @@ window.renderFixture = function (strands, meta, target) {
   // it in the Port phase without threading a new param. Inert until that phase.
   SHADOW_OVERRIDES = meta.shadow_overrides || {};
 
-  // Pairs that are the two components of a VISIBLE mask don't shadow each other
-  // (the mask owns that crossing). A hidden mask owns nothing, so its components
-  // shadow each other normally (Qt part_of_same_visible_mask, shader_utils.py:649).
-  const maskPairs = new Set();
-  for (const s of strands) {
-    if (s.type !== 'MaskedStrand' || s.is_hidden === true) continue;
-    const p = (s.layer_name || '').split('_');
-    if (p.length >= 4) {
-      maskPairs.add(p[0] + '_' + p[1] + '|' + p[2] + '_' + p[3]);
-      maskPairs.add(p[2] + '_' + p[3] + '|' + p[0] + '_' + p[1]);
-    }
-  }
-
-  // Draw in list order (≈ Qt paint loop): for each strand, first cast its
-  // faithful two-pass shadow onto already-drawn lower strands (SOLID CORE +
-  // clipped FADED BLUR, see castStrandShadow), then paint its body. Drawing the
-  // body after the cast means it covers its own inner shadow, leaving only the
-  // fringe over lower strands. Masked strands repaint the top strand over the
-  // bottom (and own their own crossing shadow).
+  // Draw in layer order (Qt's paint loop): each strand's own shadow pass, then
+  // its body; a mask paints at its own place (see drawMask). The frame cache
+  // holds what one strand's pass works out for the masks drawn later.
+  fcBegin(strands, byLayer, P, enableThird, S);
   for (let i = 0; i < strands.length; i++) {
     const s = strands[i];
-    // Hidden strands do not cast a shadow (Qt draw_strand_shadow early-returns on
-    // is_hidden, shader_utils.py:457) and paint no body (gated below); they stay
-    // in the array only so masks/has_circles can still resolve them.
-    // hide_shadow (OSS 1.109 per-layer "Hide Shadow", shader_utils.py:466): the
-    // strand casts nothing but still receives and paints its body normally.
-    const casts = shadowEnabled && s.is_hidden !== true && s.hide_shadow !== true;
     if (s.type === 'MaskedStrand') {
-      // A mask FIRST casts its crossing shadow onto lower NON-mask strands (the
-      // receiver loop skips MaskedStrand receivers and the mask's own components),
-      // THEN draws its body (which owns its own-component crossing shadow).
-      if (casts) castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i);
-      // shadow_only mask (OSS masked_strand.py:561-568): still owns its crossing
-      // shadow (drawn inside drawMasked) but paints NO body fill/stroke.
-      drawMasked(s, byLayer, P, enableThird, S, s.shadow_only === true);
+      // shadow_only mask (OSS masked_strand.py): its lift shadow, no piece.
+      drawMask(s, s.shadow_only === true);
       continue;
     }
-
-    if (casts) castStrandShadow(s, strands, byLayer, P, enableThird, S, maskPairs, i);
-    // Hidden strand: no body (Qt strand.py:2279 / :3019 early-return on
-    // is_hidden). It stays in the array so masks can still resolve it as a
-    // component and has_circles still sees it, exactly like canvas.strands.
-    if (s.is_hidden === true) continue;
-    // OSS shadow_only: the strand has already cast its shadow above; suppress its
-    // own body/extension paint. Absent/false => normal full body (oracle-safe).
-    // (Per-pair visibility/full/subtract overrides are handled inside
-    // castStrandShadow via SHADOW_OVERRIDES — supersedes the group branch's
-    // isShadowPairVisible gate.)
-    if (s.shadow_only) continue;
-    drawStrand(s, strands, P, enableThird, S);
+    drawStrandWithCaps(s, strands, P, enableThird, S);
   }
 
   // After every body, so the preview reads over the finished drawing.
   drawVisibleShadowPaths(strands, byLayer, P, enableThird, S);
+  fcEnd();
 
   // Drop the memo (and its detached masters) before the frame is composited, so
   // no entry can outlive this render's paper project.
@@ -3453,7 +4429,7 @@ function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg, topo, pers
   const { hasCircles, enableThird } = topo;
   // byLayer is a GEOMETRY lookup, not topology, so it must be rebuilt from THIS
   // frame's array. Taking it from the bake (as hasCircles/enableThird correctly do)
-  // froze every mask at its pointer-down shape: drawMasked resolves a mask's two
+  // froze every mask at its pointer-down shape: drawMask resolves a mask's two
   // components through byLayer, and the store hands the renderer freshly cloned
   // strand objects each frame, so a mask whose component was being dragged kept
   // rendering the intersection computed from pre-drag positions until pointer-up.
@@ -3476,16 +4452,26 @@ function _dragPaint(targetCanvas, strands, meta, shouldDraw, whiteBg, topo, pers
     if (s.type === 'MaskedStrand' && s.is_hidden !== true && shouldDraw(s.layer_name)) { memo = true; break; }
   }
   if (memo) geomCacheBegin();
-  for (let i = 0; i < strands.length; i++) {
-    const s = strands[i];
-    if (!shouldDraw(s.layer_name)) continue;
-    if (s.is_hidden === true) continue; // same paint gate as renderFixture
-    if (s.type === 'MaskedStrand') { drawMasked(s, byLayer, P, enableThird, S); continue; }
-    // Apply the cached topology to the strand we are about to draw (the Map holds
-    // every non-masked strand's value, computed once per gesture at bake).
+  // Apply the cached topology (the Map holds every non-masked strand's value,
+  // computed once per gesture at bake): a mask's piece keeps clear of the strands
+  // above its crossing, drawn or not, so all of them need it.
+  for (const s of strands) {
     const hc = hasCircles.get(s.layer_name);
     if (hc) s.has_circles = hc;
-    drawStrand(s, strands, P, enableThird, S);
+  }
+  // The same per-paint frame as renderFixture (masks are layers whose piece
+  // keeps off the strands above it; lowered joint caps), shadows off.
+  fcBegin(strands, byLayer, P, enableThird, S);
+  try {
+    for (let i = 0; i < strands.length; i++) {
+      const s = strands[i];
+      if (!shouldDraw(s.layer_name)) continue;
+      if (s.is_hidden === true) continue; // same paint gate as renderFixture
+      if (s.type === 'MaskedStrand') { drawMask(s, false); continue; }
+      drawStrandWithCaps(s, strands, P, enableThird, S);
+    }
+  } finally {
+    fcEnd();
   }
   geomCacheEnd();   // no-op when the memo was never opened; masters die with this paint's project
   paper.view.update();
@@ -3711,17 +4697,52 @@ window.renderPanFrame = function (meta) {
 // coming can hand back the project and its offscreen canvas early.
 window.endPan = function () { dropScene(); };
 
-// ---- auto_shadow geometry probe (OSS auto_shadow.py, 1.109) ---------------
-// For each requested {casting, receiving} pair, compute the RAW caster∩receiver
-// overlap area and the SURVIVAL ratio after the renderer's own per-pair
-// subtractions — via the same buildPairShadowRegion castStrandShadow uses, so
-// the probe can never diverge from what actually renders. Pure computation:
-// paper is set up on a throwaway offscreen canvas and nothing is kept (the next
-// renderFixture call does its own paper.setup). Areas are returned in WORLD
-// units² — call with meta.supersample = 1 and no zoom (S = 1) or they scale.
-// The pair's own `visibility` override is intentionally NOT applied: the caller
-// wipes auto entries first and skips user-authored pairs, matching
-// recompute_auto_shadow_overrides.
+// ---- auto_shadow geometry probe (OSS auto_shadow.py, 2.0) ----------------
+// For each requested {casting, receiving} pair: the RAW caster∩receiver overlap
+// area and the SURVIVAL ratio measured the way auto_shadow.py does it
+// (_surviving_shadow: the legacy, blocker-cutting region above), and, for a pair
+// that ratio would hide, how many pixels of its shadow the canvas would show
+// (_visible_shadow_px, through the 2.0 pipeline's own preview). Pure computation
+// on a throwaway project; nothing is kept. Areas are in WORLD units² — call with
+// meta.supersample = 1 and no zoom (S = 1). The pair's own `visibility` override
+// is intentionally NOT applied: the caller wipes auto entries first and skips
+// user-authored pairs, matching recompute_auto_shadow_overrides.
+// _visible_shadow_px (auto_shadow.py): how many pixels of the pair's shadow
+// the canvas would show — the Shadow Editor preview of the pair (shadowPreview,
+// the renderer's own computation) within its clips, minus the caster and every
+// strand drawn after it — counted by filling it (world units, 1 px each).
+function visibleShadowPx(cast, recv) {
+  const pv = shadowPreview(cast.layer_name, recv.layer_name);
+  if (!pv) return 0;
+  const rect = pv.clips[0].bounds.intersect(pv.area.bounds).expand(4 * FC.S);
+  if (rect.width <= 0 || rect.height <= 0) return 0;
+  const ci = rankOf(cast.layer_name);
+  const covers = [drawnFootprint(cast)];
+  for (const t of FC.strands.slice(ci + 1)) {
+    if (isMask(t) || t.is_hidden === true) continue;
+    const fp = drawnFootprint(t);
+    if (!pEmpty(fp) && fp.bounds.intersects(rect)) covers.push(fp);
+  }
+  const W = Math.ceil(rect.width / FC.S) + 2, H = Math.ceil(rect.height / FC.S) + 2;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d');
+  ctx.scale(1 / FC.S, 1 / FC.S);
+  ctx.translate(-rect.x, -rect.y);
+  for (const c of pv.clips) ctx.clip(new Path2D(c.pathData), c.fillRule === 'evenodd' ? 'evenodd' : 'nonzero');
+  for (const fp of covers) {
+    if (!fp) continue;
+    const out = outsidePath(fp, rect);
+    ctx.clip(new Path2D(out.pathData), 'evenodd');
+  }
+  ctx.fillStyle = '#fff';
+  ctx.fill(new Path2D(pv.area.pathData), 'nonzero');
+  const data = ctx.getImageData(0, 0, W, H).data;
+  let shown = 0;
+  for (let k = 0; k < data.length; k += 4) if (data[k + 3] > 127) shown++;
+  return shown;
+}
+
 window.computeShadowPairAreas = function (strands, meta, pairs) {
   CURVE = meta.curve_params || CURVE_DEFAULT;
   SAMPLE_STEP = 1;
@@ -3759,55 +4780,66 @@ window.computeShadowPairAreas = function (strands, meta, pairs) {
       s.has_circles = computeHasCircles(s, strands);
     }
     SHADOW_OVERRIDES = meta.shadow_overrides || {};
+    SHADOW_ENABLED = true;
+    SHADOW_PAINT = toColor(SHADOW_COLOR);
+    fcBegin(strands, byLayer, P, enableThird, S);
 
     const unit = S * S; // px² per world-unit²
     const idxOf = (name) => strands.findIndex((s) => s.layer_name === name);
     const out = [];
     for (const pr of pairs) {
       const i = idxOf(pr.casting), j = idxOf(pr.receiving);
-      const res = { casting: pr.casting, receiving: pr.receiving, rawArea: 0, ratio: 0 };
+      const res = { casting: pr.casting, receiving: pr.receiving, rawArea: 0, ratio: 0, visiblePx: 0 };
       out.push(res);
       if (i < 0 || j < 0 || j >= i) continue;
       const s = strands[i], o = strands[j];
       if (s.type === 'MaskedStrand') continue; // candidates are body strands
 
-      const core = buildShadowCasterCore(s, P, enableThird, S);
-      if (!core) continue;
-      // Probe uses the RAW (un-cut) caster footprint — no transparentEndCap cut —
-      // matching OSS auto_shadow.compute_auto_hidden_pairs (auto_shadow.py:190-197),
-      // which calls build_shadow_geometry directly (the cut lives only in
-      // draw_strand_shadow, i.e. the render path in castStrandShadow).
-      const circles = buildShadowCasterCircles(s, P, S);
-      let footprint = core.clone();
-      if (circles) { const u = footprint.unite(circles); footprint.remove(); footprint = u; }
-
-      // RAW overlap: caster footprint ∩ receiver rendered geometry, before any
-      // gating/subtraction (auto_shadow.py "raw" / shader_utils.py:1950-1969).
-      const recvRaw = o.type === 'MaskedStrand'
-        ? buildMaskPath(o, byLayer, P, enableThird, S)
-        : buildShadowReceiverGeom(o, strands, P, enableThird, S);
-      if (recvRaw) {
-        const raw = footprint.intersect(recvRaw);
-        res.rawArea = Math.abs(raw.area || 0) / unit;
-        raw.remove(); recvRaw.remove();
-    }
-
-      if (res.rawArea > 0) {
-        const ov = (SHADOW_OVERRIDES[s.layer_name] || {})[o.layer_name] || null;
-        const allowFull = !!(ov && ov.allow_full_shadow);
-        const r = buildPairShadowRegion(
-          s, i, o, j, strands, byLayer, P, enableThird, S, footprint, ov, allowFull, null);
-        const survArea = r.region ? Math.abs(r.region.area || 0) / unit : 0;
-        r.region && r.region.remove();
-        r.recv && r.recv.remove();
-        r.clipBlocker && r.clipBlocker.remove();
-        res.ratio = survArea / res.rawArea;
+      // _surviving_shadow (auto_shadow.py): the caster grown by a fixed 30 px
+      // (build_shadow_geometry(cs, 30, include_circles=False)) plus its circles,
+      // on the receiver, then the old pipeline's cuts (subtracted layers, mask
+      // shadow blockers grown by 30, intermediate strands). The renderer no
+      // longer cuts blockers, but AUTO_HIDE_SURVIVAL_RATIO was tuned on this.
+      const w = s.width || 0, sw = s.stroke_width || 0;
+      const blurSaved = MAX_BLUR;
+      MAX_BLUR = 30.0;
+      let footprint = null, circles = null, core = null;
+      try {
+        core = strandFootprintAtWidth(s, P, enableThird, S, w + 2 * sw + 60);
+        if (!core) continue;
+        circles = buildShadowCasterCircles(s, P, S);
+        footprint = core.clone();
+        if (circles) { const u = footprint.unite(circles); footprint.remove(); footprint = u; }
+        // RAW overlap: caster footprint ∩ receiver rendered geometry.
+        const recvRaw = o.type === 'MaskedStrand'
+          ? buildMaskPath(o, byLayer, P, enableThird, S)
+          : buildShadowReceiverGeom(o, strands, P, enableThird, S);
+        if (recvRaw) {
+          const raw = footprint.intersect(recvRaw);
+          res.rawArea = Math.abs(raw.area || 0) / unit;
+          raw.remove(); recvRaw.remove();
+        }
+        if (res.rawArea > 0) {
+          const ov = (SHADOW_OVERRIDES[s.layer_name] || {})[o.layer_name] || null;
+          const allowFull = !!(ov && ov.allow_full_shadow);
+          const r = legacySurvivingRegion(
+            s, i, o, j, strands, byLayer, P, enableThird, S, footprint, ov, allowFull, null);
+          const survArea = r.region ? Math.abs(r.region.area || 0) / unit : 0;
+          r.region && r.region.remove();
+          r.recv && r.recv.remove();
+          r.clipBlocker && r.clipBlocker.remove();
+          res.ratio = survArea / res.rawArea;
+        }
+      } finally {
+        MAX_BLUR = blurSaved;
+        footprint && footprint.remove(); core && core.remove(); circles && circles.remove();
       }
-
-      footprint.remove(); core.remove(); circles && circles.remove();
+      // _visible_shadow_px: only asked for a pair the ratio would hide.
+      if (res.rawArea > 0 && res.ratio < 0.45) res.visiblePx = visibleShadowPx(s, o);
     }
     return out;
   } finally {
+    fcEnd();
     probeProject.remove();
     // activate() on a project torn down by a concurrent render would throw, and
     // the probe's answer must not be lost to bookkeeping.
@@ -3815,7 +4847,119 @@ window.computeShadowPairAreas = function (strands, meta, pairs) {
   }
 };
 
-// The FILL region of one mask (Qt get_mask_path(), exactly the region drawMasked
+// Test hook for tools/mask_shadow_check.mjs (the OSS tests test_joint_shadow.py,
+// test_mask_piece_cover.py, test_shadow_subtraction.py): runs one query against
+// the 2.0 shadow pipeline's internals on a throwaway project, in WORLD units
+// (S = 1, no offset), with every shadow shown. Nothing is drawn or kept.
+//   {op: 'covering', mask}                 -> layer names the piece keeps clear of
+//   {op: 'keep', mask, points}             -> null (no clip) or [inside?] per point
+//   {op: 'lowered', child}                 -> null or {parent, crossers}
+//   {op: 'loweredCapPart', child, distance} -> [in cap, in raw parent, in parent] at the
+//        point `distance` past the joint along the child's start tangent
+//   {op: 'outline', caster, receiver, points, disc?: {x, y, r}}
+//        -> null (no shadow there) or {contains: [...], discArea, bounds, casterBounds}
+//   {op: 'runsUnder', width, stroke_width, footprint: rect, piece: rect} -> bool
+//   {op: 'opaqueCover', strand, footprint: rect, points} -> null or [inside?]
+// Debugging aids (compare with the same OSS internals when chasing a diff):
+//   {op: 'at', point}            -> the outlines / fills / lifts / clips at a point
+//   {op: 'outlines', caster}     -> a caster's receivers with bounds and areas
+//   {op: 'zone', mask, strand?}  -> the mask's zone and piece (and strand ∩ zone)
+//   {op: 'near', caster}         -> _masks_near: [first, second, upper, lower, between]
+window.__maskShadowProbe = function (strands, meta, q) {
+  CURVE = meta.curve_params || CURVE_DEFAULT;
+  SAMPLE_STEP = 1;
+  const hi = document.createElement('canvas');
+  hi.setAttribute('hidpi', 'off');
+  hi.width = 8; hi.height = 8;
+  const callerProject = paper.project;
+  paper.setup(hi);
+  const probeProject = paper.project;
+  try {
+    const P = (pt) => new paper.Point(pt.x, pt.y);
+    const enableThird = resolveEnableThird(strands, meta);
+    BIAS_ENABLED = !!(meta && meta.enable_curvature_bias_control);
+    applyPaintSettings(meta);
+    const byLayer = {};
+    for (const s of strands) byLayer[s.layer_name] = s;
+    for (const s of strands) if (s.type !== 'MaskedStrand') s.has_circles = computeHasCircles(s, strands);
+    SHADOW_OVERRIDES = meta.shadow_overrides || {};
+    SHADOW_ENABLED = true;
+    SHADOW_PAINT = toColor(SHADOW_COLOR);
+    fcBegin(strands, byLayer, P, enableThird, 1);
+    const rect = (r) => new paper.Path.Rectangle({ point: [r[0], r[1]], size: [r[2], r[3]], insert: false });
+    const inside = (path, pts) => pts.map((p) => !!path && path.contains(new paper.Point(p[0], p[1])));
+    const box = (b) => (b ? [b.x, b.y, b.width, b.height] : null);
+    switch (q.op) {
+      case 'covering': return coveringStrands(byLayer[q.mask]).map((c) => c.t.layer_name).sort();
+      case 'keep': { const k = pieceKeep(byLayer[q.mask]); return k ? inside(k, q.points) : null; }
+      case 'lowered': {
+        const info = loweredStartCap(byLayer[q.child]);
+        return info ? { parent: info.parent.layer_name, crossers: info.crossers.map((t) => t.layer_name) } : null;
+      }
+      case 'loweredCapPart': {
+        const child = byLayer[q.child];
+        const info = loweredStartCap(child);
+        if (!info) return null;
+        const cl = det(buildCenterline(child, P, enableThird));
+        const a = tangentAngle(cl, 0);
+        const pt = [child.start.x + q.distance * Math.cos(a), child.start.y + q.distance * Math.sin(a)];
+        const parent = info.parent;
+        return [inside(info.cap, [pt])[0], inside(geomRaw(parent), [pt])[0], inside(geomRendered(parent), [pt])[0]];
+      }
+      case 'outline': {
+        const col = collectShadow(byLayer[q.caster]);
+        const o = col && col.outlines.find((x) => x.recv === q.receiver);
+        if (!o) return null;
+        let discArea = 0;
+        if (q.disc) discArea = pArea(pInter(o.path, circlePath(new paper.Point(q.disc.x, q.disc.y), q.disc.r)));
+        const caster = byLayer[q.caster];
+        const grown = strandFootprintAtWidth(caster, P, enableThird, 1, (caster.width || 0) + 2 * (caster.stroke_width || 0) + 2);
+        return { contains: inside(o.path, q.points || []), discArea, bounds: box(o.path.bounds), casterBounds: box(grown && grown.bounds) };
+      }
+      case 'at': {
+        // Debug: every caster's outlines / lifts / clip containing a point.
+        const pt = new paper.Point(q.point[0], q.point[1]);
+        const out = [];
+        for (const t of strands) {
+          if (isMask(t)) { const pc = piecePath(t); if (pc && pc.contains(pt)) out.push(`piece ${t.layer_name}`); continue; }
+          const col = collectShadow(t);
+          if (!col) continue;
+          for (const o of col.outlines) if (o.path.contains(pt)) out.push(`${t.layer_name}->${o.recv}`);
+          for (const f of col.fills) if (f.contains(pt)) out.push(`${t.layer_name} fill`);
+          if (col.lifts.some((l) => l.contains(pt))) out.push(`${t.layer_name} lift`);
+          if (col.clip && col.clip.contains(pt)) out.push(`${t.layer_name} clip`);
+        }
+        return out;
+      }
+      case 'outlines': {
+        const col = collectShadow(byLayer[q.caster]);
+        if (!col) return null;
+        return {
+          outlines: col.outlines.map((o) => [o.recv, box(o.path.bounds), pArea(o.path)]),
+          lifts: col.lifts.map((l) => [box(l.bounds), pArea(l)]),
+          clip: col.clip ? box(col.clip.bounds) : null,
+        };
+      }
+      case 'zone': {
+        const m = byLayer[q.mask];
+        const z = zonePath(m), pc = piecePath(m);
+        const g = q.strand ? geomRendered(byLayer[q.strand]) : null;
+        return { zone: z && [box(z.bounds), pArea(z)], piece: pc && [box(pc.bounds), pArea(pc)],
+          cut: g && z ? pArea(pInter(g, z)) : null, whole: wholeMask(m) };
+      }
+      case 'near': return masksNear(byLayer[q.caster]).map((sd) => [sd.first, sd.second, [...sd.upper].sort(), [...sd.lower].sort(), [...sd.between].sort()]);
+      case 'runsUnder': return runsUnder({ width: q.width, stroke_width: q.stroke_width }, rect(q.footprint), rect(q.piece));
+      case 'opaqueCover': { const c = opaqueCover(q.strand, rect(q.footprint)); return c ? inside(c, q.points) : null; }
+      default: throw new Error('unknown probe op ' + q.op);
+    }
+  } finally {
+    fcEnd();
+    probeProject.remove();
+    try { if (callerProject && callerProject !== probeProject) callerProject.activate(); } catch { /* gone */ }
+  }
+};
+
+// The FILL region of one mask (Qt get_mask_path(), exactly the region drawMask
 // paints) handed back for the "Draw Names" label: OSS draw_strand_label centres a
 // mask's label on mask_path.boundingRect() and clips the text to that path
 // (strand_drawing_canvas.py draw_strand_label). Pure computation on a throwaway

@@ -102,6 +102,12 @@ try {
               ];
               c.color = { r: 220, g: 40, b: 40, a: 255 };
               c.stroke_color = { r: 10, g: 90, b: 200, a: 255 };
+              // Only the BODY is judged: the flat-end side lines are stroke-coloured
+              // bars, and a record without the keys draws them (OSS loads them as
+              // True). Where the swept strand is mostly covered, its bars alone
+              // would outweigh the visible fill.
+              c.start_line_visible = false;
+              c.end_line_visible = false;
             }
             return c;
           });

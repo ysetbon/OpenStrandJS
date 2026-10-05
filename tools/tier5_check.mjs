@@ -1,5 +1,6 @@
 // Guard for the Tier-5 Shadow Path preview overlay (OSS
-// strand_drawing_canvas.py:2794-2822 + shader_utils.py calculate_shadow_for_layer_pair).
+// strand_drawing_canvas.py "Draw visible shadow path(s)" + shader_utils.py
+// shadow_preview, OSS 2.0).
 //
 // The overlay's whole claim is that it shows WHERE a shadow actually lands, so
 // "it painted something blue" proves nothing. Every check below either pins the
@@ -152,16 +153,28 @@ try {
     // subtracted_layers is applied deep inside buildPairShadowRegion. A preview
     // that were a naive caster-∩-receiver intersection would ignore it entirely,
     // so this is what distinguishes "shares the shadow code" from "looks similar".
+    // Shadows stay on: since OSS 2.0 the preview is computed by the canvas's own
+    // shadow pass (shader_utils.shadow_preview -> draw_strand_shadow), which
+    // returns nothing while shadows are switched off.
     const scene = [UNDER, OVER, THIRD];
-    const noShadow = { shadow_enabled: false };
-    await render(scene, withPaths([['2_1', '1_1']], noShadow));
+    await render(scene, withPaths([['2_1', '1_1']]));
     const before = (await bluePixels()).length;
     await render(scene, withPaths([['2_1', '1_1']],
-      { ...noShadow, shadow_overrides: { '2_1': { '1_1': { subtracted_layers: ['3_1'] } } } }));
+      { shadow_overrides: { '2_1': { '1_1': { subtracted_layers: ['3_1'] } } } }));
     const after = (await bluePixels()).length;
     ok('the preview honours subtracted_layers, so it runs the real shadow pipeline',
       before > 0 && after < before,
       `${before}px -> ${after}px (unchanged means the overlay is its own intersection)`);
+  }
+
+  // ------------------------------------------- F. no shadows, no preview
+  {
+    const off = { shadow_enabled: false };
+    await render(SCENE, { ...BASE, ...off });
+    const plain = await hash();
+    await render(SCENE, withPaths([['2_1', '1_1']], off));
+    ok('with shadows switched off there is no preview (draw_strand_shadow draws nothing)',
+      await hash() === plain);
   }
 
   ok('no page errors along the way', errors.length === 0, errors.slice(0, 3).join(' | '));

@@ -264,6 +264,10 @@ export interface RenderStrand {
   start_circle_stroke_color?: RGBA | null;
   end_circle_stroke_color?: RGBA | null;
   is_setting_staring_circle?: boolean;
+  // An AttachedStrand's parent layer (OSS AttachedStrand.parent): the renderer
+  // finds the strand that paints a lowered unfolded start cap through it
+  // (shader_utils.lowered_start_cap).
+  attached_to?: string | null;
   is_selected?: boolean;          // draws the unified selection highlight (under the body)
   // OSS shadow_only: suppress this strand's own body/extension drawing but keep
   // its shadow contribution (it still casts onto lower strands). Absent/false ==
