@@ -30,7 +30,9 @@ import assert from 'node:assert/strict';
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
 const withOss = process.argv.includes('--oss');
-const FIXTURE = join(root, 'fixtures', 'history_mask_below.json');
+// A save-path fixture, kept out of the top-level render corpus (pan_fidelity,
+// fidelity_run and friends sweep fixtures/*.json).
+const FIXTURE = join(root, 'fixtures', 'history', 'history_mask_below.json');
 
 const work = mkdtempSync(join(tmpdir(), 'ossjs-history-export-'));
 const entry = join(work, 'entry.ts');
