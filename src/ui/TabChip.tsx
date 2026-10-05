@@ -47,7 +47,7 @@ export function TabChip(props: {
     // background tab holds only its document (its history was dropped on the
     // switch), so it saves the one-step history a snapshot would produce.
     const payload = id === s.activeTabId
-      ? serializeHistory(s.past, { doc: s.doc, meta: s.presentMeta }, s.future, opts)
+      ? serializeHistory(s.past, { doc: s.doc, meta: s.presentMeta, raw: s.presentRaw }, s.future, opts)
       : serializeHistory([], { doc: tab.doc ?? s.doc, meta: null }, [], opts);
     const res = await saveProjectFile(tab.filePath ?? 'openstrand_project.json', payload);
     if (!res.saved) return;

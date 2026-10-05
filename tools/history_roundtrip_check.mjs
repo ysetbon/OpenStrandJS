@@ -41,16 +41,24 @@ for (const file of files) {
   try {
     const raw = JSON.parse(readFileSync(resolve(file), 'utf8'));
     const a = io.loadProjectFile(raw, OPTS);
-    const wrapper = io.serializeHistory(a.past, { doc: a.doc, meta: a.presentMeta }, a.future, OPTS);
+    const wrapper = io.serializeHistory(a.past, { doc: a.doc, meta: a.presentMeta, raw: a.presentRaw }, a.future, OPTS);
 
     // export_history shape and key order.
     assert.deepEqual(Object.keys(wrapper), ['type', 'version', 'current_step', 'max_step', 'states']);
     assert.equal(wrapper.type, 'OpenStrandStudioHistory');
     assert.equal(wrapper.version, 1);
     assert.equal(wrapper.max_step, wrapper.states.length);
+    // A step read from a history file goes back out exactly as it was stored
+    // (export_history_payload copies the temp state files); only states made
+    // in the session are serialized, in serialize_project_state's key order.
+    const fromFile = new Set([...a.past, { raw: a.presentRaw }, ...a.future].filter((e) => e.raw).map((e) => e.raw));
     wrapper.states.forEach((s, i) => {
       assert.deepEqual(Object.keys(s), ['step', 'data']);
       assert.equal(s.step, i + 1);
+      if (fromFile.size) {
+        const src = [...a.past, { raw: a.presentRaw }, ...[...a.future].reverse()].filter((e) => e.raw)[i]?.raw;
+        if (src) { assert.deepEqual(s.data, src, `step ${i + 1} is written as stored`); return; }
+      }
       const keys = Object.keys(s.data);
       const expectedKeys = ['strands', 'groups', 'strand_colors', 'selected_strand_name', 'locked_layers',
         'lock_mode', 'shadow_enabled', 'show_control_points', 'shadow_overrides'];
@@ -92,7 +100,7 @@ for (const file of files) {
     a.future.forEach((e, i) => sameMeta(b.future[i].meta, e.meta));
 
     // And a third serialization is byte-identical to the second.
-    const again = io.serializeHistory(b.past, { doc: b.doc, meta: b.presentMeta }, b.future, OPTS);
+    const again = io.serializeHistory(b.past, { doc: b.doc, meta: b.presentMeta, raw: b.presentRaw }, b.future, OPTS);
     const norm = (w) => JSON.stringify(w, (k, v) => (k === 'at' ? undefined : v));
     assert.equal(norm(again), norm(wrapper));
 

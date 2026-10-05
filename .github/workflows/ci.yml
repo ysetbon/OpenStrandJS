@@ -193,6 +193,13 @@ jobs:
       - name: Guards — Strands / Masks layer tabs
         run: node tools/layer_tab_check.mjs
 
+      # Save after opening a history file (OSS export_history_payload): every
+      # stored step is written back verbatim (layer order included, though the
+      # canvas keeps the masks on top), undo/redo keep that, an edit drops the
+      # redo steps, and a mask loaded as an undo state keeps its centre.
+      - name: Guards — history save after open / undo / redo
+        run: node tools/history_export_check.mjs
+
       # Snap-to-grid settings (OSS settings_dialog General page): the MOVE
       # checkbox gates move-mode drags (with the desktop's zoom/Ctrl decision), the
       # ATTACH/CREATE checkbox gates a new strand's start AND end and a child's end

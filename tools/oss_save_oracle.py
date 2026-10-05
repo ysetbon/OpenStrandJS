@@ -4,12 +4,14 @@ Save-format oracle for the OpenStrandJS save/load parity check.
 
 Drives the REAL OpenStrand Studio (headless) through its own load -> save path:
 the input is a project-state dict (or an OpenStrandStudioHistory file, whose
-current step is used), it is loaded exactly the way MainWindow.load_project's
-snapshot branch loads it (load_strands_from_data + apply_loaded_strands), and the
-resulting canvas is serialized with serialize_project_state — the dict that
-save_strands / export_history write. The output is what `python main.py` would
-save for that drawing, so tools/saveload_check.mjs can diff the JS serializer
-against it key for key.
+current step is used), it is put on the canvas exactly the way OpenStrand Studio
+does it, and the resulting canvas is serialized with serialize_project_state —
+the dict save_state records for that canvas. A bare project state goes through
+MainWindow.load_project's snapshot branch (load_strands, which keeps the masks on
+top since 2.0, + apply_loaded_strands); a history file's step goes through
+UndoRedoManager.import_history_payload / _load_state, the path every undo, redo
+and history open takes (load_strands only). tools/saveload_check.mjs diffs the
+JS serializer against it key for key.
 
 Usage:
     python oss_save_oracle.py <input.json> <out.json> [--bias on|off] [--step N]
@@ -61,7 +63,8 @@ def main():
     from PyQt5.QtWidgets import QApplication
     from main_window import MainWindow
     from save_load_manager import (
-        load_strands_from_data, apply_loaded_strands, serialize_project_state, SafeJSONEncoder,
+        load_strands_from_data, _with_masks_on_top, apply_loaded_strands, serialize_project_state,
+        SafeJSONEncoder,
     )
 
     app = QApplication.instance() or QApplication(sys.argv)
@@ -86,31 +89,47 @@ def main():
         state = next((s["data"] for s in states if s["step"] == step), None)
         if state is None:
             sys.exit("oracle: step %s not in file (steps %s)" % (step, [s["step"] for s in states]))
+        # UndoRedoManager._load_state, through import_history_payload with the
+        # requested step as the current one (the temp state files are the
+        # file's steps, renumbered 1..n in order, as import does).
+        undo_mgr = win.layer_panel.undo_redo_manager
+        position = [s["step"] for s in states].index(step) + 1
+        payload = {"type": "OpenStrandStudioHistory", "version": 1,
+                   "current_step": position, "max_step": len(states),
+                   "states": [{"step": i + 1, "data": s["data"]} for i, s in enumerate(states)]}
+        if not undo_mgr.import_history_payload(payload):
+            sys.exit("oracle: import_history_payload failed")
+        # _load_state keeps the canvas's CURRENT shadow toggle (undo/redo must
+        # not flip it), and load_project turns it off before importing. The JS
+        # port keeps the state's own value, a known separate difference, so the
+        # state's value is what is compared here.
+        canvas.shadow_enabled = bool(state.get("shadow_enabled", True))
     else:
         state = data
-
-    # MainWindow.load_project, snapshot branch.
-    (strands, groups, selected_strand_name, locked_layers, lock_mode,
-     shadow_enabled, show_control_points, shadow_overrides) = load_strands_from_data(state, canvas)
-    canvas.strands = []
-    canvas.groups = {}
-    canvas.shadow_enabled = shadow_enabled
-    gp = canvas.group_layer_manager.group_panel
-    gp.clear_all()
-    gp.groups_loaded_from_json = False
-    apply_loaded_strands(canvas, strands, groups, shadow_overrides)
-    canvas.show_control_points = show_control_points
-    for s in canvas.strands:
-        s.should_draw_shadow = shadow_enabled
-    if hasattr(canvas.layer_panel, "apply_lock_state"):
-        canvas.layer_panel.apply_lock_state(locked_layers, lock_mode)
-    # The selection is restored by the undo manager's _load_state, not by the
-    # snapshot branch; mirror what a saved file carries by selecting it here.
-    canvas.selected_strand = None
-    for s in canvas.strands:
-        if s.layer_name == selected_strand_name:
-            canvas.selected_strand = s
-            break
+        # MainWindow.load_project, snapshot branch: load_strands (masks on top,
+        # 45d6f1f) + apply_loaded_strands.
+        (strands, groups, selected_strand_name, locked_layers, lock_mode,
+         shadow_enabled, show_control_points, shadow_overrides) = _with_masks_on_top(
+            load_strands_from_data(state, canvas))
+        canvas.strands = []
+        canvas.groups = {}
+        canvas.shadow_enabled = shadow_enabled
+        gp = canvas.group_layer_manager.group_panel
+        gp.clear_all()
+        gp.groups_loaded_from_json = False
+        apply_loaded_strands(canvas, strands, groups, shadow_overrides)
+        canvas.show_control_points = show_control_points
+        for s in canvas.strands:
+            s.should_draw_shadow = shadow_enabled
+        if hasattr(canvas.layer_panel, "apply_lock_state"):
+            canvas.layer_panel.apply_lock_state(locked_layers, lock_mode)
+        # The selection is restored by the undo manager's _load_state, not by
+        # the snapshot branch; mirror what a saved file carries by selecting it.
+        canvas.selected_strand = None
+        for s in canvas.strands:
+            if s.layer_name == selected_strand_name:
+                canvas.selected_strand = s
+                break
 
     out = serialize_project_state(canvas.strands, win.group_layer_manager.get_group_data(), canvas)
 

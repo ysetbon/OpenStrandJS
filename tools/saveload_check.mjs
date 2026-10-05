@@ -43,6 +43,7 @@ const entry = join(work, 'entry.ts');
 writeFileSync(entry, [
   `export * from ${JSON.stringify(join(root, 'src', 'io', 'saveLoad.ts'))};`,
   `export { computeLayerState, formatLayerStateLog } from ${JSON.stringify(join(root, 'src', 'store', 'layerStateManager.ts'))};`,
+  `export { withMasksOnTop } from ${JSON.stringify(join(root, 'src', 'model', 'maskOrder.ts'))};`,
 ].join('\n'));
 const esb = spawnSync(join(root, 'node_modules', '.bin', 'esbuild'), [
   entry, '--bundle', '--format=esm', '--platform=node', `--outfile=${bundle}`,
@@ -111,15 +112,18 @@ for (const file of args) {
     const py = spawnSync('python3', pyArgs, { encoding: 'utf8' });
     if (py.status !== 0) { console.error(py.stdout, py.stderr); failures++; continue; }
     const oss = JSON.parse(readFileSync(oracleOut, 'utf8'));
+    // What the canvas holds once the state is loaded: load_strands keeps every
+    // mask above every strand (OSS 2.0, 45d6f1f), as the editor store does.
     const entry = step == null ? stack[currentStep - 1] : stack[step - 1];
-    const js = JSON.parse(JSON.stringify(io.serializeProject(entry.doc, opts)));
+    const doc = io.withMasksOnTop(entry.doc);
+    const js = JSON.parse(JSON.stringify(io.serializeProject(doc, opts)));
     const out = [];
     diff(oss, js, '$', out);
     if (checkState) {
       // OSS reads the selection off the canvas (the oracle selects the file's
       // selected_strand_name) and newest_strand is None after a load.
       const text = io.formatLayerStateLog(
-        io.computeLayerState(entry.doc, { newestStrand: null, selectedStrand: entry.doc.selected_strand_name }), LABELS);
+        io.computeLayerState(doc, { newestStrand: null, selectedStrand: doc.selected_strand_name }), LABELS);
       // masked_layers is list(set(...)) in OSS: hash-randomized order per run,
       // so that one line is compared as a set.
       const canon = (t) => t.replace(/^(Masked Layers:\n)(\[.*\])$/m,

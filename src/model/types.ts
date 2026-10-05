@@ -80,6 +80,13 @@ export interface StrandRecord {
   // when a constituent strand is dragged (move-mode fidelity). Recomputed during drags.
   base_center_point?: Point | null;
   edited_center_point?: Point | null;
+  // The centre a mask was loaded with from an undo/redo state (OSS
+  // UndoRedoManager._load_state -> load_strands seeds base/edited_center_point
+  // from the file's control_point_center, :996-999, and nothing overwrites them
+  // there). Only the saver reads it: a mask untouched since such a load writes
+  // this value back. The snapshot open path never sets it (apply_loaded_strands'
+  // force_complete_update replaces the centre with the first component's start).
+  loaded_center_point?: Point | null;
 
   // visibility / control-point state flags carried through save/load
   triangle_has_moved?: boolean;

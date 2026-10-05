@@ -82,6 +82,7 @@ export function Toolbar() {
     const st = useEditorStore.getState();
     const loaded = loadProjectFile(json, {
       enable_curvature_bias_control: st.settings.enable_curvature_bias_control,
+      curve_params: st.settings.curve_params,
     });
     st.loadDocumentWithHistory(loaded);
     const { panX, panY } = fitPan(loaded.doc, st.view);
@@ -109,7 +110,7 @@ export function Toolbar() {
   async function onSave(): Promise<boolean> {
     const st = useEditorStore.getState();
     const active = st.tabs.find((tb) => tb.id === st.activeTabId);
-    const payload = serializeHistory(st.past, { doc: st.doc, meta: st.presentMeta }, st.future, {
+    const payload = serializeHistory(st.past, { doc: st.doc, meta: st.presentMeta, raw: st.presentRaw }, st.future, {
       enable_curvature_bias_control: st.settings.enable_curvature_bias_control,
     });
     const res = await saveProjectFile(active?.filePath ?? 'openstrand_project.json', payload);
