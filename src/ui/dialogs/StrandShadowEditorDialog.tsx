@@ -11,12 +11,14 @@ import { requestRender } from '../../renderer/renderScheduler';
 import { t, isRTL } from '../i18n';
 import '../groupPanel.css';
 
-// OSS-faithful per-strand Shadow Editor (shadow_editor_dialog.py), 1.109 shape:
+// OSS-faithful per-strand Shadow Editor (shadow_editor_dialog.py), 2.0 shape:
 // rows for every non-hidden layer BELOW this strand (this strand casting onto
 // each), then a "Shadows cast via masks" section (77cd95ee) — for every
-// non-hidden mask whose OVER strand is this layer, one row per layer below the
-// mask. Mask-proxy rows read/write the overrides keyed under the MASK's layer
-// name (the same settings the mask's own dialog edits).
+// non-hidden mask whose OVER strand is this layer, the mask's row on its UNDER
+// strand. Mask-proxy rows read/write the overrides keyed under the MASK's layer
+// name (the same settings the mask's own dialog edits). A mask casts one shadow
+// since OSS 2.0 (722780e, _mask_second_layer): its first strand's shading on its
+// second strand, so a mask's own dialog and its proxy rows list only that one.
 //
 // Visibility toggles route through setShadowVisibilityUser, which implements
 // the auto_shadow interplay: re-enabling an auto-hidden pair drops `auto` and
@@ -60,8 +62,12 @@ export function StrandShadowEditorDialog(props: {
 
   // Main rows: every non-hidden layer below this strand, TOP-TO-BOTTOM.
   const ci = live.order.indexOf(layerName);
+  // A mask casts one shadow: on its second strand (_mask_second_layer).
+  const self = live.strands[layerName];
+  const maskPartner = self && self.type === 'MaskedStrand' ? maskComponents(layerName)?.second ?? null : null;
   const receivers: string[] = [];
   for (let i = ci - 1; i >= 0; i--) {
+    if (maskPartner !== null && live.order[i] !== maskPartner) continue;
     if (notHidden(live.order[i])) receivers.push(live.order[i]);
   }
 
@@ -72,12 +78,11 @@ export function StrandShadowEditorDialog(props: {
     if (!s || s.type !== 'MaskedStrand' || s.is_hidden) continue;
     const comp = maskComponents(nm);
     if (!comp || comp.first !== layerName) continue;
+    // Only the mask's second strand, and only when it lies below the mask.
     const mi = live.order.indexOf(nm);
-    for (let i = mi - 1; i >= 0; i--) {
-      const recv = live.order[i];
-      if (recv === layerName || !notHidden(recv)) continue;
-      maskRows.push({ mask: nm, recv });
-    }
+    const ri = live.order.indexOf(comp.second);
+    if (ri < 0 || ri >= mi || !notHidden(comp.second)) continue;
+    maskRows.push({ mask: nm, recv: comp.second });
   }
 
   // Subtraction candidates: every non-hidden non-mask layer except the receiver
