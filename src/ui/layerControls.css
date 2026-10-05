@@ -112,16 +112,23 @@
 /* Delete-All confirmation dialog buttons (No / Yes). The shared <Modal>
    footer (.modal-footer in dialogs.css) carries no button style, so style
    our own here to match the themed dialog buttons used elsewhere. */
+/* OSS shows a QMessageBox: the app's QDialog QPushButton (normal weight,
+   2px border, themed hover / pressed). */
 .dlg-btn {
-  font-weight: bold;
+  font-weight: normal;
   padding: 5px 14px;
   color: var(--text, #000);
-  background: var(--button-bg, #e6e6e6);
-  border: 1px solid var(--button-border, #888);
+  background: var(--dialog-btn-bg, #e8e8e8);
+  border: 2px solid var(--dialog-btn-border, #b0b0b0);
   border-radius: 4px;
   cursor: pointer;
 }
 
 .dlg-btn:hover {
-  background: var(--button-hover, #dadada);
+  background: var(--dialog-btn-hover, #dadada);
+}
+
+.dlg-btn:active {
+  background: var(--dialog-btn-pressed, #c8c8c8);
+  border-color: var(--dialog-btn-pressed-border, #a0a0a0);
 }

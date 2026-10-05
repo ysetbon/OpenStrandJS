@@ -5,8 +5,15 @@
 // We therefore fold pan straight into offset and pass view.zoom as meta.zoom.
 
 import type {
-  EditorDocument, RenderMeta, RenderStrand, Settings, ViewState,
+  EditorDocument, RenderMeta, RenderStrand, Settings, Theme, ViewState,
 } from '../model/types';
+
+// Canvas backdrop per theme (main_window.apply_theme QWidget background-color).
+const CANVAS_BG: Record<Theme, string | undefined> = {
+  default: '#ECECEC',
+  light: undefined,
+  dark: '#2C2C2C',
+};
 
 // `highlightSet` (optional) marks extra strands as selected for highlight
 // purposes — used during an endpoint drag so welded/attached peers that move
@@ -165,11 +172,12 @@ export function buildMeta(
     // never sets these, so fixtures stay byte-identical.
     show_grid: settings.show_grid,
     grid_size: settings.grid_size,
-    // Theme-aware canvas painting (live editor only). OSS paints the canvas
-    // interior #2C2C2C in the dark theme (UI_PORT_PLAN.md §2.6, canvas_bg dark);
-    // light/default stay white. Left undefined off-dark so the renderer's default
-    // 'white' path — shared with the fidelity oracle — is byte-for-byte unchanged.
-    canvas_bg: settings.theme === 'dark' ? '#2C2C2C' : undefined,
+    // Theme-aware canvas painting (live editor only). The OSS canvas has no
+    // backdrop of its own, so it shows the app stylesheet's QWidget background:
+    // #2C2C2C dark, #ECECEC default, #FFFFFF light. Left undefined for light so
+    // the renderer's default 'white' path — shared with the fidelity oracle — is
+    // byte-for-byte unchanged.
+    canvas_bg: CANVAS_BG[settings.theme],
     // OSS grid is theme-INDEPENDENT #C8C8C8 (zoom >= 0.5) / #B4B4B4 (< 0.5)
     // (UI_PORT_PLAN.md:196). The legacy faint rgba(0,0,0,0.08) vanished on the dark
     // canvas; this value reads correctly on every theme. Grid is live-editor-only

@@ -85,7 +85,7 @@ try {
       const S = window.__store;
       const raf = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
       const st = S.getState();
-      st.setSettings({ curve_params: meta.curve_params, show_grid: false, show_hover_highlights: true, theme: 'default' });
+      st.setSettings({ curve_params: meta.curve_params, show_grid: false, show_hover_highlights: true, theme: 'light' });  // white canvas, like the OSS capture's img.fill(white)
       const doc = window.__io.loadProject(fixture);
       doc.shadow_enabled = false;
       st.loadDocument(doc);

@@ -52,11 +52,11 @@ export function LanguagePage({ lang }: PageProps) {
         >
           <Flag code={current.code} />
           <span style={{ flex: 1, textAlign: 'start' }}>{t(current.nameKey, lang)}</span>
-          <span aria-hidden style={{ opacity: 0.7 }}>▾</span>
+          <span aria-hidden style={{ color: 'var(--set-combo-arrow)' }}>▾</span>
         </button>
         {open && (
           <ul
-            className="set-nav"
+            className="set-nav set-pop"
             // Twelve entries no longer fit under the combobox inside the settings
             // page, so the list scrolls within the room it has (a QComboBox popup
             // would spill past the dialog; the page area cannot).

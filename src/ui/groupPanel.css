@@ -48,10 +48,10 @@
   background: var(--create-group-pressed);
 }
 
-/* OSS disable_controls (mask editing) greys the Create Group button. */
+/* OSS disable_controls (mask editing) disables the Create Group button, but
+ * its own sheet has no :disabled rule (and beats the app's), so it looks the same. */
 .gp-create-btn:disabled {
   cursor: default;
-  opacity: 0.5;
 }
 
 .gp-tree {
@@ -65,6 +65,8 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  /* App-sheet QScrollBar colours (track / handle), not the native bar. */
+  scrollbar-color: var(--scrollbar-handle) var(--scrollbar-track);
 }
 
 .gp-group {
@@ -122,8 +124,10 @@
   user-select: none;
 }
 
+/* OSS never installs _GroupTreeDelegate, so QTreeWidget::item:hover paints
+ * child rows with the same group_hover_bg as group rows. */
 .gp-child-row:hover {
-  background: var(--group-child-hover-bg);
+  background: var(--group-hover-bg);
 }
 
 /* RTL: mirror the QTreeWidget indentation. */

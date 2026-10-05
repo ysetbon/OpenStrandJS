@@ -33,7 +33,8 @@
   --ctx-hover-fg: #FFFFFF;
   --ctx-sep-dark: #9D9D9D;
   --ctx-sep-light: #FFFFFF;
-  --ctx-disabled: #888888;
+  /* strand_data_menu.py: disabled text #909090 in every theme. */
+  --ctx-disabled: #909090;
   --ctx-frame: 1px;
 
   position: fixed;
@@ -69,9 +70,28 @@
   --ctx-hover-fg: #000000;
   --ctx-sep-dark: #1D1D1D;
   --ctx-sep-light: #333333;
-  --ctx-disabled: #777777;
   --ctx-frame: 3px;
 }
+
+/* Group panel menu (group_layers.py _group_context_menu_stylesheet): menu_bg
+ * frame with a 1px menu_border, 4px padding, transparent items, menu_selected
+ * hover, a single menu_border separator line. Hebrew items are _RtlMenuLabel
+ * widgets that keep the HoverLabel colours, so RTL keeps the base item vars. */
+.ctx-menu.ctx-group {
+  --ctx-window: var(--menu-bg);
+  border: 1px solid var(--menu-border);
+  padding: 4px;
+}
+.ctx-menu.ctx-group:not([dir='rtl']) {
+  --ctx-item-bg: transparent;
+  --ctx-item-fg: var(--text);
+  --ctx-hover-bg: var(--menu-selected-bg);
+  --ctx-hover-fg: var(--menu-selected-text);
+}
+.ctx-group:not([dir='rtl']) .ctx-item { min-height: 0; padding: 6px 28px 6px 14px; }
+.ctx-group .ctx-sep { height: 9px; padding: 4px 8px; }
+.ctx-group .ctx-sep::before { background: var(--menu-border); }
+.ctx-group .ctx-sep::after { display: none; }
 
 /* ---- plain item (HoverLabel) ---- */
 .ctx-item {

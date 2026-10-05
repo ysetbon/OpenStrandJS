@@ -72,6 +72,9 @@ export function ContextMenu(props: {
   x: number;
   y: number;
   onClose: () => void;
+  // 'group': the group panel's own QMenu sheet (group_layers.py
+  // _group_context_menu_stylesheet), not the layer-button menu's look.
+  variant?: 'group';
 }): JSX.Element {
   const { items, x, y, onClose } = props;
   const ref = useRef<HTMLDivElement>(null);
@@ -129,7 +132,7 @@ export function ContextMenu(props: {
   return (
     <div
       ref={ref}
-      className={'ctx-menu ' + themeClass}
+      className={'ctx-menu ' + themeClass + (props.variant === 'group' ? ' ctx-group' : '')}
       style={{ left: pos.left, top: pos.top, minWidth }}
       role="menu"
       dir={isRtl ? 'rtl' : 'ltr'}

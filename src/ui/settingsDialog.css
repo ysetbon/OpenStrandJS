@@ -34,7 +34,12 @@
   user-select: none;
 }
 .set-nav-item:hover { background: var(--set-list-hover); }
-.set-nav-item.active { background: var(--set-list-sel); }
+.set-nav-item.active { background: var(--set-list-sel); color: var(--set-list-sel-text); }
+/* Combo popup (QComboBox QAbstractItemView): the app's QWidget ground and the
+ * combo's selection-background-color (#666666; dark #222222), white text. */
+.set-pop { background: var(--set-pop-bg); }
+.set-pop .set-nav-item:hover,
+.set-pop .set-nav-item.active { background: var(--set-pop-sel); color: #FFFFFF; }
 
 /* ---- Stacked page area (QStackedWidget) ---- */
 .set-content {
@@ -63,7 +68,6 @@
 }
 .set-page-sub {
   text-align: center;
-  opacity: 0.85;
   white-space: pre-line;
   max-width: 460px;
   margin: 0 auto 6px;
@@ -105,25 +109,27 @@
   flex: 0 0 auto;
   display: inline-flex;
   align-items: stretch;
-  border: 1px solid var(--set-combo-border);
-  border-radius: 4px;
-  background: var(--set-combo-bg);
+  border: 1px solid var(--set-spin-border);
+  border-radius: 5px;
+  background: var(--set-spin-bg);
   overflow: hidden;
 }
 .set-num-seg > button {
   flex: 0 0 auto;
-  width: 26px;
+  width: 30px;
   border: none;
-  background: transparent;
+  background: var(--set-spin-btn);
   color: var(--text);
-  font-size: 14px;
+  font-size: 15px;
+  font-weight: bold;
   line-height: 1;
   cursor: pointer;
   padding: 0;
 }
-.set-num-seg > button:first-child { border-right: 1px solid var(--set-combo-border); }
-.set-num-seg > button:last-child { border-left: 1px solid var(--set-combo-border); }
-.set-num-seg > button:hover { background: var(--set-list-hover); }
+.set-num-seg > button:first-child { border-right: 1px solid var(--set-spin-sep); }
+.set-num-seg > button:last-child { border-left: 1px solid var(--set-spin-sep); }
+.set-num-seg > button:hover { background: var(--set-spin-btn-hover); }
+.set-num-seg > button:active { background: var(--set-spin-btn-pressed); }
 .set-num {
   flex: 0 0 auto;
   width: 58px;
@@ -164,6 +170,10 @@
 }
 .set-btn:hover { background: var(--set-btn-hover); }
 .set-btn:active { background: var(--set-btn-pressed); }
+/* A disabled Qt button takes no hover/press fill. */
+.set-btn:disabled { cursor: default; }
+.set-btn:disabled:hover,
+.set-btn:disabled:active { background: var(--set-btn-bg); }
 .set-btn.wide { min-width: 150px; min-height: 40px; }
 
 /* ---- Color swatch button (style_color_swatch_button: 64x27, 22x22 chip) ---- */
@@ -189,8 +199,8 @@
   width: 22px;
   height: 22px;
   border-radius: 2px;
-  border: 1px solid rgba(0, 0, 0, 0.35);
-  /* checkerboard backing shows alpha; the colour layer is set inline */
+  /* OSS fills a bare 22x22 pixmap with the colour: no outline. The
+   * checkerboard backing shows alpha; the colour layer is set inline. */
 }
 
 /* ---- Custom green checkbox (setup_custom_checkmark) ---- */
@@ -223,9 +233,15 @@ input.set-toggle:checked {
   background-position: center;
   background-size: 70%;
 }
+.set-check input[type='checkbox']:hover:not(:checked):not(:disabled),
+input.set-toggle:hover:not(:checked):not(:disabled) {
+  border-color: var(--set-check-hover-border);
+  background-color: var(--set-check-hover-bg);
+}
 .set-check input[type='checkbox']:hover:checked,
 input.set-toggle:hover:checked { background-color: var(--set-check-on-hover); }
-input.set-toggle:disabled { opacity: 0.45; cursor: default; }
+/* OSS has no QCheckBox:disabled rule, so a disabled box looks enabled. */
+input.set-toggle:disabled { cursor: default; }
 .set-check > span { font-size: 14px; }
 /* Arrow-color checkbox renders label first, box second in LTR (OSS special case). */
 .set-check.label-first { flex-direction: row; }
@@ -243,14 +259,20 @@ input.set-toggle:disabled { opacity: 0.45; cursor: default; }
 .set-html {
   line-height: 1.5;
   max-width: 640px;
+  /* QTextBrowser frame (apply_dialog_theme): #F5F5F5 / white / #3D3D3D with a
+   * #CCCCCC (dark #505050) border — the list tokens hold exactly these. */
+  background: var(--set-list-bg);
+  border: 1px solid var(--set-list-border);
+  border-radius: 4px;
+  padding: 8px;
 }
 .set-html h2 { font-size: 18px; margin: 10px 0 6px; }
 .set-html h3 { font-size: 15px; margin: 8px 0 4px; }
 .set-html ul { margin: 4px 0 8px; padding-inline-start: 22px; }
-.set-html a { color: var(--accent); }
+.set-html a { color: #0000FF; }  /* unstyled QTextBrowser link: Qt palette Link */
 .set-html img { vertical-align: middle; }
 .set-html table { border-collapse: collapse; margin: 6px 0; }
-.set-html th, .set-html td { border: 1px solid var(--set-list-border); padding: 4px 8px; text-align: start; }
+.set-html th, .set-html td { border: none; padding: 4px 8px; text-align: start; }
 
 /* Vertical button column (Samples / Tutorial play buttons). */
 .set-btn-col {
@@ -276,9 +298,7 @@ input.set-toggle:disabled { opacity: 0.45; cursor: default; }
   flex-direction: column;
   gap: 6px;
   padding: 8px 0;
-  border-bottom: 1px solid var(--set-list-border);
 }
-.set-tutorial-entry:last-child { border-bottom: none; }
 .set-tutorial-text { white-space: pre-line; }
 
 /* In-app video modal body. */
@@ -305,8 +325,8 @@ input.set-toggle:disabled { opacity: 0.45; cursor: default; }
   font-variant-numeric: tabular-nums;
 }
 .set-history-row:hover { background: var(--set-list-hover); }
-.set-history-row.active { background: var(--set-list-sel); }
-.set-history-empty { opacity: 0.65; font-style: italic; padding: 8px; }
+.set-history-row.active { background: var(--set-list-sel); color: var(--set-list-sel-text); }
+.set-history-empty { font-style: italic; padding: 8px; }
 
 /* Guide icon inline. */
 .set-guide-icon { width: 34px; height: 34px; vertical-align: middle; }
@@ -316,4 +336,12 @@ input.set-toggle:disabled { opacity: 0.45; cursor: default; }
 .set-history-actions { max-height: 30vh; }
 .set-history-row.is-static { cursor: default; }
 .set-history-row.is-static:hover { background: none; }
-.set-history-time { opacity: 0.6; margin-inline-end: 8px; font-variant-numeric: tabular-nums; }
+/* Dark keeps QListWidget::item:hover even with NoSelection. */
+.theme-dark .set-history-row.is-static:hover { background: var(--set-list-hover); }
+.set-history-time { margin-inline-end: 8px; font-variant-numeric: tabular-nums; }
+
+/* Scrollbars: the dialog's own sheet in dark (#505050 on #2C2C2C), the app
+ * sheet's colours in default/light. */
+.set-nav, .set-content, .set-history-list, .set-html {
+  scrollbar-color: var(--set-scroll-handle) var(--set-scroll-track);
+}
