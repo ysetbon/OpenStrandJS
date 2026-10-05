@@ -7,6 +7,7 @@ import { CanvasStage } from './CanvasStage';
 import { LayerPanel } from './LayerPanel';
 import { Splitter } from './Splitter';
 import { startHistoryRecorder } from './settings/history';
+import { tabRowMinWidth } from './layerTabFit';
 
 // OSS main-window shell: a horizontal splitter with `left_widget` (toolbar over
 // canvas) on one side and the layer panel on the other. Theme + RTL are applied
@@ -21,7 +22,8 @@ import { startHistoryRecorder } from './settings/history';
 // The panel is sized to its widest CONTENT rather than to a round number, so
 // the canvas keeps everything the panel does not actually need:
 //
-//   list column   132px layer button + 12px scrollbar room + 2 slack = 146
+//   list column   132px layer button + 12px scrollbar room + 2 slack = 146,
+//                 or the Strands / Masks switch's need if that is more (below)
 //   group column  112px Create Group button + the 1px hairline that stands in
 //                 for the splitter handle beside it = 113
 //   +1            .layer-panel's own border-inline-start
@@ -38,6 +40,15 @@ import { startHistoryRecorder } from './settings/history';
 // clears the widest bottom-stack label (Spanish "Nuevo Cordón", 96px) with
 // 24px each side.
 //
+// The Strands / Masks switch on top of that stack (OSS 2.0, 9fc7cbd) is two
+// equal halves with no side padding, so it is the one thing in the column whose
+// labels can outgrow it: Japanese "ストランド" needs ~72px of a 73px half. OSS
+// guarantees every language clears its ~79px half by 4px
+// (test_labels_fit_the_panel); the column takes whatever that needs for the
+// widest label of any language (layerTabFit.tabRowMinWidth — 152px with the
+// fonts of a stock Linux, so the floor is 152 there), the same in every
+// language, the way OSS's column does not change with the language either.
+//
 // This is also OSS's own compact geometry (layer_panel.py set_compact_reduction
 // trims the list column to exactly the buttons plus a scrollbar gutter), so the
 // port no longer needs a separate wide/compact split: the compact column is the
@@ -49,16 +60,20 @@ const GROUP_PANEL_W = 113;
 // hairline. The panel minimum drops by the difference (72px here; 140 → 40 =
 // 100px in OSS) and the canvas gains exactly that.
 const GROUP_RAIL_W = 40 + 1;
-const LIST_COLUMN_W = 146;
+const LIST_BUTTONS_W = 146;
 const PANEL_BORDER_W = 1;
-const PANEL_DEFAULT_W = LIST_COLUMN_W + GROUP_PANEL_W + PANEL_BORDER_W;   // 260
 const PANEL_MAX_W = 860;
 // OSS layer_panel animates the column between 140 and 40 over 200ms
 // (QVariantAnimation, InOutCubic); the shell's widths follow the same curve.
 const GROUP_ANIM_MS = 200;
 
+// The list column's floor: the layer buttons' 146, or the switch's need.
+function listColumnWidth(): number {
+  return Math.max(LIST_BUTTONS_W, tabRowMinWidth());
+}
+
 function panelMinFor(collapsed: boolean): number {
-  return LIST_COLUMN_W + (collapsed ? GROUP_RAIL_W : GROUP_PANEL_W) + PANEL_BORDER_W;
+  return listColumnWidth() + (collapsed ? GROUP_RAIL_W : GROUP_PANEL_W) + PANEL_BORDER_W;
 }
 
 export function App() {

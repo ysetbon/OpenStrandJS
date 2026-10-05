@@ -69,9 +69,10 @@
   font-weight: bold;
   text-align: center;
   white-space: nowrap;
-  /* Not clipped: this column is 146px (OSS's is ~158), so a CJK label such as
-     Japanese "ストランド" can use the last pixel of padding-free width. */
-  overflow: visible;
+  /* Clipped like a QPushButton's text. Nothing is ever cut: the list column is
+     at least wide enough for the widest label of any language to clear its
+     half by OSS's 4px (App.tsx listColumnWidth, layerTabFit.ts). */
+  overflow: hidden;
   cursor: pointer;
   border-radius: 0;
   /* released half */
