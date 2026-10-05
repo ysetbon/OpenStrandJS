@@ -1,0 +1,435 @@
+{
+  "sub": "pr-64",
+  "kind": "pr",
+  "pr": 64,
+  "branch": "ccr-519c5948-m3oj6g",
+  "title": "OSS 2.0 follow-ups: history save parity (masks below strands), tab label fit, overlay at display scale",
+  "sha": "0efd31a29a",
+  "updated": "2026-10-05T14:15:34.369Z",
+  "summary": {
+    "fixtures": 41,
+    "perfect": 37,
+    "lowest": 99.911
+  },
+  "results": [
+    {
+      "fixture": "fid_shadow_unfolded_attach",
+      "match_pct": 100
+    },
+    {
+      "fixture": "fid_unfold_angled",
+      "match_pct": 100
+    },
+    {
+      "fixture": "fid_unfold_chain",
+      "match_pct": 100
+    },
+    {
+      "fixture": "fid_mask_cross_toggle",
+      "match_pct": 100
+    },
+    {
+      "fixture": "fid_mask_hidden",
+      "match_pct": 100
+    },
+    {
+      "fixture": "fid_mask_full_nosub",
+      "match_pct": 100
+    },
+    {
+      "fixture": "fid_mask_shadow_only",
+      "match_pct": 100
+    },
+    {
+      "fixture": "fid_mask_curved_shadow_only",
+      "match_pct": 100
+    },
+    {
+      "fixture": "fid_attached_locked_center",
+      "match_pct": 100
+    },
+    {
+      "fixture": "fid_mask_panned_shadow_only",
+      "match_pct": 100
+    },
+    {
+      "fixture": "mso_ex1",
+      "match_pct": 100
+    },
+    {
+      "fixture": "mso_ex2",
+      "match_pct": 100
+    },
+    {
+      "fixture": "mso_ex4",
+      "match_pct": 100
+    },
+    {
+      "fixture": "mso_ex5",
+      "match_pct": 100
+    },
+    {
+      "fixture": "mp_neighbour_opaque",
+      "match_pct": 100
+    },
+    {
+      "fixture": "mp_neighbour_translucent",
+      "match_pct": 100
+    },
+    {
+      "fixture": "mp_neighbour_no_outline",
+      "match_pct": 100
+    },
+    {
+      "fixture": "mp_neighbour_see_through",
+      "match_pct": 100
+    },
+    {
+      "fixture": "mp_neighbour_shadow_only",
+      "match_pct": 100
+    },
+    {
+      "fixture": "mp_neighbour_hidden",
+      "match_pct": 100
+    },
+    {
+      "fixture": "mp_third_strand_over",
+      "match_pct": 100
+    },
+    {
+      "fixture": "mp_third_strand_between",
+      "match_pct": 100
+    },
+    {
+      "fixture": "mp_diagonal_crossing",
+      "match_pct": 100
+    },
+    {
+      "fixture": "mp_first_already_above",
+      "match_pct": 100
+    },
+    {
+      "fixture": "mp_mask_mid_order",
+      "match_pct": 100
+    },
+    {
+      "fixture": "mp_joint_seamless",
+      "match_pct": 100
+    },
+    {
+      "fixture": "mp_joint_circle",
+      "match_pct": 100
+    },
+    {
+      "fixture": "mp_mask_mode_pick",
+      "match_pct": 100
+    },
+    {
+      "fixture": "mp_selected_over_crossing",
+      "match_pct": 100
+    },
+    {
+      "fixture": "mp_selected_over_crossing_sel",
+      "match_pct": 100
+    },
+    {
+      "fixture": "mp_selected_over_crossing_sel_pan",
+      "match_pct": 100
+    },
+    {
+      "fixture": "sample_chinese_double_coin",
+      "match_pct": 99.999
+    },
+    {
+      "fixture": "sample_chinese_double_coin_w80",
+      "match_pct": 100
+    },
+    {
+      "fixture": "sample_woven_heart",
+      "match_pct": 99.999
+    },
+    {
+      "fixture": "sample_woven_heart_w80",
+      "match_pct": 100
+    },
+    {
+      "fixture": "sample_tidal_waves",
+      "match_pct": 99.997
+    },
+    {
+      "fixture": "sample_tidal_waves_w80",
+      "match_pct": 99.911
+    },
+    {
+      "fixture": "sample_kagome_weave",
+      "match_pct": 100
+    },
+    {
+      "fixture": "sample_thick_and_thin",
+      "match_pct": 100
+    },
+    {
+      "fixture": "sample_box_stitch",
+      "match_pct": 100
+    },
+    {
+      "fixture": "sample_box_stitch_w80",
+      "match_pct": 100
+    }
+  ],
+  "selected": "fid_shadow_unfolded_attach",
+  "thumb": {
+    "file": "thumb.png",
+    "from": "fid_shadow_unfolded_attach",
+    "w": 364,
+    "h": 360
+  },
+  "thumbs": [
+    {
+      "fixture": "fid_shadow_unfolded_attach",
+      "file": "snaps/fid_shadow_unfolded_attach.png",
+      "w": 364,
+      "h": 360
+    },
+    {
+      "fixture": "fid_unfold_angled",
+      "file": "snaps/fid_unfold_angled.png",
+      "w": 371,
+      "h": 360
+    },
+    {
+      "fixture": "fid_unfold_chain",
+      "file": "snaps/fid_unfold_chain.png",
+      "w": 311,
+      "h": 360
+    },
+    {
+      "fixture": "fid_mask_cross_toggle",
+      "file": "snaps/fid_mask_cross_toggle.png",
+      "w": 422,
+      "h": 360
+    },
+    {
+      "fixture": "fid_mask_hidden",
+      "file": "snaps/fid_mask_hidden.png",
+      "w": 422,
+      "h": 360
+    },
+    {
+      "fixture": "fid_mask_full_nosub",
+      "file": "snaps/fid_mask_full_nosub.png",
+      "w": 422,
+      "h": 360
+    },
+    {
+      "fixture": "fid_mask_shadow_only",
+      "file": "snaps/fid_mask_shadow_only.png",
+      "w": 422,
+      "h": 360
+    },
+    {
+      "fixture": "fid_mask_curved_shadow_only",
+      "file": "snaps/fid_mask_curved_shadow_only.png",
+      "w": 423,
+      "h": 360
+    },
+    {
+      "fixture": "fid_attached_locked_center",
+      "file": "snaps/fid_attached_locked_center.png",
+      "w": 466,
+      "h": 360
+    },
+    {
+      "fixture": "fid_mask_panned_shadow_only",
+      "file": "snaps/fid_mask_panned_shadow_only.png",
+      "w": 422,
+      "h": 360
+    },
+    {
+      "fixture": "mso_ex1",
+      "file": "snaps/mso_ex1.png",
+      "w": 328,
+      "h": 360
+    },
+    {
+      "fixture": "mso_ex2",
+      "file": "snaps/mso_ex2.png",
+      "w": 372,
+      "h": 360
+    },
+    {
+      "fixture": "mso_ex4",
+      "file": "snaps/mso_ex4.png",
+      "w": 423,
+      "h": 360
+    },
+    {
+      "fixture": "mso_ex5",
+      "file": "snaps/mso_ex5.png",
+      "w": 361,
+      "h": 360
+    },
+    {
+      "fixture": "mp_neighbour_opaque",
+      "file": "snaps/mp_neighbour_opaque.png",
+      "w": 360,
+      "h": 360
+    },
+    {
+      "fixture": "mp_neighbour_translucent",
+      "file": "snaps/mp_neighbour_translucent.png",
+      "w": 360,
+      "h": 360
+    },
+    {
+      "fixture": "mp_neighbour_no_outline",
+      "file": "snaps/mp_neighbour_no_outline.png",
+      "w": 360,
+      "h": 360
+    },
+    {
+      "fixture": "mp_neighbour_see_through",
+      "file": "snaps/mp_neighbour_see_through.png",
+      "w": 360,
+      "h": 360
+    },
+    {
+      "fixture": "mp_neighbour_shadow_only",
+      "file": "snaps/mp_neighbour_shadow_only.png",
+      "w": 360,
+      "h": 360
+    },
+    {
+      "fixture": "mp_neighbour_hidden",
+      "file": "snaps/mp_neighbour_hidden.png",
+      "w": 360,
+      "h": 360
+    },
+    {
+      "fixture": "mp_third_strand_over",
+      "file": "snaps/mp_third_strand_over.png",
+      "w": 360,
+      "h": 360
+    },
+    {
+      "fixture": "mp_third_strand_between",
+      "file": "snaps/mp_third_strand_between.png",
+      "w": 360,
+      "h": 360
+    },
+    {
+      "fixture": "mp_diagonal_crossing",
+      "file": "snaps/mp_diagonal_crossing.png",
+      "w": 360,
+      "h": 360
+    },
+    {
+      "fixture": "mp_first_already_above",
+      "file": "snaps/mp_first_already_above.png",
+      "w": 360,
+      "h": 360
+    },
+    {
+      "fixture": "mp_mask_mid_order",
+      "file": "snaps/mp_mask_mid_order.png",
+      "w": 360,
+      "h": 360
+    },
+    {
+      "fixture": "mp_joint_seamless",
+      "file": "snaps/mp_joint_seamless.png",
+      "w": 360,
+      "h": 360
+    },
+    {
+      "fixture": "mp_joint_circle",
+      "file": "snaps/mp_joint_circle.png",
+      "w": 360,
+      "h": 360
+    },
+    {
+      "fixture": "mp_mask_mode_pick",
+      "file": "snaps/mp_mask_mode_pick.png",
+      "w": 337,
+      "h": 360
+    },
+    {
+      "fixture": "mp_selected_over_crossing",
+      "file": "snaps/mp_selected_over_crossing.png",
+      "w": 340,
+      "h": 360
+    },
+    {
+      "fixture": "mp_selected_over_crossing_sel",
+      "file": "snaps/mp_selected_over_crossing_sel.png",
+      "w": 340,
+      "h": 360
+    },
+    {
+      "fixture": "mp_selected_over_crossing_sel_pan",
+      "file": "snaps/mp_selected_over_crossing_sel_pan.png",
+      "w": 340,
+      "h": 360
+    },
+    {
+      "fixture": "sample_chinese_double_coin",
+      "file": "snaps/sample_chinese_double_coin.png",
+      "w": 378,
+      "h": 360
+    },
+    {
+      "fixture": "sample_chinese_double_coin_w80",
+      "file": "snaps/sample_chinese_double_coin_w80.png",
+      "w": 377,
+      "h": 360
+    },
+    {
+      "fixture": "sample_woven_heart",
+      "file": "snaps/sample_woven_heart.png",
+      "w": 387,
+      "h": 360
+    },
+    {
+      "fixture": "sample_woven_heart_w80",
+      "file": "snaps/sample_woven_heart_w80.png",
+      "w": 387,
+      "h": 360
+    },
+    {
+      "fixture": "sample_tidal_waves",
+      "file": "snaps/sample_tidal_waves.png",
+      "w": 480,
+      "h": 279
+    },
+    {
+      "fixture": "sample_tidal_waves_w80",
+      "file": "snaps/sample_tidal_waves_w80.png",
+      "w": 480,
+      "h": 284
+    },
+    {
+      "fixture": "sample_kagome_weave",
+      "file": "snaps/sample_kagome_weave.png",
+      "w": 362,
+      "h": 360
+    },
+    {
+      "fixture": "sample_thick_and_thin",
+      "file": "snaps/sample_thick_and_thin.png",
+      "w": 480,
+      "h": 344
+    },
+    {
+      "fixture": "sample_box_stitch",
+      "file": "snaps/sample_box_stitch.png",
+      "w": 423,
+      "h": 360
+    },
+    {
+      "fixture": "sample_box_stitch_w80",
+      "file": "snaps/sample_box_stitch_w80.png",
+      "w": 421,
+      "h": 360
+    }
+  ]
+}
