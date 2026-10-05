@@ -7,7 +7,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 
-const OSS_SHA = (process.argv[2] || '0d751d90f79c97c7ea9994fd02234fe066935a47').slice(0, 10);
+const OSS_SHA = (process.argv[2] || '3e1b02f5870affaa7bd54ae2efd7561bf3095b52').slice(0, 10);
 const OUT = path.join(process.cwd(), 'artifacts', 'fidelity');
 
 // Prefer THIS run's actual results (report.json) so the page shows live numbers;

@@ -31,7 +31,7 @@ env:
   OSS_REPO: ysetbon/OpenStrandStudio
   # Pinned oracle commit — the fidelity spec. Bump deliberately (and refresh
   # fidelity-baselines.json) when you want to track a newer OpenStrandStudio.
-  OSS_SHA: 0d751d90f79c97c7ea9994fd02234fe066935a47
+  OSS_SHA: 3e1b02f5870affaa7bd54ae2efd7561bf3095b52
   PYQT_VERSION: "5.15.11"
   ARTIFACTS_BRANCH: ci-fidelity
 

@@ -50,6 +50,22 @@ const DEFAULT_CORPUS = [
   // Panned by 1e-4 px ("oss_pan"), which moves no pixels but switches OSS masks to
   // MaskedStrand._draw_direct (1px-ring first_path); the JS follows via meta.mask_direct.
   'fid_mask_panned_shadow_only', // fid_mask_shadow_only through _draw_direct (fid_mask_panned_knot: same for overhand_knot)
+  // OSS 2.0 mask / joint shadow pipeline (tools/make_mask_shadow_fixtures.mjs):
+  // a mask casts nothing of its own, lifts its first strand's shadow onto its
+  // second, keeps its piece off the strands above its crossing and puts back the
+  // shadows it covers; strands near a mask are restacked as at a genuine crossing.
+  'mso_ex1', 'mso_ex2', 'mso_ex4', 'mso_ex5',   // docs/mask_shadow_observations examples
+  // tests/mask_piece designs: one kind of strand next to / across a masked crossing
+  'mp_neighbour_opaque', 'mp_neighbour_translucent', 'mp_neighbour_no_outline', 'mp_neighbour_see_through',
+  'mp_neighbour_shadow_only', 'mp_neighbour_hidden', 'mp_third_strand_over', 'mp_third_strand_between',
+  'mp_diagonal_crossing', 'mp_first_already_above', 'mp_mask_mid_order', 'mp_joint_seamless', 'mp_joint_circle',
+  'mp_mask_mode_pick', 'mp_selected_over_crossing',
+  'mp_selected_over_crossing_sel',     // selected strand's outline stays whole over the crossing
+  'mp_selected_over_crossing_sel_pan', // ... through _draw_direct
+  // Bundled samples, and at three grid squares wide (joint shadows, lowered caps)
+  'sample_chinese_double_coin', 'sample_chinese_double_coin_w80', 'sample_woven_heart', 'sample_woven_heart_w80',
+  'sample_tidal_waves', 'sample_tidal_waves_w80', 'sample_kagome_weave', 'sample_thick_and_thin',
+  'sample_box_stitch', 'sample_box_stitch_w80',
   // (fid_shadow_folded_attach and fid_shadow_cross remain as contrast/control
   // cases runnable via --fixtures.)
 ];
