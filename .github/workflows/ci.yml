@@ -109,6 +109,14 @@ jobs:
       - name: Guards — Tier 5 shadow-path preview overlay
         run: node tools/tier5_check.mjs
 
+      # OSS 2.0 mask / joint shadows: which strands a mask's piece keeps clear
+      # of, _runs_under / _opaque_cover, the joint shadow cut and lowered
+      # unfolded caps, and a selected strand's outline staying whole over a
+      # masked crossing — the assertions of OSS's own tests (test_mask_piece_cover,
+      # test_shadow_subtraction, test_joint_shadow, test_selection_outline_over_masks).
+      - name: Guards — mask and joint shadows (OSS 2.0)
+        run: node tools/mask_shadow_check.mjs
+
       # OSS 1.111 Stylize End Side: the styled-end pixels (cap pieces added,
       # cuts removed, the coloured band, the dormant style under a circle, the
       # default record's fast path), the end_styles save/load slot and undo
