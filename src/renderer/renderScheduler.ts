@@ -90,19 +90,51 @@ export function setOverlay(
   overlayDraw = draw;
 }
 
+// The overlay's backing store is in PHYSICAL pixels, the way OSS 2.0 paints its
+// selection ring (selection_utils._paint_selection_border, commit d190260: the
+// layer works in the device's pixels "at any zoom and display scale"), so the
+// hover outline, the mask-mode border and the handles are crisp at 125 %, 150 %
+// and 200 %. #c keeps its CSS-pixel backing store (strand-renderer.js
+// compositeTo) and is upscaled by the browser; the overlay still lines up with
+// it exactly because both canvases fill the same CSS box and the overlay draws
+// in CSS px through the transform below — the same world->screen geometry the
+// body is rasterised from, just sampled finer. At a devicePixelRatio of 1 the
+// backing store, the transform and therefore every pixel are what they were.
 function syncOverlay(): void {
   if (!overlayCanvas) return;
   const c = document.getElementById('c') as HTMLCanvasElement | null;
   if (!c) return;
-  // Match backing store + CSS box exactly to #c.
-  if (overlayCanvas.width !== c.width) overlayCanvas.width = c.width;
-  if (overlayCanvas.height !== c.height) overlayCanvas.height = c.height;
+  // #c's CSS box (compositeTo sets style.width/height to its W x H in px).
+  const cssW = parseFloat(c.style.width) || c.width;
+  const cssH = parseFloat(c.style.height) || c.height;
+  const dpr = window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;
+  const pw = Math.max(1, Math.round(cssW * dpr));
+  const ph = Math.max(1, Math.round(cssH * dpr));
+  if (overlayCanvas.width !== pw) overlayCanvas.width = pw;
+  if (overlayCanvas.height !== ph) overlayCanvas.height = ph;
   overlayCanvas.style.width = c.style.width;
   overlayCanvas.style.height = c.style.height;
   const ctx = overlayCanvas.getContext('2d');
   if (!ctx) return;
-  ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, pw, ph);
+  // CSS px -> backing px. pw / cssW rather than dpr itself: the backing store is
+  // a whole number of pixels, and this keeps its edges on #c's edges.
+  ctx.setTransform(pw / cssW, 0, 0, ph / cssH, 0, 0);
   if (overlayDraw) overlayDraw(ctx);
+}
+
+// A devicePixelRatio change with no layout change (the window dragged to a
+// screen with another scale) resizes nothing, so nothing else would redraw the
+// overlay at the new resolution. Re-armed after every change, since the media
+// query names the ratio it was created for.
+if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+  const watchDpr = () => {
+    const mq = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+    const onChange = () => { mq.removeEventListener?.('change', onChange); requestOverlay(); watchDpr(); };
+    mq.addEventListener?.('change', onChange);
+  };
+  watchDpr();
 }
 
 // Redraw just the overlay (cheap; no renderFixture). Used for hover/selection.

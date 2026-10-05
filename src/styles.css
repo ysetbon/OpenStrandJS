@@ -172,7 +172,7 @@ body {
    * standard property is the whole story: once it is set, Chromium ignores
    * ::-webkit-scrollbar rules, so there is nothing to add for it.
    *
-   * The column is wide enough (App.tsx LIST_COLUMN_W) that even the widest
+   * The column is wide enough (App.tsx listColumnWidth) that even the widest
    * thin scrollbar leaves the fixed-width buttons their full width, so a
    * scrolling list never squeezes them. Reserving that room permanently with
    * `scrollbar-gutter: stable` would though: the buttons centre inside the

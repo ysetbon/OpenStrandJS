@@ -23,6 +23,7 @@ export function SamplesPage({ lang, onClose }: PageProps) {
       const st = useEditorStore.getState();
       st.loadDocumentWithHistory(loadProjectFile(json, {
         enable_curvature_bias_control: st.settings.enable_curvature_bias_control,
+        curve_params: st.settings.curve_params,
       }));
       onClose();
     } catch {

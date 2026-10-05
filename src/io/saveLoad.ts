@@ -31,11 +31,12 @@
 // keys OSS does not know are kept for the session but, as in OSS, never written.
 
 import type {
-  DeletionRect, EditorDocument, GroupRecord, KnotConnection, Point, RGBA, StrandRecord, StrandType,
+  DeletionRect, EditorDocument, GroupRecord, KnotConnection, Point, RGBA, Settings, StrandRecord, StrandType,
 } from '../model/types';
 import { readBiasData, readBias, refreshBiasPositions, serializedBias, NEUTRAL_BIAS, BIAS_EPS } from '../model/biasControl';
 import { resolveGroupMembers } from '../model/group';
 import { maskComponents } from '../model/layerName';
+import { maskCentroid } from '../interaction/hitGeometry';
 import { deserializeEndStyles, serializeEndStyles } from '../model/endStyle';
 import type { HistoryMeta } from '../store/historyMeta';
 
@@ -70,7 +71,16 @@ const UNDO_METADATA_KEY = 'undo_metadata';
 // serializer writes the stored squares as they stand.
 export interface SaveLoadOptions {
   enable_curvature_bias_control?: boolean;
+  // Load a state the way UndoRedoManager._load_state does (load_strands only)
+  // rather than File > Open's snapshot branch (load_strands + apply_loaded_strands).
+  // The one difference a save can see: a mask keeps the file's centre.
+  undoStateLoad?: boolean;
+  // The canvas curve settings (Settings.curve_params); a mask's computed centre
+  // depends on them.
+  curve_params?: Settings['curve_params'];
 }
+
+const DEFAULT_CURVE_PARAMS: Settings['curve_params'] = { base_fraction: 1.0, dist_multiplier: 2.0, exponent: 2.0 };
 
 // ---- primitives ------------------------------------------------------------
 
@@ -303,6 +313,14 @@ function loadStrand(raw: any, opts?: SaveLoadOptions): StrandRecord {
     // has not been touched since it was loaded is settled in serializeStrand.
     rec.base_center_point = null;
     rec.edited_center_point = null;
+    // Loaded as an undo/redo state, the centre the MaskedStrand constructor
+    // computed (calculate_center_point) survives into the next save, replaced by
+    // the file's centre when the record carries deletion_rectangles
+    // (load_strands_from_data :986-999); no force_complete_update follows on this
+    // path. The computed case is filled in by loadProjectFile once both
+    // components exist.
+    rec.loaded_center_point = opts?.undoStateLoad && 'deletion_rectangles' in raw && raw.control_point_center != null
+      ? asPoint(raw.control_point_center, start) : null;
     rec.control_point_center = null;
     rec.has_circles = [false, false];
     rec.control_points = [start, end];
@@ -740,14 +758,16 @@ function serializeStrand(
   out.control_points = masked ? [null, null] : [pt(s.control_points[0]), pt(s.control_points[1])];
   // A mask writes its edited centre (the region centroid, recomputed whenever
   // a component is edited — base when nothing is erased). A mask untouched
-  // since it was LOADED writes the FIRST component's start instead: the file's
-  // centre is copied into base/edited (:963-966), but apply_loaded_strands then
+  // since it was OPENED as a snapshot writes the FIRST component's start instead:
+  // the file's centre is copied into base/edited (:963-966), but apply_loaded_strands then
   // runs force_complete_update with skip_center_recalculation still set
   // (:1290-1292), which overwrites both with the Strand-level
   // control_point_center — Strand.__init__ set that to the first component's
-  // start and MaskedStrand.update_shape never recomputes it.
+  // start and MaskedStrand.update_shape never recomputes it. A mask loaded as an
+  // undo/redo state (a history file's steps, _load_state) skips that pass and
+  // keeps the file's centre (loaded_center_point).
   out.control_point_center = masked
-    ? pt(s.edited_center_point ?? s.base_center_point ?? maskFirstStart(s, doc) ?? s.control_point_center)
+    ? pt(s.edited_center_point ?? s.base_center_point ?? s.loaded_center_point ?? maskFirstStart(s, doc) ?? s.control_point_center)
     : pt(s.control_point_center);
   out.control_point_center_locked = masked ? false : !!s.control_point_center_locked;
   // Every strand on a canvas owns a bias control (strand.py:423-430 creates one
@@ -816,13 +836,15 @@ export function serializeProject(doc: EditorDocument, opts?: SaveLoadOptions): R
 
 // ---- history wrapper (export_history / import_history_payload) --------------
 
-export interface HistoryState { doc: EditorDocument; meta: HistoryMeta | null }
+// `raw`: the state as a loaded history file stored it (see HistoryEntry.raw).
+export interface HistoryState { doc: EditorDocument; meta: HistoryMeta | null; raw?: Record<string, unknown> | null }
 
 export interface LoadedProject {
   doc: EditorDocument;
   past: HistoryState[];
   future: HistoryState[];
   presentMeta: HistoryMeta | null;
+  presentRaw?: Record<string, unknown> | null;
 }
 
 // The file save_project writes: every undo step in order, each one a full
@@ -848,6 +870,9 @@ export function serializeHistory(
     currentIndex = -1;
   }
   const states = ordered.map((entry, i) => {
+    // A step read from a history file goes back out as it was stored
+    // (export_history_payload copies the temp state files verbatim).
+    if (entry.raw) return { step: i + 1, data: JSON.parse(JSON.stringify(entry.raw)) };
     const data = serializeProject(entry.doc, opts);
     const meta = metaToOss(entry.meta);
     if (meta) data[UNDO_METADATA_KEY] = meta;
@@ -862,6 +887,24 @@ export function serializeHistory(
   };
 }
 
+// MaskedStrand.__init__ -> calculate_center_point (masked_strand.py:51,
+// :1146-1195): the edited centroid, else the base one. Kept for every mask whose
+// record did not hand over its own centre (see loadStrand).
+function seedLoadedMaskCenters(doc: EditorDocument, opts?: SaveLoadOptions): EditorDocument {
+  const curve = opts?.curve_params ?? DEFAULT_CURVE_PARAMS;
+  for (const name of doc.order) {
+    const m = doc.strands[name];
+    if (!m || m.type !== 'MaskedStrand' || m.loaded_center_point) continue;
+    const comp = maskComponents(name);
+    const first = comp ? doc.strands[comp.first] : undefined;
+    const second = comp ? doc.strands[comp.second] : undefined;
+    if (!first || !second) continue;
+    m.loaded_center_point = maskCentroid(first, second, curve, m.deletion_rectangles ?? [])
+      ?? maskCentroid(first, second, curve);
+  }
+  return doc;
+}
+
 // Load a project file the way main_window.load_project does: a history wrapper
 // restores the whole undo/redo stack around its current step; a bare project
 // state becomes a document with no history (the snapshot path clears it).
@@ -871,15 +914,25 @@ export function loadProjectFile(data: unknown, opts?: SaveLoadOptions): LoadedPr
     const states = sortedStates(d);
     if (states.length) {
       const cur = currentStepIndex(d, states);
-      const loaded = states.map((s) => ({
-        doc: loadProjectState(s.data && typeof s.data === 'object' ? s.data : {}, opts),
-        meta: metaFromOss(s.data?.[UNDO_METADATA_KEY]),
-      }));
+      // Every step is loaded the way UndoRedoManager._load_state loads it
+      // (load_strands with no apply_loaded_strands pass), and keeps the data it
+      // was stored as.
+      const loaded = states.map((s) => {
+        const data = s.data && typeof s.data === 'object' ? s.data : {};
+        return {
+          doc: seedLoadedMaskCenters(loadProjectState(data, { ...opts, undoStateLoad: true }), opts),
+          meta: metaFromOss(s.data?.[UNDO_METADATA_KEY]),
+          // A copy of its own: the loaded document shares nested arrays with
+          // `data` (deletion_rectangles), and edits must never reach a stored step.
+          raw: JSON.parse(JSON.stringify(data)) as Record<string, unknown>,
+        };
+      });
       return {
         doc: loaded[cur].doc,
         past: loaded.slice(0, cur),
         future: loaded.slice(cur + 1).reverse(),
         presentMeta: loaded[cur].meta,
+        presentRaw: loaded[cur].raw,
       };
     }
   }

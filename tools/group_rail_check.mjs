@@ -31,12 +31,16 @@ let fails = 0;
 const ok = (n, c, x = '') => { console.log((c ? 'PASS  ' : 'FAIL  ') + n + (c ? '' : '  ' + x)); if (!c) fails++; };
 const near = (a, b, tol = 1) => Math.abs(a - b) <= tol;
 
-// Widths from App.tsx: list column 146 + group column (113 expanded / 41 rail) + 1.
-const PANEL_FULL = 260;
-const PANEL_RAIL = 188;
+// Widths from App.tsx: list column + group column (113 expanded / 41 rail) + 1.
+// The list column is 146 (the layer buttons), or more if the Strands / Masks
+// switch needs it for its widest label with the fonts at hand (layerTabFit.ts);
+// it is read from the app once the page is up.
+let LIST_COLUMN = 146;
+let PANEL_FULL = 260;
+let PANEL_RAIL = 188;
 const GROUP_FULL = 113;
 const GROUP_RAIL = 41;
-const FREED = PANEL_FULL - PANEL_RAIL;   // 72
+const FREED = GROUP_FULL - GROUP_RAIL;   // 72
 
 const browser = await chromium.launch(process.env.OSS_CHROMIUM ? { executablePath: process.env.OSS_CHROMIUM } : {});
 try {
@@ -45,6 +49,10 @@ try {
   await page.goto(`http://localhost:${PORT}/`);
   await page.waitForFunction(() => !!window.__store, null, { timeout: 15000 });
   await page.evaluate(() => { localStorage.clear(); window.__store.getState().setSettings({ theme: 'default', language: 'en' }); });
+  LIST_COLUMN = Math.max(146, await page.evaluate(async () => (await import('/src/ui/layerTabFit.ts')).tabRowMinWidth()));
+  PANEL_FULL = LIST_COLUMN + GROUP_FULL + 1;
+  PANEL_RAIL = LIST_COLUMN + GROUP_RAIL + 1;
+  console.log(`list column ${LIST_COLUMN}px: panel ${PANEL_FULL}px expanded, ${PANEL_RAIL}px collapsed`);
 
   const w = async (sel) => (await page.locator(sel).first().boundingBox())?.width ?? -1;
   const collapsed = () => page.evaluate(() => window.__store.getState().groupPanelCollapsed);

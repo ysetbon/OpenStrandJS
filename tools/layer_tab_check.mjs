@@ -537,21 +537,69 @@ try {
   // test_hebrew_puts_strands_on_the_right + test_labels_fit_the_panel (on the
   // small bridge.json: every language switch re-renders the canvas)
   await load('bridge.json');
+  const panelWidths = new Set();
   for (const lang of ['en', 'fr', 'de', 'it', 'es', 'pt', 'he', 'ru', 'fi', 'sv', 'ja', 'zh']) {
     await S((l) => window.__store.getState().setSettings({ language: l }), lang);
     await settle(60);
     for (const tab of ['strands', 'masks']) {
-      // Inside the half's border box (OSS: the label fits the ~79px half; this
-      // column is 146px, so the halves are ~73px and CJK uses all of it).
-      const fit = await half(tab).evaluate((e) => [e.scrollWidth, e.offsetWidth]);
-      ok(`[${lang}] '${await half(tab).textContent()}' fits its half`, fit[0] <= fit[1], JSON.stringify(fit));
+      // OSS's own rule, test_labels_fit_the_panel:
+      //   need = QFontMetrics(half.font()).horizontalAdvance(half.text())
+      //   assert need <= half.width() - 4
+      // need = the label's advance (a Range over its text), half.width() = the
+      // half's border box.
+      const fit = await half(tab).evaluate((e) => {
+        const r = document.createRange();
+        r.selectNodeContents(e);
+        return { need: r.getBoundingClientRect().width, width: e.getBoundingClientRect().width, sw: e.scrollWidth, cw: e.clientWidth };
+      });
+      ok(`[${lang}] '${await half(tab).textContent()}' needs <= its half - 4 (OSS test_labels_fit_the_panel)`,
+        fit.need <= fit.width - 4 && fit.sw <= fit.cw, JSON.stringify(fit));
     }
+    {
+      const a = (await half('strands').boundingBox()).width, b = (await half('masks').boundingBox()).width;
+      ok(`[${lang}] the halves are equal`, Math.abs(a - b) <= 1, `${a}/${b}`);
+    }
+    panelWidths.add((await page.locator('.layer-panel').boundingBox()).width);
     await half('masks').click();
     for (const id of ['new-mask', 'delete-mask', 'delete-all-masks']) {
       const loc = page.locator(`[data-testid="${id}"]`);
       ok(`[${lang}] '${await loc.textContent()}' fits its button`, await loc.evaluate((e) => e.scrollWidth <= e.clientWidth));
     }
     await half('strands').click();
+    if (lang === 'ja') await page.locator('.layer-panel').screenshot({ path: `${OUT}/04b_japanese_panel.png` });
+  }
+  // OSS's column does not change with the language (list_column_min_width); the
+  // port's floor is the 146px the layer buttons need or, if more, two halves
+  // holding the widest label of any language with that 4px (layerTabFit.ts).
+  {
+    const floor = await S(async () => (await import('/src/ui/layerTabFit.ts')).tabRowMinWidth());
+    const column = (await page.locator('.lp-left').boundingBox()).width;
+    ok('the panel is as wide in every language', panelWidths.size === 1, JSON.stringify([...panelWidths]));
+    ok(`list column is max(146, the switch's floor ${floor})`, Math.abs(column - Math.max(146, floor)) <= 0.5, String(column));
+  }
+  // Text-only zoom (Firefox) scales even px fonts while the page is open: the
+  // switch's labels must still clear their halves. Simulated by doubling the
+  // tabs' font, as 200% text zoom does; layerTabFit.watchTabFont re-measures.
+  {
+    await S((l) => window.__store.getState().setSettings({ language: l }), 'ja');
+    await settle(60);
+    const before = (await page.locator('.lp-left').boundingBox()).width;
+    const tag = await page.addStyleTag({ content: '.lc-tab { font-size: 28px !important; }' });
+    await settle(120);
+    const fit = await half('strands').evaluate((e) => {
+      const r = document.createRange();
+      r.selectNodeContents(e);
+      return { need: r.getBoundingClientRect().width, width: e.getBoundingClientRect().width };
+    });
+    const zoomed = (await page.locator('.lp-left').boundingBox()).width;
+    ok('200% text zoom: the column widens for the larger labels', zoomed > before, `${before} -> ${zoomed}`);
+    ok("200% text zoom: [ja] the Strands label still clears its half by 4", fit.need <= fit.width - 4, JSON.stringify(fit));
+    await tag.evaluate((e) => e.remove());
+    await settle(120);
+    const back = (await page.locator('.lp-left').boundingBox()).width;
+    ok('text zoom back to 100%: the column returns to its floor', Math.abs(back - before) <= 0.5, `${before} -> ${back}`);
+    await S((l) => window.__store.getState().setSettings({ language: l }), 'en');
+    await settle(60);
   }
   await S(() => window.__store.getState().setSettings({ language: 'he' }));
   await settle();
