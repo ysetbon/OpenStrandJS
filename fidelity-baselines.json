@@ -15,17 +15,17 @@
     "height": 1362
   },
   "fid_mask_cross_toggle": {
-    "match_pct": 99.79,
+    "match_pct": 100,
     "width": 800,
     "height": 682
   },
   "fid_mask_hidden": {
-    "match_pct": 99.79,
+    "match_pct": 100,
     "width": 800,
     "height": 682
   },
   "fid_mask_full_nosub": {
-    "match_pct": 99.79,
+    "match_pct": 100,
     "width": 800,
     "height": 682
   },
@@ -48,5 +48,160 @@
     "match_pct": 100,
     "width": 800,
     "height": 682
+  },
+  "mso_ex1": {
+    "match_pct": 100,
+    "width": 854,
+    "height": 938
+  },
+  "mso_ex2": {
+    "match_pct": 100,
+    "width": 854,
+    "height": 826
+  },
+  "mso_ex4": {
+    "match_pct": 100,
+    "width": 938,
+    "height": 798
+  },
+  "mso_ex5": {
+    "match_pct": 100,
+    "width": 800,
+    "height": 798
+  },
+  "mp_neighbour_opaque": {
+    "match_pct": 100,
+    "width": 876,
+    "height": 876
+  },
+  "mp_neighbour_translucent": {
+    "match_pct": 100,
+    "width": 876,
+    "height": 876
+  },
+  "mp_neighbour_no_outline": {
+    "match_pct": 100,
+    "width": 876,
+    "height": 876
+  },
+  "mp_neighbour_see_through": {
+    "match_pct": 100,
+    "width": 876,
+    "height": 876
+  },
+  "mp_neighbour_shadow_only": {
+    "match_pct": 100,
+    "width": 876,
+    "height": 876
+  },
+  "mp_neighbour_hidden": {
+    "match_pct": 100,
+    "width": 876,
+    "height": 876
+  },
+  "mp_third_strand_over": {
+    "match_pct": 100,
+    "width": 876,
+    "height": 876
+  },
+  "mp_third_strand_between": {
+    "match_pct": 100,
+    "width": 876,
+    "height": 876
+  },
+  "mp_diagonal_crossing": {
+    "match_pct": 100,
+    "width": 965,
+    "height": 965
+  },
+  "mp_first_already_above": {
+    "match_pct": 100,
+    "width": 876,
+    "height": 876
+  },
+  "mp_mask_mid_order": {
+    "match_pct": 100,
+    "width": 876,
+    "height": 876
+  },
+  "mp_joint_seamless": {
+    "match_pct": 100,
+    "width": 876,
+    "height": 876
+  },
+  "mp_joint_circle": {
+    "match_pct": 100,
+    "width": 876,
+    "height": 876
+  },
+  "mp_mask_mode_pick": {
+    "match_pct": 100,
+    "width": 826,
+    "height": 882
+  },
+  "mp_selected_over_crossing": {
+    "match_pct": 100,
+    "width": 994,
+    "height": 1052
+  },
+  "mp_selected_over_crossing_sel": {
+    "match_pct": 100,
+    "width": 994,
+    "height": 1052
+  },
+  "mp_selected_over_crossing_sel_pan": {
+    "match_pct": 100,
+    "width": 994,
+    "height": 1052
+  },
+  "sample_chinese_double_coin": {
+    "match_pct": 99.999,
+    "width": 1075,
+    "height": 1024
+  },
+  "sample_chinese_double_coin_w80": {
+    "match_pct": 100,
+    "width": 1127,
+    "height": 1076
+  },
+  "sample_woven_heart": {
+    "match_pct": 99.999,
+    "width": 1186,
+    "height": 1104
+  },
+  "sample_woven_heart_w80": {
+    "match_pct": 100,
+    "width": 1248,
+    "height": 1160
+  },
+  "sample_tidal_waves": {
+    "match_pct": 99.997,
+    "width": 1868,
+    "height": 1085
+  },
+  "sample_tidal_waves_w80": {
+    "match_pct": 99.911,
+    "width": 1922,
+    "height": 1139
+  },
+  "sample_kagome_weave": {
+    "match_pct": 100,
+    "width": 1140,
+    "height": 1134
+  },
+  "sample_thick_and_thin": {
+    "match_pct": 100,
+    "width": 1388,
+    "height": 994
+  },
+  "sample_box_stitch": {
+    "match_pct": 100,
+    "width": 1134,
+    "height": 966
+  },
+  "sample_box_stitch_w80": {
+    "match_pct": 100,
+    "width": 1160,
+    "height": 992
   }
 }

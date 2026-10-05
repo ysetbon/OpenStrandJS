@@ -109,6 +109,14 @@ jobs:
       - name: Guards — Tier 5 shadow-path preview overlay
         run: node tools/tier5_check.mjs
 
+      # OSS 2.0 mask / joint shadows: which strands a mask's piece keeps clear
+      # of, _runs_under / _opaque_cover, the joint shadow cut and lowered
+      # unfolded caps, and a selected strand's outline staying whole over a
+      # masked crossing — the assertions of OSS's own tests (test_mask_piece_cover,
+      # test_shadow_subtraction, test_joint_shadow, test_selection_outline_over_masks).
+      - name: Guards — mask and joint shadows (OSS 2.0)
+        run: node tools/mask_shadow_check.mjs
+
       # OSS 1.111 Stylize End Side: the styled-end pixels (cap pieces added,
       # cuts removed, the coloured band, the dormant style under a circle, the
       # default record's fast path), the end_styles save/load slot and undo
@@ -176,6 +184,15 @@ jobs:
       - name: Guards — layer list scrolls
         run: node tools/layer_list_scroll_check.mjs
 
+      # Strands / Masks switch (OSS 2.0 layer_panel.py, tests/test_layer_tab_switch.py
+      # there): each tab lists only its layers and buttons, the selection drops /
+      # opens tabs by every route (panel, canvas, undo/redo, mask creation, new
+      # strand), New Mask drives mask mode, Delete Mask / Delete All (masks) in
+      # one undo step, drag-and-drop over hidden rows, every mask kept above
+      # every strand (load, new/attached strand, drag), Hebrew swap, OSS colours.
+      - name: Guards — Strands / Masks layer tabs
+        run: node tools/layer_tab_check.mjs
+
       # Snap-to-grid settings (OSS settings_dialog General page): the MOVE
       # checkbox gates move-mode drags (with the desktop's zoom/Ctrl decision), the
       # ATTACH/CREATE checkbox gates a new strand's start AND end and a child's end
@@ -196,6 +213,7 @@ jobs:
           path: |
             artifacts/ci_smoke/
             artifacts/layer_list_scroll/
+            artifacts/layer_tab/
           if-no-files-found: ignore
           retention-days: 14
 

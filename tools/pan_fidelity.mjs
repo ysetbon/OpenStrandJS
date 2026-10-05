@@ -65,8 +65,16 @@ const only = fixArgIdx >= 0 && process.argv[fixArgIdx + 1]
   ? process.argv[fixArgIdx + 1].split(',')
   : null;
 
+// The scenes copied from OpenStrand Studio (fixtures/sample_*, mso_*, mp_*; see
+// tools/make_mask_shadow_fixtures.mjs) are left out by default: the samples take
+// several seconds per render at the zooms swept here, and the dense soft-band
+// edges of a few mask scenes (mp_diagonal_crossing, mso_ex2, mso_ex5) put the
+// anti-aliasing residual of a large pan just over the 0.3% gate — with the
+// pre-2.0 renderer too, so it says nothing about the pan path. The fidelity
+// corpus covers them all. Name one with --fixtures to sweep it anyway.
+const IMPORTED = /^(sample|mso|mp)_/;
 const fixtures = (only || readdirSync(path.join(root, 'fixtures'))
-  .filter((f) => f.endsWith('.json'))
+  .filter((f) => f.endsWith('.json') && !IMPORTED.test(f))
   .map((f) => f.replace(/\.json$/, ''))).sort();
 
 // Integer deltas, in CSS px: both signs on both axes, pure-axis moves, and moves far

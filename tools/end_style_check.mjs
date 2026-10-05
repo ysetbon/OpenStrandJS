@@ -248,6 +248,11 @@ const fixture = JSON.parse(readFileSync(path.join(root, 'fixtures/end_styles.jso
     await page.waitForTimeout(600);
 
     const menuFor = async (name) => {
+      // OSS 2.0 lists masks on the layer panel's Masks tab, strands on Strands.
+      await page.evaluate((n) => {
+        const st = window.__store.getState();
+        st.setLayerTab(st.doc.strands[n]?.type === 'MaskedStrand' ? 'masks' : 'strands');
+      }, name);
       await page.locator('.nlb', { hasText: new RegExp(`^${name}$`) }).first().click({ button: 'right' });
       await page.waitForTimeout(250);
       const rows = await page.evaluate(() => Array.from(document.querySelectorAll('[class*=ctx], [role=menu]'))

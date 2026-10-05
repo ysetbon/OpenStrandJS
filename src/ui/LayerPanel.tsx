@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import { createGroup, createMask, reorderLayer } from '../store/actions';
+import { layerTabOf } from '../store/editorStore';
+import { putMasksOnTop } from '../model/maskOrder';
 import { requestRender } from '../renderer/renderScheduler';
 import { isRTL, t } from './i18n';
 import { ControlColumn } from './ControlColumn';
@@ -74,6 +76,10 @@ export function LayerPanel() {
   const order = useEditorStore((s) => s.doc.order);
   const strands = useEditorStore((s) => s.doc.strands);
   const lockMode = useEditorStore((s) => s.doc.lock_mode);
+  // Strands / Masks switch: the list shows only the current tab's layers. The
+  // other tab's rows are simply not drawn — doc.order (and with it every index,
+  // the drawing order and drag-and-drop's mapping) never changes.
+  const layerTab = useEditorStore((s) => s.layerTab);
   const multiSelectMode = useEditorStore((s) => s.multiSelectMode);
   const multiSelectedLayers = useEditorStore((s) => s.multiSelectedLayers);
   const toggleMultiSelectLayer = useEditorStore((s) => s.toggleMultiSelectLayer);
@@ -130,8 +136,12 @@ export function LayerPanel() {
   const listRef = useRef<HTMLDivElement>(null);
 
   // Visual list: top (z-top) first. order index 0 = bottom (lowest z-order).
+  // `visual` is the FULL list (every layer, as OSS's scroll_layout holds every
+  // button); `shown` is the current tab's rows, the only ones on screen.
   const visual = [...order].map((name, i) => ({ name, orderIdx: i })).reverse();
-  const L = visual.length;
+  const shown = visual.filter(({ name }) => strands[name] && layerTabOf({ strands }, name) === layerTab);
+  const L = shown.length;
+  const shownIndexOf = (orderIdx: number) => shown.findIndex((v) => v.orderIdx === orderIdx);
 
   // Clicking a layer must repaint the canvas so the selection highlight appears —
   // exactly like OSS select_layer, which ends with canvas.update() (layer_panel.py:2428).
@@ -195,13 +205,14 @@ export function LayerPanel() {
     dragIdx.current = orderIdx;
   }
 
-  // Map a VISUAL insertion boundary (0..L) to the source's own "no-op" boundaries.
-  // Removing the source then re-inserting just above or just below itself yields
-  // the same order; suppress the line + skip the commit in those cases. The
-  // source row sits at visual index `srcVisual = L-1-from`; its own gap is the
-  // boundary at srcVisual (just above it) and srcVisual+1 (just below it).
+  // Map a VISUAL insertion boundary (0..L, in the SHOWN rows) to the source's
+  // own "no-op" boundaries. Removing the source then re-inserting just above or
+  // just below itself yields the same order; suppress the line + skip the
+  // commit in those cases. The source row sits at shown index `srcVisual`; its
+  // own gap is the boundary at srcVisual (just above it) and srcVisual+1 (just
+  // below it).
   function isNoopBoundary(from: number, boundary: number): boolean {
-    const srcVisual = L - 1 - from;
+    const srcVisual = shownIndexOf(from);
     return boundary === srcVisual || boundary === srcVisual + 1;
   }
 
@@ -222,7 +233,8 @@ export function LayerPanel() {
   function onDragOver(orderIdx: number, e: React.DragEvent) {
     const from = dragIdx.current;
     if (from == null) return;
-    const visualIdx = L - 1 - orderIdx;
+    const visualIdx = shownIndexOf(orderIdx);
+    if (visualIdx < 0) return;
     const { boundary, top } = boundaryFor(visualIdx, e);
     const next = isNoopBoundary(from, boundary) ? null : boundary;
     if (dropBoundary !== next) setDropBoundary(next);
@@ -234,23 +246,28 @@ export function LayerPanel() {
     dragIdx.current = null;
     setDropBoundary(null);
     if (from == null) return;
-    const visualIdx = L - 1 - orderIdx;
+    const visualIdx = shownIndexOf(orderIdx);
+    if (visualIdx < 0 || shownIndexOf(from) < 0) return;
     const { boundary } = boundaryFor(visualIdx, e);
     if (isNoopBoundary(from, boundary)) return;
 
-    // Mirror OSS dropEvent exactly, then map back to doc.order. Work in VISUAL
-    // space (top = index 0): the resolved boundary is OSS target_visual_index
-    // (insert-before; === L means the bottom default). Take the source out, apply
-    // the downward-drag -1 shift, insert, then reverse to order space and ask
-    // reorderLayer to splice the dragged name to where it now sits.
-    const srcVisual = L - 1 - from;
-    const newVisual = visual.map((v) => v.name); // top -> bottom names
-    const [moved] = newVisual.splice(srcVisual, 1);
-    const finalInsert = boundary - (srcVisual < boundary ? 1 : 0);
-    newVisual.splice(finalInsert, 0, moved);
-    const newOrder = [...newVisual].reverse(); // bottom -> top == doc.order
+    // Mirror OSS dropEvent, then map back to doc.order. The boundary is found
+    // among the SHOWN rows only (OSS skips the other tab's hidden buttons,
+    // whose geometry is stale, 9fc7cbd) and the move is applied to the FULL
+    // visual list (top = index 0): insert before the shown row at the boundary,
+    // or — below every shown row — right after the lowest one, never under the
+    // hidden layers beneath it (ba88e75: a mask dropped under every hidden
+    // strand would stop covering its crossing). Then reverse to order space,
+    // let reorderLayer splice the dragged name to where it now sits, and keep
+    // the masks above every strand (45d6f1f: refresh after a drop re-checks it).
+    const full = visual.map((v) => v.name);       // top -> bottom, every layer
+    const moved = order[from];
+    full.splice(full.indexOf(moved), 1);
+    if (boundary < L) full.splice(full.indexOf(shown[boundary].name), 0, moved);
+    else full.splice(full.indexOf(shown[L - 1].name) + 1, 0, moved);
+    const newOrder = [...full].reverse();         // bottom -> top == doc.order
     const to = newOrder.indexOf(moved);
-    commitEdit((d) => reorderLayer(d, from, to),
+    commitEdit((d) => { reorderLayer(d, from, to); putMasksOnTop(d); },
       { action: 'layer.reorder', source: 'panel', targets: [moved], detail: `${from} -> ${to}` });
   }
 
@@ -278,7 +295,7 @@ export function LayerPanel() {
         <ControlColumn />
 
         <div className="lp-list" ref={listRef}>
-          {visual.map(({ name, orderIdx }) => {
+          {shown.map(({ name, orderIdx }) => {
             if (!strands[name]) return null;
             const s = strands[name];
             const attachable = !!s && !(s.has_circles[0] && s.has_circles[1]);

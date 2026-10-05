@@ -59,6 +59,9 @@ export function toRenderArray(
       // assignment, including load (strand.py:534-541). Derive identically here
       // so an unfolded start keeps its inner fill circle.
       is_setting_staring_circle: startStroke != null && (startStroke.a ?? 255) === 0,
+      // The parent of an AttachedStrand: a lowered unfolded start cap is painted
+      // by it (shader_utils.lowered_start_cap).
+      attached_to: s.attached_to ?? null,
       // Selected strand draws its unified highlight in the renderer (under the
       // body), exactly like OSS — so the black stroke stays on top. Welded peers
       // moving with a dragged endpoint are highlighted too (highlightSet).

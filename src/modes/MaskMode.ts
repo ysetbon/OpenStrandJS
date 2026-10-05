@@ -54,8 +54,17 @@ export const MaskMode: Mode = {
     );
     st.setMaskPending([]);
     st.setHover({ layerName: null, handle: null });
-    if (newName) {
-      st.setSelection({ layerName: newName, handle: null });   // OSS selects the new mask
+    // OSS mask_mode.create_masked_layer ends with layer_panel.select_layer(mask):
+    // the new mask is selected (which keeps the Masks tab open) and, like every
+    // panel selection outside lock mode, select_layer switches to attach mode —
+    // so mask mode ends and New Mask releases. In multi-select mode
+    // select_layer only adds the layer to the multi-selection and returns
+    // early, so mask mode stays on.
+    if (newName && st.multiSelectMode) {
+      st.toggleMultiSelectLayer(newName);
+    } else if (newName) {
+      st.setSelection({ layerName: newName, handle: null });
+      if (!useEditorStore.getState().doc.lock_mode) st.setMode('attach');
     }
     ctx.requestRender();
   },
