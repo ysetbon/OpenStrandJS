@@ -23,6 +23,7 @@ import {
   DEFAULT_STRAND_WIDTH, DEFAULT_STROKE_WIDTH,
 } from '../model/factory';
 import { areVisuallyEqual } from './visualEqual';
+import { withMasksOnTop } from '../model/maskOrder';
 import {
   buildMeta, type HistoryEvent, type HistoryMeta, type HistoryMetaInput,
 } from './historyMeta';
@@ -446,7 +447,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const tabs = s.tabs.map((t) => (t.id === s.activeTabId ? { ...t, doc: s.doc, view: s.view } : t));
     const target = tabs.find((t) => t.id === id);
     if (!target) return {};
-    const doc = target.doc ?? emptyDocument();
+    // apply_project_state: the restored layers get the masks back on top.
+    const doc = withMasksOnTop(target.doc ?? emptyDocument());
     return {
       tabs, activeTabId: id,
       doc, view: target.view ?? { ...DEFAULT_VIEW, width: s.view.width, height: s.view.height },
@@ -476,7 +478,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
     if (id !== s.activeTabId) return { tabs: remaining };
     const target = remaining[Math.min(idx, remaining.length - 1)];
-    const doc = target.doc ?? emptyDocument();
+    const doc = withMasksOnTop(target.doc ?? emptyDocument());
     return {
       tabs: remaining, activeTabId: target.id,
       doc, view: target.view ?? { ...s.view }, past: [], future: [], gestureBase: null, presentMeta: null, pendingMeta: null,
@@ -496,7 +498,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const src = persisted[idx];
     const srcDoc = src.doc ?? (id === s.activeTabId ? s.doc : emptyDocument());
     const nid = s.nextTabId;
-    const copyDoc = cloneDoc(srcDoc);
+    const copyDoc = withMasksOnTop(cloneDoc(srcDoc));
     const lang = s.settings.language;
     const name = `${tabTitleFor(src, lang)} ${rawT('tab_copy_suffix', lang)}`;
     const tabs = [...persisted];
@@ -546,20 +548,27 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   loadDocument: (doc) => get().loadDocumentWithHistory({ doc, past: [], future: [], presentMeta: null }),
 
-  loadDocumentWithHistory: ({ doc, past, future, presentMeta }) => set((s) => ({
-    doc,
-    selection: { layerName: doc.selected_strand_name, handle: null },
-    docRevision: s.docRevision + 1,
-    // A snapshot load starts fresh history (clear_history(save_current=True));
-    // a history file brings its own stack (import_history_payload).
-    past: [...past], future: [...future], gestureBase: null, presentMeta, pendingMeta: null,
-    historyLog: appendLog(s.historyLog, 'load', buildMeta({ action: 'system.load', source: 'system' }, null)),
-    // Any in-flight mask edit/create session belongs to the old document — drop it.
-    maskEditTarget: null, maskCreateMode: false, firstMaskedLayer: null, eraser: null,
-    // Preview pairs name layers in the OLD document — they mean nothing here.
-    visibleShadowPaths: [],
-    newestStrand: null,
-  })),
+  // OSS load_strands (2.0, 45d6f1f) applies keep_masks_on_top to the layers it
+  // hands to the canvas. The parsed states themselves (past/future, like OSS's
+  // temp state files) stay exactly as the file had them; each one gets the same
+  // treatment when undo/redo applies it.
+  loadDocumentWithHistory: ({ doc: loadedDoc, past, future, presentMeta }) => set((s) => {
+    const doc = withMasksOnTop(loadedDoc);
+    return {
+      doc,
+      selection: { layerName: doc.selected_strand_name, handle: null },
+      docRevision: s.docRevision + 1,
+      // A snapshot load starts fresh history (clear_history(save_current=True));
+      // a history file brings its own stack (import_history_payload).
+      past: [...past], future: [...future], gestureBase: null, presentMeta, pendingMeta: null,
+      historyLog: appendLog(s.historyLog, 'load', buildMeta({ action: 'system.load', source: 'system' }, null)),
+      // Any in-flight mask edit/create session belongs to the old document — drop it.
+      maskEditTarget: null, maskCreateMode: false, firstMaskedLayer: null, eraser: null,
+      // Preview pairs name layers in the OLD document — they mean nothing here.
+      visibleShadowPaths: [],
+      newestStrand: null,
+    };
+  }),
 
   setNewestStrand: (name) => set((s) => (s.newestStrand === name ? {} : { newestStrand: name })),
 
@@ -653,11 +662,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (!s.past.length) return {};
     const prev = s.past[s.past.length - 1];
     // shadow_enabled / show_control_points are canvas toggles -> carry current.
-    const restored: EditorDocument = {
+    // Undo loads its state through load_strands, which keeps the masks on top.
+    const restored: EditorDocument = withMasksOnTop({
       ...prev.doc,
       shadow_enabled: s.doc.shadow_enabled,
       show_control_points: s.doc.show_control_points,
-    };
+    });
     const selLives = s.selection.layerName != null && restored.strands[s.selection.layerName];
     return {
       doc: restored,
@@ -678,11 +688,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   redo: () => set((s) => {
     if (!s.future.length) return {};
     const next = s.future[s.future.length - 1];
-    const restored: EditorDocument = {
+    const restored: EditorDocument = withMasksOnTop({
       ...next.doc,
       shadow_enabled: s.doc.shadow_enabled,
       show_control_points: s.doc.show_control_points,
-    };
+    });
     const selLives = s.selection.layerName != null && restored.strands[s.selection.layerName];
     return {
       doc: restored,
