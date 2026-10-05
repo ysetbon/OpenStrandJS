@@ -1,8 +1,10 @@
 // Draws the interaction overlay (control-point glyphs, endpoint/CP handles,
 // selection ring, new-strand / attach preview, mask-pending highlight) onto
 // #overlay using the SAME viewTransform world->screen math as hit-testing, so
-// handles sit exactly on the rendered geometry. The overlay canvas is 1:1 with
-// #c's backing store (synced by renderScheduler).
+// handles sit exactly on the rendered geometry. The overlay canvas covers #c's
+// CSS box with a physical-pixel backing store, and the context arrives with the
+// CSS px -> pixel transform already set (renderScheduler.syncOverlay), so
+// everything here draws in CSS px.
 //
 // The visuals are a faithful port of OpenStrand Studio's Qt overlay
 // (OVERLAY_UI_SPEC.md). All glyph/handle constants are specified in CANVAS/WORLD
@@ -446,13 +448,19 @@ function drawPending(ctx: CanvasRenderingContext2D, st: OverlayState): void {
 // Used for the yellow HOVER hint (select + mask mode, 2px black border) and the
 // red PICKED highlight (mask mode, highlight_color@128 + black@128 border,
 // stroke_width*2 wide — mask_mode.py:272-312).
+//
+// The overlay's backing store is in physical pixels (renderScheduler.syncOverlay)
+// and `ctx` arrives with the CSS px -> pixel transform. The scratch layer is the
+// same physical size and draws through the same transform, then lands on the
+// overlay pixel for pixel — OSS 2.0's _paint_selection_border (d190260) works
+// in device pixels the same way, so the ring is exact at any display scale.
 let ringCanvas: HTMLCanvasElement | null = null;
-function ringLayer(w: number, h: number): CanvasRenderingContext2D | null {
+function ringLayer(w: number, h: number, base: DOMMatrix): CanvasRenderingContext2D | null {
   if (!ringCanvas) ringCanvas = document.createElement('canvas');
   if (ringCanvas.width !== w) ringCanvas.width = w;
   if (ringCanvas.height !== h) ringCanvas.height = h;
   const c = ringCanvas.getContext('2d');
-  if (c) { c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, w, h); }
+  if (c) { c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, w, h); c.setTransform(base); }
   return c;
 }
 
@@ -479,18 +487,21 @@ function drawSelectionOverlay(
   // under the same clip, so the half of the border stroke that lies outward
   // of the profile (inside a cut polygon) survives — the silhouette the ring
   // strokes already follows the profile (selectionFootprint.strandFootprint).
+  // The overlay's CSS px -> backing px transform (identity at devicePixelRatio 1).
+  const base = ctx.getTransform();
   const keep = new Path2D();
   if (removedPath) {
-    keep.rect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    // The whole canvas, in the CSS px the paths are in.
+    keep.rect(0, 0, ctx.canvas.width / (base.a || 1), ctx.canvas.height / (base.d || 1));
     keep.addPath(removedPath);
   }
   ctx.save();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.setTransform(base);
   if (removedPath) ctx.clip(keep, 'evenodd');
   ctx.fillStyle = fill;
   ctx.fill(fillPath, 'nonzero');
   ctx.restore();
-  const ring = borderW > 0 ? ringLayer(ctx.canvas.width, ctx.canvas.height) : null;
+  const ring = borderW > 0 ? ringLayer(ctx.canvas.width, ctx.canvas.height, base) : null;
   if (ring) {
     ring.lineWidth = borderW * 2 * z;
     ring.lineJoin = 'miter';
@@ -505,7 +516,7 @@ function drawSelectionOverlay(
     ring.fill(fillPath, 'nonzero');
     ring.restore();
     ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);   // the layer is in pixels: pixel for pixel
     ctx.drawImage(ringCanvas as HTMLCanvasElement, 0, 0);
     ctx.restore();
   }

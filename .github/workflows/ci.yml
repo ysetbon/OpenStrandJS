@@ -200,6 +200,14 @@ jobs:
       - name: Guards — history save after open / undo / redo
         run: node tools/history_export_check.mjs
 
+      # The overlay at devicePixelRatio 1, 1.25, 1.5 and 2 (OSS 2.0
+      # selection_utils._paint_selection_border, d190260): #overlay has a
+      # physical-pixel backing store over #c's CSS box, and the hover outline
+      # and mask-mode border start on the strand body's edge and are exactly
+      # their CSS width thick at every scale, crisp at 2x.
+      - name: Guards — overlay at display scales
+        run: node tools/dpr_overlay_check.mjs
+
       # Snap-to-grid settings (OSS settings_dialog General page): the MOVE
       # checkbox gates move-mode drags (with the desktop's zoom/Ctrl decision), the
       # ATTACH/CREATE checkbox gates a new strand's start AND end and a child's end
@@ -221,6 +229,7 @@ jobs:
             artifacts/ci_smoke/
             artifacts/layer_list_scroll/
             artifacts/layer_tab/
+            artifacts/dpr_overlay/
           if-no-files-found: ignore
           retention-days: 14
 

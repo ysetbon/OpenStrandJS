@@ -101,7 +101,8 @@ try {
       const t = document.createElement('canvas'); t.width = cv.width; t.height = cv.height;
       const ctx = t.getContext('2d');
       ctx.fillStyle = 'white'; ctx.fillRect(0, 0, t.width, t.height);
-      ctx.drawImage(cv, 0, 0); ctx.drawImage(ov, 0, 0);
+      // #overlay is in physical pixels at a devicePixelRatio > 1: draw it onto #c's grid.
+      ctx.drawImage(cv, 0, 0); ctx.drawImage(ov, 0, 0, t.width, t.height);
       const [x0, y0, x1, y1] = meta.crop;
       const w = x1 - x0, h = y1 - y0;
       const hitIdx = new Int16Array(w * h).fill(-1);
