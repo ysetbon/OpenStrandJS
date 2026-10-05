@@ -674,12 +674,12 @@ function collectSideLines(s, centerline, P, S) {
   // ever draws the END line; strand.py:2766 draws both for a plain Strand).
   // A styled end paints its side line as the band along its profile instead
   // (strand.py _draw_side_lines), so the classic bar is skipped there.
-  if (s.type !== 'AttachedStrand' && s.start_line_visible && !hc[0] && !esActiveStyle(s, 0)) {
+  if (s.type !== 'AttachedStrand' && s.start_line_visible !== false && !hc[0] && !esActiveStyle(s, 0)) {
     const a = tangentAngle(centerline, 0), c = P(s.start);
     // start shift is opposite the tangent (angle + pi)
     out.push(bar({ x: c.x + shift * Math.cos(a + Math.PI), y: c.y + shift * Math.sin(a + Math.PI) }, a));
   }
-  if (s.end_line_visible && !hc[1] && !esActiveStyle(s, 1)) {
+  if (s.end_line_visible !== false && !hc[1] && !esActiveStyle(s, 1)) {
     const a = tangentAngle(centerline, len), c = P(s.end);
     // end shift is along the tangent
     out.push(bar({ x: c.x + shift * Math.cos(a), y: c.y + shift * Math.sin(a) }, a));
@@ -1252,8 +1252,11 @@ function buildShadowReceiverPieces(s, strands, P, enableThird, S) {
       ? (which === 0 ? capOuterStart(centre, angle, td) : capOuterEnd(centre, angle, td))
       : new paper.Path.Circle(centre, td / 2));
   };
-  if (hc[0] && startA > 0) addCircle(P(s.start), tangentAngle(cl, 0), 0);
-  if (hc[1] && endA > 0) addCircle(P(s.end), tangentAngle(cl, len), 1);
+  // Only where a strand is actually attached at that end (shader_utils.py
+  // _build_rendered_geometry: `has_attachment`); an attached strand's own start
+  // circle is not part of it unless another strand starts there too.
+  if (hc[0] && startA > 0 && hasAttachedChildAt(s.start, strands, s)) addCircle(P(s.start), tangentAngle(cl, 0), 0);
+  if (hc[1] && endA > 0 && hasAttachedChildAt(s.end, strands, s)) addCircle(P(s.end), tangentAngle(cl, len), 1);
   cl.remove();
   return pieces;
 }
