@@ -1,12 +1,19 @@
 // Automatic per-pair shadow-visibility overrides for masked weaves — port of
-// OSS 1.109 `auto_shadow.py` (92c6f8e2). See that module's docstring for the
-// full why; the short version: a mask X_Y flips over/under at ONE crossing, but
-// the plain z-order shadow pass still runs for every other pair, and chain
-// members buried under the woven fabric keep casting residue slivers that
-// contradict the weave. Whenever masks change, evaluate each candidate
-// casting->receiving pair the way the renderer will; if the surviving shadow is
-// under AUTO_HIDE_SURVIVAL_RATIO of the raw caster∩receiver overlap, write
-// shadow_overrides[casting][receiving] = {visibility:false, auto:true}.
+// OSS `auto_shadow.py` (1.109 92c6f8e2, 2.0 ec0f6ba + 407728c). See that
+// module's docstring for the full why; the short version: a mask X_Y flips
+// over/under at ONE crossing, but the plain z-order shadow pass still runs for
+// every other pair, and chain members buried under the woven fabric keep
+// casting residue slivers that contradict the weave. Whenever masks change,
+// evaluate each candidate casting->receiving pair; it is hidden —
+// shadow_overrides[casting][receiving] = {visibility:false, auto:true} — when
+//   * its surviving shadow, measured the way the renderer drew it when the
+//     threshold was tuned (_surviving_shadow: the caster grown by 30 px, the
+//     mask shadow blockers and the strands in between cut out), is under
+//     AUTO_HIDE_SURVIVAL_RATIO of the raw caster∩receiver overlap, AND
+//   * the canvas would show less than AUTO_HIDE_MAX_VISIBLE_BAND of one
+//     crossing's band of it (_visible_shadow_px: the Shadow Editor preview of the
+//     pair, clipped as the canvas draws it, minus the caster and every strand
+//     drawn after it, counted in pixels).
 //
 // Bookkeeping (stored inside the override dict, survives save/undo verbatim):
 //   auto: true   -> written here; wiped and recomputed each run.
@@ -14,10 +21,12 @@
 //                   (setShadowVisibilityUser); recompute never touches it.
 // Entries without `auto` (any user-authored override) are never modified.
 //
-// The geometry runs in web/strand-renderer.js (window.computeShadowPairAreas),
-// through the SAME buildPairShadowRegion the shadow pass renders with, so the
-// decision and the pixels can't diverge. Rendering stays byte-identical to OSS
-// everywhere overrides are honored — this module only decides when to write them.
+// The geometry runs in web/strand-renderer.js (window.computeShadowPairAreas):
+// the survival ratio through the legacy measure (legacySurvivingRegion), the
+// visible pixels through the 2.0 pipeline's own Shadow Editor preview, so the
+// second test sees exactly what the canvas draws. Rendering stays byte-identical
+// to OSS everywhere overrides are honored — this module only decides when to
+// write them.
 
 import type { EditorDocument, Settings } from '../model/types';
 import { toRenderArray } from '../renderer/toRenderArray';
@@ -28,8 +37,11 @@ import { useEditorStore } from './editorStore';
 // weave scene: residue <=0.374 vs real exposed crossings >=0.598; 0.45 mid-gap).
 export const AUTO_HIDE_SURVIVAL_RATIO = 0.45;
 export const AUTO_MIN_RAW_AREA = 150.0; // world-units²; ignores grazing overlaps
+// A pair that would still show at least this share of one crossing's band
+// (receiver width x half the blur) is a real shadow, not residue (ec0f6ba).
+export const AUTO_HIDE_MAX_VISIBLE_BAND = 0.25;
 
-interface PairAreas { casting: string; receiving: string; rawArea: number; ratio: number }
+interface PairAreas { casting: string; receiving: string; rawArea: number; ratio: number; visiblePx: number }
 
 type ProbeFn = (strands: unknown[], meta: Record<string, unknown>, pairs: { casting: string; receiving: string }[]) => PairAreas[];
 
@@ -146,8 +158,11 @@ export function recomputeAutoShadowOverrides(
 
     // ---- geometry probe at S = 1 so areas come back in world units² ----
     const arr = toRenderArray(draft, null);
+    const blur = live.max_blur_radius;
     const meta = {
       supersample: 1,
+      max_blur_radius: blur,
+      num_steps: live.num_steps,
       x_offset: 0,
       y_offset: 0,
       shadow_enabled: true,
@@ -162,6 +177,11 @@ export function recomputeAutoShadowOverrides(
     for (const res of results) {
       if (res.rawArea < AUTO_MIN_RAW_AREA) continue;
       if (res.ratio >= AUTO_HIDE_SURVIVAL_RATIO) continue;
+      // A pair that would still show a real band of shadow is not residue,
+      // however much of its landing area is covered.
+      const rs = draft.strands[res.receiving];
+      const band = ((rs?.width ?? 46) + 2 * (rs?.stroke_width ?? 4)) * (blur || 30) / 2;
+      if (res.visiblePx >= AUTO_HIDE_MAX_VISIBLE_BAND * band) continue;
       if (overrides[res.casting]?.[res.receiving]) continue; // user-authored survives
       (overrides[res.casting] ?? (overrides[res.casting] = {}))[res.receiving] = {
         visibility: false,
