@@ -6,7 +6,8 @@ import { SAMPLES, sampleUrl } from './assets';
 import type { PageProps } from './types';
 
 // Samples page (settings_dialog.py index 9). A centered header + subtitle and a
-// vertical column of 5 sample-project buttons. Clicking one loads the bundled
+// two-per-row grid of the 18 sample-project buttons (QGridLayout index//2, index%2,
+// reading across rows; the page scrolls inside the dialog). Clicking one loads the bundled
 // project JSON into the active canvas (existing loadProject → loadDocument
 // pipeline) and closes the settings dialog (OSS closes then loads next tick).
 export function SamplesPage({ lang, onClose }: PageProps) {
@@ -30,12 +31,12 @@ export function SamplesPage({ lang, onClose }: PageProps) {
   };
 
   return (
-    <div className="set-page" style={{ alignItems: 'center' }}>
+    <div className="set-page" style={{ width: '100%' }}>
       <div className="set-page-header">{t('samples_header', lang)}</div>
       <div className="set-page-sub">{t('samples_sub', lang)}</div>
-      <div className="set-btn-col">
+      <div className="set-samples-grid">
         {SAMPLES.map((s) => (
-          <button key={s.file} type="button" className="set-btn" style={{ minHeight: 40 }} onClick={() => open(s.file)}>
+          <button key={s.file} type="button" className="set-btn" onClick={() => open(s.file)}>
             {t(s.key, lang)}
           </button>
         ))}

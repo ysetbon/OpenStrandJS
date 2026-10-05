@@ -260,6 +260,16 @@ input.set-toggle:disabled { opacity: 0.45; cursor: default; }
   align-items: center;
 }
 
+/* Samples: QGridLayout, 2 buttons per row (index//2, index%2), equal columns that
+   fill the page, default Qt spacing (6px). The page scrolls inside .set-content. */
+.set-samples-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  width: 100%;
+}
+.set-samples-grid .set-btn { min-width: 0; }
+
 /* Tutorial entry: explanation text + Play button. */
 .set-tutorial-entry {
   display: flex;

@@ -40,7 +40,17 @@ export function TutorialPage({ lang }: PageProps) {
         >
           <div className="set-video-body">
             {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-            <video src={tutorialVideoUrl(playing)} controls autoPlay />
+            <video
+              key={`${lang}-${playing}`}
+              src={tutorialVideoUrl(playing, lang)}
+              controls
+              autoPlay
+              // OSS video_path_for: fall back to English if this language's file is missing.
+              onError={(e) => {
+                const en = tutorialVideoUrl(playing, 'en');
+                if (!e.currentTarget.src.endsWith(en)) e.currentTarget.src = en;
+              }}
+            />
           </div>
         </Modal>
       )}
