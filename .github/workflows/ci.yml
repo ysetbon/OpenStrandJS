@@ -176,6 +176,15 @@ jobs:
       - name: Guards — layer list scrolls
         run: node tools/layer_list_scroll_check.mjs
 
+      # Strands / Masks switch (OSS 2.0 layer_panel.py, tests/test_layer_tab_switch.py
+      # there): each tab lists only its layers and buttons, the selection drops /
+      # opens tabs by every route (panel, canvas, undo/redo, mask creation, new
+      # strand), New Mask drives mask mode, Delete Mask / Delete All (masks) in
+      # one undo step, drag-and-drop over hidden rows, every mask kept above
+      # every strand (load, new/attached strand, drag), Hebrew swap, OSS colours.
+      - name: Guards — Strands / Masks layer tabs
+        run: node tools/layer_tab_check.mjs
+
       # Snap-to-grid settings (OSS settings_dialog General page): the MOVE
       # checkbox gates move-mode drags (with the desktop's zoom/Ctrl decision), the
       # ATTACH/CREATE checkbox gates a new strand's start AND end and a child's end
@@ -196,6 +205,7 @@ jobs:
           path: |
             artifacts/ci_smoke/
             artifacts/layer_list_scroll/
+            artifacts/layer_tab/
           if-no-files-found: ignore
           retention-days: 14
 
