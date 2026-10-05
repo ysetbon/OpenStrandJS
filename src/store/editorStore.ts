@@ -323,6 +323,13 @@ export interface EditorState {
   // stack and keep the CURRENT drawing as the one and only state. The document,
   // the view and the selection are untouched — this resets history, not the canvas.
   resetHistory: () => void;
+  // File > Save of a state that came from an opened history file: OSS's
+  // export_history_payload first runs save_state(detail='captured before
+  // exporting the history'), and its _would_be_identical_save never finds the
+  // live canvas identical to a step it imported (measured against OSS 2.0 on
+  // every sample and on files OSS itself had just written). So the canvas
+  // becomes one more step and the redo steps go, exactly as after an edit.
+  captureForExport: () => void;
   setView: (patch: Partial<ViewState>) => void;
   setSettings: (patch: Partial<Settings>) => void;
   setMode: (mode: ModeName) => void;
@@ -760,6 +767,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       past: [], future: [], gestureBase: null, pendingMeta: null,
       presentMeta: meta, presentRaw: null,
       historyLog: appendLog(s.historyLog, 'reset', meta),
+    };
+  }),
+
+  captureForExport: () => set((s) => {
+    if (!s.presentRaw) return {};
+    const meta = buildMeta(
+      { action: 'system.setting', source: 'system', detail: 'captured before exporting the history' }, s.mode);
+    const past = [...s.past, { doc: s.doc, meta: s.presentMeta, raw: s.presentRaw }];
+    if (past.length > HISTORY_CAP) past.shift();
+    return {
+      past, future: [], gestureBase: null, pendingMeta: null,
+      presentMeta: meta, presentRaw: null,
+      historyLog: appendLog(s.historyLog, 'edit', meta),
     };
   }),
 

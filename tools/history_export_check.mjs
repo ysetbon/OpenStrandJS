@@ -5,19 +5,23 @@
 // state file and File > Save (export_history_payload) copies those files back
 // out verbatim. Since 2.0 the CANVAS has every mask above every strand
 // (load_strands -> keep_masks_on_top, 45d6f1f), but the stored steps keep the
-// file's order. This drives the real editor store through Open / Undo / Redo /
-// an edit and checks what Save writes:
+// file's order. Before copying them, Save records the live canvas as one more
+// step ("captured before exporting the history") whenever the current state is
+// one it imported, and drops the redo steps. This drives the real editor store
+// through Open / Undo / Redo / an edit and checks what Save writes:
 //
-//   - a step that came from the file is written exactly as it was stored;
-//   - the canvas has the masks on top, and a new state is saved in that order;
-//   - an edit after an undo drops the redo steps and keeps the stored ones;
+//   - the stored steps up to the current one are written exactly as stored;
+//   - the live canvas follows as the captured step, in canvas order (masks on
+//     top), carrying changes that made no undo step (selection, shadows);
+//   - after an edit the new state is saved as usual and nothing is captured;
+//   - an in-place edit never reaches a stored step;
 //   - a mask loaded as an undo state keeps the centre MaskedStrand computed /
 //     the file carried (no apply_loaded_strands pass on that path).
 //
 // With --oss it also runs the real OpenStrand Studio (tools/oss_history_export_oracle.py,
-// PyQt5 + OSS_ROOT) and checks that every step OSS keeps from the file is
-// byte-identical to what the JS store writes, and that the canvas OSS captures
-// on export has the same layer order as the JS canvas.
+// PyQt5 + OSS_ROOT) and checks that OSS captures too, with the same step
+// counts, that every step OSS keeps from the file is byte-identical to what the
+// JS store writes, and that the captured canvas has the same layer order.
 //
 //   node tools/history_export_check.mjs [--oss]
 import { spawnSync } from 'node:child_process';
@@ -59,17 +63,35 @@ const masksOnTop = (order, strands) => {
   return firstMask < 0 || order.slice(firstMask).every((n) => strands[n]?.type === 'MaskedStrand');
 };
 
-// What Save writes for the live store (Toolbar.onSave).
+// What Save writes for the live store (Toolbar.onSave): the capture step first.
 const save = () => {
+  store.getState().captureForExport();
   const st = store.getState();
   return io.serializeHistory(st.past, { doc: st.doc, meta: st.presentMeta, raw: st.presentRaw }, st.future, OPTS);
 };
-const open = (json) => store.getState().loadDocumentWithHistory(io.loadProjectFile(json, OPTS));
+// Every Open parses its own copy, as the app does; the checks compare against
+// the untouched `fileStates`.
+const open = (json) => store.getState().loadDocumentWithHistory(io.loadProjectFile(JSON.parse(JSON.stringify(json)), OPTS));
+const CAPTURED = 'captured before exporting the history';
 
 let failures = 0;
 const check = (label, fn) => {
   try { fn(); console.log(`PASS  ${label}`); }
   catch (err) { failures++; console.log(`FAIL  ${label}\n      ${err.message.split('\n').slice(0, 6).join('\n      ')}`); }
+};
+
+// Save of a state that came from the file: the stored steps up to it, verbatim,
+// then the live canvas as one more step; the redo steps are gone.
+const expectCaptured = (w, currentFromFile) => {
+  assert.equal(w.max_step, currentFromFile + 1);
+  assert.equal(w.current_step, w.max_step);
+  for (let i = 0; i < currentFromFile; i++) assert.deepEqual(w.states[i].data, fileStates[i], `step ${i + 1}`);
+  const last = w.states[w.max_step - 1].data;
+  assert.equal(last.undo_metadata?.detail, CAPTURED);
+  assert.equal(last.undo_metadata?.action, 'system.setting');
+  const byName = Object.fromEntries(last.strands.map((st) => [st.layer_name, st]));
+  assert.ok(masksOnTop(names(last), byName), `captured step in canvas order: ${names(last).join(' ')}`);
+  return last;
 };
 
 check('the fixture has a mask below a strand', () => {
@@ -83,41 +105,61 @@ check('Open: the canvas has every mask above every strand', () => {
   const { doc } = store.getState();
   assert.ok(masksOnTop(doc.order, doc.strands), doc.order.join(' '));
 });
-check('Open -> Save: every step is written exactly as stored', () => {
-  const w = save();
-  assert.equal(w.current_step, file.current_step);
-  assert.equal(w.max_step, fileStates.length);
-  w.states.forEach((s, i) => assert.deepEqual(s.data, fileStates[i], `step ${i + 1}`));
+check('Open -> Save: stored steps verbatim, the canvas captured, redo dropped', () => {
+  expectCaptured(save(), file.current_step);
+});
+check('Save again: nothing more to capture, the same file', () => {
+  const again = save();
+  assert.equal(again.max_step, file.current_step + 1);
 });
 
-store.getState().undo();
-check('Undo -> Save: still every step as stored, current step one back', () => {
-  const w = save();
-  assert.equal(w.current_step, file.current_step - 1);
-  w.states.forEach((s, i) => assert.deepEqual(s.data, fileStates[i], `step ${i + 1}`));
-  const { doc } = store.getState();
-  assert.ok(masksOnTop(doc.order, doc.strands), 'undo keeps the masks on top');
+open(file);
+store.getState().setDoc({ ...store.getState().doc, selected_strand_name: '3_1', shadow_enabled: false });
+check('Open, change selection and shadows (no undo step) -> Save: the capture carries them', () => {
+  const last = expectCaptured(save(), file.current_step);
+  assert.equal(last.selected_strand_name, '3_1');
+  assert.equal(last.shadow_enabled, false);
 });
+
+open(file);
+store.getState().undo();
+check('Undo -> Save: steps up to the undone-to one verbatim, then the capture', () => {
+  expectCaptured(save(), file.current_step - 1);
+});
+
+open(file);
 store.getState().redo();
-store.getState().redo();
-check('Redo, Redo -> Save: still every step as stored', () => {
-  const w = save();
-  assert.equal(w.current_step, fileStates.length);
-  w.states.forEach((s, i) => assert.deepEqual(s.data, fileStates[i], `step ${i + 1}`));
+check('Redo -> Save: every step verbatim, then the capture', () => {
+  expectCaptured(save(), fileStates.length);
 });
 
 open(file);
 store.getState().undo();
 store.getState().commitEdit((d) => { d.strands['2_1'].stroke_width = 9; }, { action: 'strand.width', source: 'panel' });
-check('Undo, edit -> Save: stored steps kept, redo dropped, new state in canvas order', () => {
+check('Undo, edit -> Save: stored steps kept, redo dropped, new state in canvas order, no capture', () => {
   const w = save();
   assert.equal(w.max_step, file.current_step);
   assert.equal(w.current_step, w.max_step);
   for (let i = 0; i < w.max_step - 1; i++) assert.deepEqual(w.states[i].data, fileStates[i], `step ${i + 1}`);
   const last = w.states[w.max_step - 1].data;
+  assert.notEqual(last.undo_metadata?.detail, CAPTURED);
   const strandsByName = Object.fromEntries(last.strands.map((s) => [s.layer_name, s]));
   assert.ok(masksOnTop(names(last), strandsByName), names(last).join(' '));
   assert.equal(strandsByName['2_1'].stroke_width, 9);
+});
+
+open(file);
+check('an edit never reaches a stored step (the stored data is a copy)', () => {
+  const st = store.getState();
+  const maskName = st.doc.order.find((n) => st.doc.strands[n].type === 'MaskedStrand');
+  // A drag: beginGesture, then mutateDocLive edits the document in place
+  // (trackMaskDeletionRects moves rectangles in place on every frame).
+  st.beginGesture();
+  store.getState().mutateDocLive((d) => {
+    const m = d.strands[maskName];
+    (m.deletion_rectangles ??= []).push({ top_left: [0, 0], top_right: [1, 0], bottom_left: [0, 1], bottom_right: [1, 1] });
+  });
+  assert.deepEqual(store.getState().presentRaw, fileStates[file.current_step - 1]);
 });
 
 check('a mask loaded as an undo state keeps its computed centre', () => {
@@ -154,16 +196,18 @@ if (withOss) {
     if (ops === 'undo') store.getState().undo();
     if (ops === 'redo') store.getState().redo();
     const js = save();
-    const captured = oss.states.at(-1)?.data?.undo_metadata?.detail === 'captured before exporting the history';
-    const kept = captured ? oss.current_step - 1 : oss.current_step;
-    check(`OSS [${ops || 'open'}]: the ${kept} step(s) OSS keeps from the file match the JS save byte for byte`, () => {
-      for (let i = 0; i < kept; i++) assert.deepEqual(js.states[i].data, oss.states[i].data, `step ${i + 1}`);
+    const ossCaptured = oss.states.at(-1)?.data?.undo_metadata?.detail === CAPTURED;
+    check(`OSS [${ops || 'open'}]: OSS captures the canvas on Save, as the JS store does`, () => {
+      assert.ok(ossCaptured, 'OSS wrote no capture step');
+      assert.equal(js.max_step, oss.max_step);
+      assert.equal(js.current_step, oss.current_step);
     });
-    if (captured) {
-      check(`OSS [${ops || 'open'}]: the canvas OSS captures has the JS canvas's layer order`, () => {
-        assert.deepEqual(names(oss.states.at(-1).data), store.getState().doc.order);
-      });
-    }
+    check(`OSS [${ops || 'open'}]: the ${oss.current_step - 1} step(s) OSS keeps from the file match the JS save byte for byte`, () => {
+      for (let i = 0; i < oss.current_step - 1; i++) assert.deepEqual(js.states[i].data, oss.states[i].data, `step ${i + 1}`);
+    });
+    check(`OSS [${ops || 'open'}]: the captured canvas has the JS canvas's layer order`, () => {
+      assert.deepEqual(names(oss.states.at(-1).data), names(js.states.at(-1).data));
+    });
   }
 }
 

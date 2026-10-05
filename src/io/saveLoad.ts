@@ -922,7 +922,9 @@ export function loadProjectFile(data: unknown, opts?: SaveLoadOptions): LoadedPr
         return {
           doc: seedLoadedMaskCenters(loadProjectState(data, { ...opts, undoStateLoad: true }), opts),
           meta: metaFromOss(s.data?.[UNDO_METADATA_KEY]),
-          raw: data as Record<string, unknown>,
+          // A copy of its own: the loaded document shares nested arrays with
+          // `data` (deletion_rectangles), and edits must never reach a stored step.
+          raw: JSON.parse(JSON.stringify(data)) as Record<string, unknown>,
         };
       });
       return {

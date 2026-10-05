@@ -108,6 +108,7 @@ export function Toolbar() {
   // only when a file was actually written; the active tab is then clean and
   // titled after the file (mark_active_saved).
   async function onSave(): Promise<boolean> {
+    useEditorStore.getState().captureForExport();
     const st = useEditorStore.getState();
     const active = st.tabs.find((tb) => tb.id === st.activeTabId);
     const payload = serializeHistory(st.past, { doc: st.doc, meta: st.presentMeta, raw: st.presentRaw }, st.future, {

@@ -39,6 +39,7 @@ export function TabChip(props: {
   // cancelled the tab stays (OSS: "if not saved: return"). A background tab is
   // serialized from its stored doc, so the live tab is never disturbed.
   const doSave = async () => {
+    if (id === useEditorStore.getState().activeTabId) useEditorStore.getState().captureForExport();
     const s = useEditorStore.getState();
     const tab = s.tabs.find((tb) => tb.id === id);
     if (!tab) { setConfirmOpen(false); return; }
