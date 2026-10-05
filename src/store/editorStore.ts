@@ -28,6 +28,16 @@ import {
   buildMeta, type HistoryEvent, type HistoryMeta, type HistoryMetaInput,
 } from './historyMeta';
 
+// The layer panel's Strands / Masks switch (OSS 2.0 layer_panel.layer_tab,
+// commit 9fc7cbd). UI state only: never saved, never undoable.
+export type LayerTab = 'strands' | 'masks';
+
+// OSS LayerPanel._layer_tab_of: 'masks' for a MaskedStrand, else 'strands'
+// (also for a name that no longer exists).
+export function layerTabOf(doc: Pick<EditorDocument, 'strands'>, name: string | null | undefined): LayerTab {
+  return name != null && doc.strands[name]?.type === 'MaskedStrand' ? 'masks' : 'strands';
+}
+
 // One entry on the undo/redo stacks: the document, plus the record of what
 // produced it. `meta` is null only for states nobody annotated (a fresh
 // document, or a commit from a call site that named no action).
@@ -227,6 +237,15 @@ export interface EditorState {
   // Transient UI state: not part of the document, not undoable.
   angleAdjust: { layerName: string; spanDeg: number } | null;
   firstMaskedLayer: string | null;
+  // Which half of the layer panel's Strands / Masks switch is pressed. The
+  // layer list shows only that tab's layers (doc.order is never touched). Kept
+  // consistent at store level (see enforceLayerTab below): selecting a layer of
+  // the other tab, by any route, opens that tab; mask mode always runs on the
+  // Masks tab; leaving the Masks tab ends mask mode.
+  layerTab: LayerTab;
+  // OSS set_layer_tab: drops the selection the new tab would hide (single and
+  // multi), cancels a half-made mask pick, and leaving Masks ends mask mode.
+  setLayerTab: (tab: LayerTab) => void;
   // bumped whenever the document changes so subscribers can re-render the canvas
   docRevision: number;
 
@@ -412,6 +431,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   maskCreateMode: false,
   angleAdjust: null,
   firstMaskedLayer: null,
+  layerTab: 'strands',
   docRevision: 0,
   past: [],
   future: [],
@@ -816,6 +836,34 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   exitMaskCreate: () => set((s) => (!s.maskCreateMode ? {} : { maskCreateMode: false, firstMaskedLayer: null })),
   setFirstMaskedLayer: (firstMaskedLayer) => set({ firstMaskedLayer }),
 
+  setLayerTab: (tab) => {
+    const s = get();
+    if (tab !== 'strands' && tab !== 'masks') return;
+    if (tab === s.layerTab) return;
+    const leavingMasks = s.layerTab === 'masks';
+    const patch: Partial<EditorState> = {
+      layerTab: tab,
+      // _cancel_pending_mask_selection: forget a first strand picked for a mask
+      // that was never made (canvas mask mode and the panel's Ctrl-hold pick).
+      maskPending: [], firstMaskedLayer: null,
+    };
+    // _drop_hidden_selection: deselect what the new tab hides (single + multi).
+    const hidden = (n: string | null) => n != null && layerTabOf(s.doc, n) !== tab;
+    if (hidden(s.doc.selected_strand_name) || hidden(s.selection.layerName)) {
+      patch.selection = { layerName: null, handle: null };
+      if (s.doc.selected_strand_name !== null) patch.doc = { ...s.doc, selected_strand_name: null };
+      patch.docRevision = s.docRevision + 1;   // the canvas highlight goes too
+    }
+    const keptMulti = s.multiSelectedLayers.filter((n) => !hidden(n));
+    if (keptMulti.length !== s.multiSelectedLayers.length) patch.multiSelectedLayers = keptMulti;
+    // _end_mask_mode: New Mask lives on the Masks tab; leaving it, however it
+    // happens, ends mask mode and goes back to attach mode. Same update as the
+    // tab change (what setMode does), so no listener ever sees mask mode on the
+    // Strands tab.
+    if (leavingMasks && s.mode === 'mask') { patch.mode = 'attach'; patch.newStrandArmed = false; }
+    set(patch);
+  },
+
   panMode: false,
   panning: false,
   newStrandArmed: false,
@@ -880,6 +928,40 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     };
   }),
 }));
+
+// Store-level Strands / Masks consistency (OSS layer_panel._apply_layer_tab_filter
+// + set_new_mask_active, which run after every rebuild, selection and mode
+// change). Runs synchronously after every store update, so it holds whatever
+// changed the state: a panel click, a canvas click, undo/redo restoring a
+// selection, mask creation, a new strand, a load.
+//   1. The selected layer is never hidden: if it belongs to the other tab, that
+//      tab opens (no selection is dropped by this). Leaving the Masks tab this
+//      way cancels a half-made mask and ends mask mode (OSS d763a50: Undo during
+//      New Mask selects a strand -> the Strands tab opens -> attach mode).
+//   2. Mask mode never runs without the New Mask button that shows it: entering
+//      it on the Strands tab opens the Masks tab (set_layer_tab, so a selected
+//      strand is dropped exactly as a click on the Masks half would).
+function enforceLayerTab(s: EditorState): void {
+  const sel = s.doc.selected_strand_name;
+  if (sel != null && s.doc.strands[sel]) {
+    const want = layerTabOf(s.doc, sel);
+    if (want !== s.layerTab) {
+      const patch: Partial<EditorState> = { layerTab: want };
+      if (s.layerTab === 'masks') {
+        patch.maskPending = [];
+        patch.firstMaskedLayer = null;
+        // One update with the tab change (see setLayerTab).
+        if (s.mode === 'mask') { patch.mode = 'attach'; patch.newStrandArmed = false; }
+      }
+      useEditorStore.setState(patch);
+      return;
+    }
+  }
+  if (s.mode === 'mask' && s.layerTab !== 'masks') s.setLayerTab('masks');
+}
+// Reads the live state (not the listener argument), so a nested update made by
+// another listener can never be judged against a stale snapshot.
+useEditorStore.subscribe(() => enforceLayerTab(useEditorStore.getState()));
 
 // Convenience accessor for imperative (non-React) code.
 export const editorStore = useEditorStore;

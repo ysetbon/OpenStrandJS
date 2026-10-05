@@ -41,6 +41,73 @@
   cursor: default;
 }
 
+/* New Mask while mask mode is on (OSS _sync_mask_button_styles): it keeps the
+   New Strand green (and its hover / pressed shades) and gets a 2px #3c3c3c
+   border, the padding trimmed by 1px so the button keeps its size. */
+.lc-btn.mask-on {
+  border: 2px solid #3c3c3c;
+  padding: 4px 5px;
+}
+
+/* Strands / Masks switch (OSS 2.0 layer_panel._layer_tab_half_style, commits
+   9fc7cbd + 21ae6b0): one button cut in half above Draw Names. Two equal halves
+   (equal stretch, no side padding, no spacing), only the outer corners
+   rounded. Border + padding add up to the bottom buttons' 12px, so the row is
+   their height. The stylesheet is fixed in OSS, so it is the same in every
+   theme (dark included). */
+.lc-tab-row {
+  display: flex;
+  direction: ltr;           /* the RTL swap is explicit (Strands on the right in Hebrew) */
+}
+
+.lc-tab {
+  flex: 1 1 0;
+  min-width: 0;
+  box-sizing: border-box;
+  margin: 0;
+  font-size: 14px;
+  font-weight: bold;
+  text-align: center;
+  white-space: nowrap;
+  /* Not clipped: this column is 146px (OSS's is ~158), so a CJK label such as
+     Japanese "ストランド" can use the last pixel of padding-free width. */
+  overflow: visible;
+  cursor: pointer;
+  border-radius: 0;
+  /* released half */
+  background: #e8e8e8;
+  color: #555555;
+  border: 1px solid #888;
+  border-bottom: 3px solid #888;
+  padding: 4px 0;
+}
+
+.lc-tab-left { border-top-left-radius: 4px; border-bottom-left-radius: 4px; }
+.lc-tab-right { border-top-right-radius: 4px; border-bottom-right-radius: 4px; }
+
+.lc-tab:hover:not(:disabled) { background: #f2f2f2; }
+.lc-tab:disabled { color: #999999; cursor: default; }
+
+/* pressed half: Mocha brown, the same 1px #888 border as Draw Names & co. */
+.lc-tab.pressed {
+  background: #a47551;
+  color: black;
+  border: 1px solid #888;
+  padding: 5px 0;
+}
+.lc-tab.pressed:hover:not(:disabled) { background: #b98f6f; }
+.lc-tab.pressed:active:not(:disabled) { background: #8a5f3f; }
+.lc-tab.pressed:disabled { color: black; }
+
+/* OSS notification_label: a plain centered QLabel under the bottom buttons,
+   hidden while empty. */
+.lp-notification {
+  text-align: center;
+  color: var(--text, #000);
+  font-size: 13px;
+  padding: 2px 0 4px;
+}
+
 /* Delete-All confirmation dialog buttons (No / Yes). The shared <Modal>
    footer (.modal-footer in dialogs.css) carries no button style, so style
    our own here to match the themed dialog buttons used elsewhere. */

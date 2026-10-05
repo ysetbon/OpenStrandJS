@@ -912,6 +912,26 @@ export function deleteAllStrands(draft: EditorDocument): void {
   draft.strand_colors = {};
 }
 
+// Delete All on the layer panel's Masks tab (OSS 2.0 layer_panel.
+// request_delete_all_masks, commit 9fc7cbd): remove every mask, keep every
+// strand. Locks and the selection on a removed mask go with it; the auto shadow
+// overrides are refreshed like every other delete path. Returns the removed
+// names (empty when there were no masks).
+export function deleteAllMasks(draft: EditorDocument): string[] {
+  const removed = draft.order.filter((n) => draft.strands[n]?.type === 'MaskedStrand');
+  for (const k of Object.keys(draft.strands)) {
+    if (draft.strands[k].type === 'MaskedStrand' && !removed.includes(k)) removed.push(k);
+  }
+  if (!removed.length) return removed;
+  const gone = new Set(removed);
+  for (const k of removed) delete draft.strands[k];
+  draft.order = draft.order.filter((n) => !gone.has(n));
+  draft.locked_layers = draft.locked_layers.filter((n) => !gone.has(n));
+  if (draft.selected_strand_name && gone.has(draft.selected_strand_name)) draft.selected_strand_name = null;
+  recomputeAutoShadowOverrides(draft);
+  return removed;
+}
+
 // Drop strand_colors entries for sets that no longer have a non-masked strand.
 export function pruneSetColors(draft: EditorDocument): void {
   if (!draft.strand_colors) { draft.strand_colors = {}; return; }
@@ -1735,7 +1755,7 @@ export function createMaskGrid(
 if (import.meta.env?.DEV) {
   (globalThis as Record<string, unknown>).__actions = {
     moveHandle, setStrandAngle, setStrandAngleLength, addNewStrand, attachChild, createMask, addDeletionRect, resetMask,
-    deleteStrand, deleteAllStrands, keepMasksOnTop, putMasksOnTop, reorderLayer, toggleHidden, toggleLock,
+    deleteStrand, deleteAllStrands, deleteAllMasks, keepMasksOnTop, putMasksOnTop, reorderLayer, toggleHidden, toggleLock,
     setColor, setWidth, setWidthGridUnits, setShadowOnly, isStrandDeletable,
     setCircleStrokeColor, toggleCircleVisible, toggleLineVisible, setLineVisible, setEndStyle, copyEndStyleToOtherEnd, closeKnot,
     toggleLockMode, clearAllLocks, renameLayer,

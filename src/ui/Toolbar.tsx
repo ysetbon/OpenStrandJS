@@ -28,7 +28,8 @@ interface Btn {
 
 const BTNS: Btn[] = [
   { key: 'view_mode',   c: ['#ccbaba', '#E2C4C4', '#B88A8A'], mode: 'view' },
-  { key: 'mask_mode',   c: ['#199693', '#4CCBC8', '#0F625F'], mode: 'mask' },
+  // No Mask Mode button: masks are made from the layer panel's Masks tab (New
+  // Mask), OSS 2.0 main_window.py (commit 9fc7cbd removed mask_button).
   { key: 'select_mode', c: ['#F1C40F', '#F9E287', '#BB9A0C'], mode: 'select' },
   { key: 'attach_mode', c: ['#9B59B6', '#D5A6E6', '#703D80'], mode: 'attach' },
   { key: 'move_mode',   c: ['#D35400', '#FFA366', '#A84300'], mode: 'move' },
