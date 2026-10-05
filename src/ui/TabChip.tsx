@@ -39,7 +39,6 @@ export function TabChip(props: {
   // cancelled the tab stays (OSS: "if not saved: return"). A background tab is
   // serialized from its stored doc, so the live tab is never disturbed.
   const doSave = async () => {
-    if (id === useEditorStore.getState().activeTabId) useEditorStore.getState().captureForExport();
     const s = useEditorStore.getState();
     const tab = s.tabs.find((tb) => tb.id === id);
     if (!tab) { setConfirmOpen(false); return; }
@@ -47,8 +46,11 @@ export function TabChip(props: {
     // The live tab saves its whole undo/redo history like OSS save_project; a
     // background tab holds only its document (its history was dropped on the
     // switch), so it saves the one-step history a snapshot would produce.
-    const payload = id === s.activeTabId
-      ? serializeHistory(s.past, { doc: s.doc, meta: s.presentMeta, raw: s.presentRaw }, s.future, opts)
+    // The live tab's file includes export_history_payload's capture step; the
+    // tab closes right after, so nothing else needs to be applied to the store.
+    const h = id === s.activeTabId ? s.historyForExport() : null;
+    const payload = h
+      ? serializeHistory(h.past, h.present, h.future, opts)
       : serializeHistory([], { doc: tab.doc ?? s.doc, meta: null }, [], opts);
     const res = await saveProjectFile(tab.filePath ?? 'openstrand_project.json', payload);
     if (!res.saved) return;

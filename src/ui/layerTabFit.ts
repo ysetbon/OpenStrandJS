@@ -31,6 +31,8 @@ export const TAB_LABEL_CLEARANCE = 4;
 
 const TAB_KEYS = ['layer_tab_strands', 'layer_tab_masks'] as const;
 
+// Cached measurement, dropped whenever the tabs' rendered font changes size
+// (watchTabFont: a browser's text-only zoom scales even px fonts).
 let widest: number | null = null;
 
 // Widest Strands / Masks label of every language, in CSS px, measured in a
@@ -68,4 +70,37 @@ export function widestTabLabel(): number {
 export function tabRowMinWidth(): number {
   const w = widestTabLabel();
   return w > 0 ? 2 * Math.ceil(w + TAB_LABEL_CLEARANCE) : 0;
+}
+
+// Calls `onChange` whenever the tabs' rendered font changes size — Firefox's
+// text-only zoom, a user style, a font arriving late — after dropping the cached
+// measurement, so the next tabRowMinWidth() measures again. A hidden half in the
+// tabs' own font is watched with a ResizeObserver. Returns the disposer.
+export function watchTabFont(onChange: () => void): () => void {
+  if (typeof document === 'undefined' || !document.body || typeof ResizeObserver === 'undefined') {
+    return () => {};
+  }
+  const probe = document.createElement('button');
+  probe.type = 'button';
+  probe.className = 'lc-tab pressed';
+  probe.setAttribute('aria-hidden', 'true');
+  probe.tabIndex = -1;
+  probe.style.cssText = 'position:absolute;left:-10000px;top:0;visibility:hidden;width:auto;flex:none;';
+  const text = document.createElement('span');
+  text.textContent = 'MMMMMMMMMM';
+  probe.appendChild(text);
+  document.body.appendChild(probe);
+  let last = '';
+  const ro = new ResizeObserver(() => {
+    const r = probe.getBoundingClientRect();
+    const size = `${r.width}x${r.height}`;
+    if (size === last) return;
+    const first = last === '';
+    last = size;
+    if (first) return;
+    widest = null;
+    onChange();
+  });
+  ro.observe(probe);   // inline boxes are not observable; the button is
+  return () => { ro.disconnect(); probe.remove(); };
 }

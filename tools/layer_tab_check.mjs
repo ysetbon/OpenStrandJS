@@ -577,6 +577,30 @@ try {
     ok('the panel is as wide in every language', panelWidths.size === 1, JSON.stringify([...panelWidths]));
     ok(`list column is max(146, the switch's floor ${floor})`, Math.abs(column - Math.max(146, floor)) <= 0.5, String(column));
   }
+  // Text-only zoom (Firefox) scales even px fonts while the page is open: the
+  // switch's labels must still clear their halves. Simulated by doubling the
+  // tabs' font, as 200% text zoom does; layerTabFit.watchTabFont re-measures.
+  {
+    await S((l) => window.__store.getState().setSettings({ language: l }), 'ja');
+    await settle(60);
+    const before = (await page.locator('.lp-left').boundingBox()).width;
+    const tag = await page.addStyleTag({ content: '.lc-tab { font-size: 28px !important; }' });
+    await settle(120);
+    const fit = await half('strands').evaluate((e) => {
+      const r = document.createRange();
+      r.selectNodeContents(e);
+      return { need: r.getBoundingClientRect().width, width: e.getBoundingClientRect().width };
+    });
+    const zoomed = (await page.locator('.lp-left').boundingBox()).width;
+    ok('200% text zoom: the column widens for the larger labels', zoomed > before, `${before} -> ${zoomed}`);
+    ok("200% text zoom: [ja] the Strands label still clears its half by 4", fit.need <= fit.width - 4, JSON.stringify(fit));
+    await tag.evaluate((e) => e.remove());
+    await settle(120);
+    const back = (await page.locator('.lp-left').boundingBox()).width;
+    ok('text zoom back to 100%: the column returns to its floor', Math.abs(back - before) <= 0.5, `${before} -> ${back}`);
+    await S((l) => window.__store.getState().setSettings({ language: l }), 'en');
+    await settle(60);
+  }
   await S(() => window.__store.getState().setSettings({ language: 'he' }));
   await settle();
   {

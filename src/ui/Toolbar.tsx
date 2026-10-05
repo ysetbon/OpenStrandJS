@@ -108,14 +108,18 @@ export function Toolbar() {
   // only when a file was actually written; the active tab is then clean and
   // titled after the file (mark_active_saved).
   async function onSave(): Promise<boolean> {
-    useEditorStore.getState().captureForExport();
     const st = useEditorStore.getState();
     const active = st.tabs.find((tb) => tb.id === st.activeTabId);
-    const payload = serializeHistory(st.past, { doc: st.doc, meta: st.presentMeta, raw: st.presentRaw }, st.future, {
+    // export_history_payload's capture step happens only once the file is written.
+    const h = st.historyForExport();
+    const payload = serializeHistory(h.past, h.present, h.future, {
       enable_curvature_bias_control: st.settings.enable_curvature_bias_control,
     });
     const res = await saveProjectFile(active?.filePath ?? 'openstrand_project.json', payload);
-    if (res.saved) useEditorStore.getState().markTabSaved(st.activeTabId, res.filename);
+    if (res.saved) {
+      if (h.capture) useEditorStore.getState().captureForExport(h.capture);
+      useEditorStore.getState().markTabSaved(st.activeTabId, res.filename);
+    }
     return res.saved;
   }
 

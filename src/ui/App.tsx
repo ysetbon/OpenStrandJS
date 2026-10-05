@@ -7,7 +7,7 @@ import { CanvasStage } from './CanvasStage';
 import { LayerPanel } from './LayerPanel';
 import { Splitter } from './Splitter';
 import { startHistoryRecorder } from './settings/history';
-import { tabRowMinWidth } from './layerTabFit';
+import { tabRowMinWidth, watchTabFont } from './layerTabFit';
 
 // OSS main-window shell: a horizontal splitter with `left_widget` (toolbar over
 // canvas) on one side and the layer panel on the other. Theme + RTL are applied
@@ -85,6 +85,10 @@ export function App() {
   // animation (OSS restores it with animate=False on launch).
   const [panelW, setPanelW] = useState(() => panelMinFor(useEditorStore.getState().groupPanelCollapsed));
   const [groupAnimating, setGroupAnimating] = useState(false);
+  // Re-measure the switch's labels when their font changes size (text-only
+  // zoom): bumping this re-renders, and panelMinFor measures again.
+  const [, setTabFontRev] = useState(0);
+  useEffect(() => watchTabFont(() => setTabFontRev((n) => n + 1)), []);
   const panelMin = panelMinFor(groupCollapsed);
   const groupW = groupCollapsed ? GROUP_RAIL_W : GROUP_PANEL_W;
   const rtl = isRTL(language);

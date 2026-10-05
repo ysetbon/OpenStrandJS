@@ -329,7 +329,13 @@ export interface EditorState {
   // live canvas identical to a step it imported (measured against OSS 2.0 on
   // every sample and on files OSS itself had just written). So the canvas
   // becomes one more step and the redo steps go, exactly as after an edit.
-  captureForExport: () => void;
+  // OSS does that only once the file dialog was accepted (save_project asks for
+  // the path first), so Save builds the file from historyForExport() and calls
+  // captureForExport with the same record only after the file was written.
+  historyForExport: () => {
+    past: HistoryEntry[]; present: HistoryEntry; future: HistoryEntry[]; capture: HistoryMeta | null;
+  };
+  captureForExport: (meta: HistoryMeta) => void;
   setView: (patch: Partial<ViewState>) => void;
   setSettings: (patch: Partial<Settings>) => void;
   setMode: (mode: ModeName) => void;
@@ -770,11 +776,21 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     };
   }),
 
-  captureForExport: () => set((s) => {
-    if (!s.presentRaw) return {};
-    const meta = buildMeta(
+  historyForExport: () => {
+    const s = get();
+    const present: HistoryEntry = { doc: s.doc, meta: s.presentMeta, raw: s.presentRaw };
+    if (!s.presentRaw) return { past: s.past, present, future: s.future, capture: null };
+    const capture = buildMeta(
       { action: 'system.setting', source: 'system', detail: 'captured before exporting the history' }, s.mode);
-    const past = [...s.past, { doc: s.doc, meta: s.presentMeta, raw: s.presentRaw }];
+    return { past: [...s.past, present], present: { doc: s.doc, meta: capture, raw: null }, future: [], capture };
+  },
+
+  captureForExport: (meta) => set((s) => {
+    // Nothing to capture any more (an edit already made a new state).
+    if (!s.presentRaw) return {};
+    // The stored step keeps a copy of its own: the live document goes on
+    // being edited in place by drags (mutateDocLive).
+    const past = [...s.past, { doc: cloneDoc(s.doc), meta: s.presentMeta, raw: s.presentRaw }];
     if (past.length > HISTORY_CAP) past.shift();
     return {
       past, future: [], gestureBase: null, pendingMeta: null,

@@ -63,11 +63,14 @@ const masksOnTop = (order, strands) => {
   return firstMask < 0 || order.slice(firstMask).every((n) => strands[n]?.type === 'MaskedStrand');
 };
 
-// What Save writes for the live store (Toolbar.onSave): the capture step first.
-const save = () => {
-  store.getState().captureForExport();
-  const st = store.getState();
-  return io.serializeHistory(st.past, { doc: st.doc, meta: st.presentMeta, raw: st.presentRaw }, st.future, OPTS);
+// What Save writes for the live store (Toolbar.onSave): the file is built from
+// historyForExport(), and the capture is applied once the file was written
+// (`written` false = the user cancelled the dialog).
+const save = (written = true) => {
+  const h = store.getState().historyForExport();
+  const out = io.serializeHistory(h.past, h.present, h.future, OPTS);
+  if (written && h.capture) store.getState().captureForExport(h.capture);
+  return out;
 };
 // Every Open parses its own copy, as the app does; the checks compare against
 // the untouched `fileStates`.
@@ -146,6 +149,31 @@ check('Undo, edit -> Save: stored steps kept, redo dropped, new state in canvas 
   const strandsByName = Object.fromEntries(last.strands.map((s) => [s.layer_name, s]));
   assert.ok(masksOnTop(names(last), strandsByName), names(last).join(' '));
   assert.equal(strandsByName['2_1'].stroke_width, 9);
+});
+
+open(file);
+check('Save cancelled: the history is untouched (redo kept, nothing captured)', () => {
+  const before = store.getState();
+  save(false);
+  const after = store.getState();
+  assert.equal(after.future.length, before.future.length);
+  assert.ok(after.future.length > 0, 'the fixture has redo steps here');
+  assert.equal(after.past, before.past);
+  assert.equal(after.presentRaw, before.presentRaw);
+});
+
+open(file);
+save();
+check('after Save, a drag never changes the captured undo step', () => {
+  const st = store.getState();
+  const stored = JSON.stringify(st.past.at(-1).doc);
+  st.beginGesture();
+  store.getState().mutateDocLive((d) => { d.strands['1_1'].start.x += 25; });
+  store.getState().commit();
+  store.getState().undo();
+  store.getState().undo();
+  assert.equal(JSON.stringify(store.getState().doc.strands['1_1'].start),
+    JSON.stringify(JSON.parse(stored).strands['1_1'].start));
 });
 
 open(file);
